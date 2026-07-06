@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""batch_print.py — CLI-конвейер генерации принтов для футболок через платный
+облачный API nano-banana (Google Gemini Image), зеркальный аналог self-hosted
+comfyui-print-server/batch_print.py.
+
+Пайплайн: тема -> Claude-арт-директор (идея + промпт + слоган + kana) -> nano-banana
+рисует дизайн на хромакей-фоне -> вырезка фона кодом -> слоган накладывается кодом
+(typography.py) -> 4 файла на дизайн в out_batch/<run>/:
+  NN_raw.png, NN_diecut.png (прозрачный), NN_ongreen.png (на ровном зелёном),
+  NN_design.json (дамп идеи для воспроизводимости).
+
+Использование:
+  python batch_print.py --file themes.txt --format diecut
+  python batch_print.py --file themes.txt --format cutout --text-style none
+  python batch_print.py --file themes.txt --format diecut --chroma blue --text-style kana
+"""
+import argparse
+import json
+import random
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import cv2                    # noqa: E402
+import numpy as np            # noqa: E402
+from PIL import Image, ImageEnhance  # noqa: E402
+
+import art_director           # noqa: E402
+import chroma_remove          # noqa: E402
+import config                 # noqa: E402
+import providers              # noqa: E402
+import typography             # noqa: E402
+
+
+# ── QC-гейт границ кадра (перенесено дословно из comfyui-print-server/batch_print.py) ──
+
+def _border_chroma_coverage(img_rgb: Image.Image, tol: float = 52.0) -> float:
+    """Доля пикселей рамки кадра (ширина 1% от min(W,H), сэмплинг каждые 4px),
+    близких к цвету хромакея — QC-гейт против «персонаж/эффекты упираются в край
+    кадра, хромакей-фона не осталось». tol=52 — то же калиброванное значение, что
+    и в cutout_green (НЕ менять — подобрано под nanobanana)."""
+    rgb = np.array(img_rgb.convert("RGB"))
+    h, w = rgb.shape[:2]
+    key = chroma_remove._border_key(rgb).astype(np.uint8)
+    keyy = cv2.cvtColor(key.reshape(1, 1, 3), cv2.COLOR_RGB2YCrCb)[0, 0].astype(np.float32)
+    ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
+    dist = np.sqrt((ycc[:, :, 1] - keyy[1]) ** 2 + (ycc[:, :, 2] - keyy[2]) ** 2)
+
+    b = max(1, int(round(min(h, w) * 0.01)))
+    border_mask = np.zeros((h, w), dtype=bool)
+    border_mask[:b, :] = True
+    border_mask[-b:, :] = True
+    border_mask[:, :b] = True
+    border_mask[:, -b:] = True
+    sample_mask = np.zeros((h, w), dtype=bool)
+    sample_mask[::4, ::4] = True
+    mask = border_mask & sample_mask
+
+    total = int(mask.sum())
+    if total == 0:
+        return 0.0
+    close = int((dist[mask] < tol).sum())
+    return close / total
+
+
+def juice(rgba: Image.Image) -> Image.Image:
+    """Сочность цвета: Color x1.15 + Contrast x1.05 ТОЛЬКО по RGB-каналам, альфа-канал
+    сохраняется как есть (не участвует в enhance). Перенесено дословно из
+    comfyui-print-server/batch_print.py."""
+    rgb = rgba.convert("RGB")
+    rgb = ImageEnhance.Color(rgb).enhance(1.15)
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.05)
+    out = rgb.convert("RGBA")
+    out.putalpha(rgba.getchannel("A"))
+    return out
+
+
+def drop_small_islands(rgba: Image.Image, min_frac: float = 0.002) -> Image.Image:
+    """Убрать мусорные острова после хромакей-вырезки (водяные знаки, крапинки по
+    углам) — остаётся главный силуэт и всё крупнее min_frac от него. Перенесено
+    дословно из comfyui-print-server/batch_print.py."""
+    a = np.array(rgba.getchannel("A"))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats((a > 0).astype(np.uint8), 8)
+    if n <= 2:
+        return rgba
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    kill = [i + 1 for i, ar in enumerate(areas) if ar < areas.max() * min_frac]
+    if not kill:
+        return rgba
+    a[np.isin(labels, kill)] = 0
+    out = rgba.copy()
+    out.putalpha(Image.fromarray(a))
+    return out
+
+
+# ── Генерация одного дизайна (переиспользуемое ядро пайплайна) ──────────────────
+
+def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2,
+                   text_style: str = "anton", no_juice: bool = False,
+                   log_prefix: str = "") -> dict:
+    """Полный цикл ОДНОГО дизайна: генерация (с QC-гейтом границ) -> вырезка ->
+    типографика -> 4 файла (tag_raw.png/tag_diecut.png/tag_ongreen.png/tag_design.json)
+    в outdir. Переиспользуется и CLI-батчем (run_one ниже), и daily_prints.py.
+
+    design: dict из art_director.make_ideas (prompt/chroma/slogan/slogan_color/kana).
+    tag: базовое имя файлов без расширения (напр. "01" или "0137_kenpachi").
+    Возвращает {"ok": bool, "attempts": int, "coverage": float, "error": str|None,
+    "raw": path|None, "diecut": path|None, "ongreen": path|None, "design_json": path}
+    — attempts нужен вызывающему коду для точного учёта стоимости (QC-ретраи считаются)."""
+    p = log_prefix or f"[{tag}]"
+    design_json_path = outdir / f"{tag}_design.json"
+    design_json_path.write_text(
+        json.dumps(design, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    result = {"ok": False, "attempts": 0, "coverage": 0.0, "error": None,
+              "raw": None, "diecut": None, "ongreen": None,
+              "design_json": str(design_json_path)}
+
+    prompt = art_director.build_prompt(design)
+    seed = random.randint(0, 2**31 - 1)
+
+    # QC-гейт границ кадра: до timeout_retries доп. попыток генерации (итого максимум
+    # 1+timeout_retries попыток), берём попытку с максимальным coverage рамки хромакеем.
+    best_img, best_cov, best_seed = None, -1.0, seed
+    attempts_used = 0
+    for attempt in range(1 + timeout_retries):
+        try_seed = seed + 101 * attempt
+        attempts_used += 1
+        try:
+            print(f"{p} генерация... seed={try_seed} chroma={design['chroma']} "
+                  f"slogan={design.get('slogan')!r}", flush=True)
+            attempt_img = providers.generate_image(prompt, seed=try_seed)
+        except Exception as e:  # noqa: BLE001
+            print(f"{p} !! попытка {attempt + 1} упала: {e}", flush=True)
+            result["error"] = str(e)
+            continue
+        cov = _border_chroma_coverage(attempt_img)
+        print(f"{p} border coverage={cov:.2f}", flush=True)
+        if cov > best_cov:
+            best_img, best_cov, best_seed = attempt_img, cov, try_seed
+        if cov >= 0.90:
+            break
+        if attempt < timeout_retries:
+            print(f"{p} coverage {cov:.2f} < 0.90 -> retry", flush=True)
+
+    result["attempts"] = attempts_used
+    result["coverage"] = best_cov
+
+    if best_img is None:
+        print(f"{p} !! ни одна попытка не дала картинку — пропуск", flush=True)
+        result["error"] = result["error"] or "нет изображения ни на одной попытке"
+        return result
+    if best_cov < 0.90:
+        print(f"{p} !! warning: лучшая попытка coverage={best_cov:.2f} < 0.90, "
+              f"используем её (seed={best_seed})", flush=True)
+
+    raw_img = best_img
+    raw_path = outdir / f"{tag}_raw.png"
+    raw_img.save(raw_path)
+    result["raw"] = str(raw_path)
+
+    try:
+        cut = chroma_remove.cutout_green(raw_img, tol=52.0).convert("RGBA")
+        cut = drop_small_islands(cut)
+        if not no_juice:
+            cut = juice(cut)
+
+        slogan = design.get("slogan", "")
+        slogan_color = design.get("slogan_color", "orange")
+        kana = design.get("kana", "")
+        final = typography.apply_style(cut, text_style, slogan, slogan_color, kana)
+        diecut_path = outdir / f"{tag}_diecut.png"
+        final.save(diecut_path)
+        result["diecut"] = str(diecut_path)
+
+        # Версия на ровном зелёном RGB(0,177,64) ПОВЕРХ вырезки (кодом, всегда одна и
+        # та же — независимо от того, какой хромакей был при генерации).
+        ongreen = Image.new("RGBA", final.size, (0, 177, 64, 255))
+        ongreen.alpha_composite(final)
+        ongreen_path = outdir / f"{tag}_ongreen.png"
+        ongreen.convert("RGB").save(ongreen_path)
+        result["ongreen"] = str(ongreen_path)
+
+        print(f"{p} ok -> {raw_path.name} + diecut.png + ongreen.png "
+              f"(slogan={slogan!r})", flush=True)
+        result["ok"] = True
+        return result
+    except Exception as e:  # noqa: BLE001
+        print(f"{p} !! вырезка/типографика упала: {e} (raw сохранён)", flush=True)
+        result["error"] = str(e)
+        return result
+
+
+def run_one(design: dict, idx: int, outdir: Path, timeout_retries: int,
+            text_style: str, no_juice: bool) -> bool:
+    """Обёртка над render_design для CLI-батча (нумерованный tag "01", "02", ...).
+    Возвращает True при успехе (все 4 файла сохранены)."""
+    tag = f"{idx:02d}"
+    res = render_design(design, tag, outdir, timeout_retries, text_style, no_juice,
+                        log_prefix=f"[{tag}]")
+    return res["ok"]
+
+
+def main() -> None:
+    # Windows-консоль (cp1251/cp866) не кодирует эмодзи/кану в выводе — не падать,
+    # а заменять некодируемые символы.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--file", required=True,
+                     help="файл с темами: КАЖДАЯ строка = свой персонаж/тема (по одному "
+                          "дизайну на строку); строки, начинающиеся с #, — комментарии")
+    ap.add_argument("--format", choices=["cutout", "diecut"], default="diecut",
+                     help="cutout = просто персонаж на хромакее; diecut = персонаж в "
+                          "обрамлении пламени/энергии, образующем силуэт, + слоган снизу")
+    ap.add_argument("--text-style", choices=list(typography.STYLES), default="anton",
+                     help="типографика слогана (typography.py): none/anton/kana/comic/tag. "
+                          "Игнорируется по сути в cutout (слоган всё равно не рисуется "
+                          "художественно, но накладывается тем же способом)")
+    ap.add_argument("--chroma", choices=["green", "blue"], default=None,
+                     help="ручной override цвета хромакея для ВСЕХ дизайнов батча — "
+                          "обходит выбор арт-директора и код-предохранитель")
+    ap.add_argument("--retries", type=int, default=2,
+                     help="сколько доп. попыток генерации при провале QC-гейта границ "
+                          "кадра (итого максимум 1+retries попыток на дизайн)")
+    ap.add_argument("--no-juice", action="store_true",
+                     help="отключить пост-фильтр сочности цвета (Color x1.15, Contrast "
+                          "x1.05) — по умолчанию включён")
+    args = ap.parse_args()
+
+    print(f"провайдер: {config.IMAGE_PROVIDER}", flush=True)
+
+    outdir = HERE / "out_batch" / time.strftime("%Y%m%d_%H%M%S")
+    outdir.mkdir(parents=True, exist_ok=True)
+    print(f"формат: {args.format}\nвывод: {outdir}\n", flush=True)
+
+    with open(args.file, encoding="utf-8") as f:
+        themes = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+    print(f"файл тем: {len(themes)} тем(ы), по 1 дизайну на каждую\n", flush=True)
+
+    designs = []
+    for t in themes:
+        print(f"  прошу дизайн для «{t}»...", flush=True)
+        try:
+            d = art_director.make_ideas(t, 1, args.format)[0]
+            designs.append(d)
+        except Exception as e:  # noqa: BLE001
+            print(f"  !! пропуск «{t}»: {e}", flush=True)
+
+    ok = 0
+    for i, d in enumerate(designs, 1):
+        if args.chroma:
+            d["chroma"] = args.chroma
+        try:
+            if run_one(d, i, outdir, args.retries, args.text_style, args.no_juice):
+                ok += 1
+        except Exception as e:  # noqa: BLE001
+            print(f"[{i:02d}] ОШИБКА: {e}", flush=True)
+
+    print(f"\nГотово: {ok}/{len(designs)} -> {outdir}")
+
+
+if __name__ == "__main__":
+    main()
