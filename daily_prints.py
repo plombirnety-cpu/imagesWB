@@ -148,10 +148,11 @@ def run_daily(target_n: int, workers: int, max_cost_usd: float, dry_run: bool,
         plan = plan[:limit]
         print(f"--limit {limit}: план обрезан до {len(plan)} заданий", flush=True)
 
-    n_trend = sum(1 for t in plan if t["source"] == "trend")
+    n_trend = sum(1 for t in plan if t["source"].startswith("trend"))
+    n_pop = sum(1 for t in plan if t["source"].startswith("trend:pop:"))
     n_ever = sum(1 for t in plan if t["source"] == "evergreen")
-    print(f"план дня: {len(plan)} заданий ({n_trend} из трендов, {n_ever} из evergreen)",
-          flush=True)
+    print(f"план дня: {len(plan)} заданий ({n_trend} из трендов [{n_pop} pop], "
+          f"{n_ever} из evergreen)", flush=True)
 
     plan_path = outdir / "plan.json"
     plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
