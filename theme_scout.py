@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import anthropic
@@ -176,6 +177,15 @@ SYSTEM_SCOUT = (
     "полноценные темы принтов; НЕ отсекай их и НЕ заменяй обезличенными стилизациями, "
     "трендовый футболист/артист -> именное задание на принт с его узнаваемыми приметами. "
     "Единственное исключение: политики и персоны из запрещённого списка выше — отсекай. "
+    "ВАЖНО про смешанные группы: фильтр применяется ПОСТРОЧНО, а не к группе целиком — "
+    "если среди трендов есть и война, и футбольный матч, отсеки войну, но матч разверни. "
+    "СПОРТИВНЫЕ МАТЧИ/ТУРНИРЫ (запросы вида «англия мексика», «четвертьфинал ЧМ») — это "
+    "НЕ политика и НЕ трансляция: разверни в именные задания на звёзд матча (имена часто "
+    "прямо в example_text: Беллингем, Холанн и т.п.) + 1-2 генерик-концепта турнира. "
+    "ВЫМЫШЛЕННЫЕ ПРОИЗВЕДЕНИЯ: запрещённый список касается РЕАЛЬНЫХ событий и людей; "
+    "фильм/сериал/аниме/дорама с криминальным, военным или мрачным СЮЖЕТОМ — печатабельны. "
+    "Кино-тайтл или дорама из трендов -> задания на главных персонажей франшизы (если "
+    "узнаваемы) или яркий постер-образ по духу произведения. "
     "Для каждого задания верни JSON-объект: "
     "{\"theme\":\"<готовая тема-описание для арт-директора принтов, на русском, "
     "конкретная — имя персонажа+тайтл, или конкретный предмет/сцена>\","
@@ -204,6 +214,11 @@ def _ask_claude_scout(media_rows: list, anime_rows: list, target_n: int,
     для читаемости промпта."""
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     call_n = min(target_n, _MAX_TASKS_PER_CALL)
+    # Соло-вызов на pop-группу из нескольких готовых сущностей: не просить полный
+    # дневной объём с 5-8 строк — Claude раздувает ответ до потолка max_tokens и
+    # JSON обрезается посреди массива (наблюдалось на всех неаниме-группах разом).
+    if pop_rows and not media_rows and not anime_rows:
+        call_n = min(call_n, max(6, len(pop_rows) * 4))
     lines = ["ОБЩИЕ ТРЕНДЫ (СМИ/соцсети):"]
     for r in media_rows:
         lines.append(f"- {r['lemma']} (score={r['score']}): {r.get('example_text', '')[:200]}")
@@ -233,13 +248,26 @@ def _ask_claude_scout(media_rows: list, anime_rows: list, target_n: int,
 
 
 def _parse_scout(text: str) -> list:
+    # Кандидат 1: закрытый массив как есть. Кандидат 2: ремонт обрезанного по
+    # max_tokens ответа — от первой '[' до последнего полного объекта '}' + ']'
+    # (лучше принять 38 заданий из 40, чем выбросить весь блок).
+    candidates = []
     m = re.search(r"\[.*\]", text, re.S)
-    if not m:
-        return []
-    try:
-        data = json.loads(m.group(0))
-    except Exception:
-        return []
+    if m:
+        candidates.append(m.group(0))
+    start = text.find("[")
+    cut = text.rfind("}")
+    if start != -1 and cut > start:
+        candidates.append(text[start:cut + 1] + "]")
+    data = None
+    for cand in candidates:
+        try:
+            data = json.loads(cand)
+            break
+        except Exception:
+            continue
+    if not isinstance(data, list):
+        return None  # сбой парсинга; валидный пустой [] — НЕ сбой, вернётся ниже как []
     out = []
     for x in data:
         if isinstance(x, dict) and str(x.get("theme", "")).strip():
@@ -255,10 +283,25 @@ def _ask_and_parse_with_retry(media_rows: list, anime_rows: list, target_n: int,
     что раньше была inline в expand_trends_to_tasks). Пустой список = двойной сбой."""
     text = _ask_claude_scout(media_rows, anime_rows, target_n, pop_rows, pop_is_anime)
     tasks = _parse_scout(text)
-    if not tasks:
+    if tasks is None:  # именно сбой парсинга; валидный [] ретраить не нужно
+        _dump_scout_failure(text, attempt=1)
         text = _ask_claude_scout(media_rows, anime_rows, target_n, pop_rows, pop_is_anime)
         tasks = _parse_scout(text)
+        if tasks is None:
+            _dump_scout_failure(text, attempt=2)
     return tasks
+
+
+def _dump_scout_failure(text: str, attempt: int) -> None:
+    """Сырой ответ Claude при сбое парсинга — в файл, иначе сбой недиагностируем."""
+    try:
+        dump_dir = HERE / "out_batch" / "scout_failures"
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        (dump_dir / f"scout_fail_{stamp}_try{attempt}.txt").write_text(
+            text or "<пустой ответ>", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def expand_trends_to_tasks(media_rows: list, anime_rows: list, target_n: int,
@@ -287,9 +330,12 @@ def expand_trends_to_tasks(media_rows: list, anime_rows: list, target_n: int,
             for t in tasks:
                 t["source"] = "trend"
             all_tasks.extend(tasks)
-        else:
+        elif tasks is None:
             print("  !! тематизатор (медиа/аниме) не смог собрать валидный JSON "
                   "дважды подряд — этот блок пропущен", flush=True)
+        else:
+            print("  тематизатор (медиа/аниме): фильтр отсёк все темы — штатно",
+                  flush=True)
 
     # Pop-строки группируются по точному значению sources (обычно 1-4 группы: anilist,
     # jikan, youtube, gtrends) — каждая группа уходит отдельным вызовом, чтобы задания
@@ -308,9 +354,12 @@ def expand_trends_to_tasks(media_rows: list, anime_rows: list, target_n: int,
                 for t in tasks:
                     t["source"] = f"trend:pop:{src}"
                 all_tasks.extend(tasks)
-            else:
+            elif tasks is None:
                 print(f"  !! тематизатор (pop:{src}) не смог собрать валидный JSON "
                       f"дважды подряд — этот блок пропущен", flush=True)
+            else:
+                print(f"  тематизатор (pop:{src}): фильтр отсёк все темы группы — "
+                      f"штатно, блок пуст", flush=True)
 
     if not all_tasks:
         print("  !! ни один блок тематизатора не дал валидных заданий — "
