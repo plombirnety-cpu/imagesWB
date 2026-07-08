@@ -331,6 +331,41 @@ def test_each_source_function_catches_its_own_network_errors(monkeypatch):
     assert fscout._gtrends_related("Any Title") == []
 
 
+def test_gtrends_related_handles_dataframe_result(monkeypatch):
+    """РЕГРЕССИЯ: trendspy.related_queries() на реальном прогоне возвращает
+    {"top": pandas.DataFrame, "rising": pandas.DataFrame} (колонка текста запроса —
+    "query"), а старый код делал булеву проверку вида `rising or []`, что на
+    DataFrame бросает ValueError ("truth value of a DataFrame is ambiguous").
+    Починка — явные isinstance-ветки + .to_dict("records") (см. _gtrends_related).
+    Здесь мокаем trendspy.Trends так, чтобы related_queries() отдал НАСТОЯЩИЙ
+    pandas.DataFrame в "rising", и проверяем, что _gtrends_related не падает и
+    возвращает непустой список строк запросов."""
+    import pandas as pd
+
+    rising_df = pd.DataFrame({
+        "query": ["рем аниме", "рем футболка", "рем принт"],
+        "value": [120, 95, 80],
+    })
+    top_df = pd.DataFrame({"query": ["re zero"], "value": [100]})
+
+    class _FakeTrends:
+        def __init__(self, *a, **kw):
+            pass
+
+        def related_queries(self, *a, **kw):
+            return {"top": top_df, "rising": rising_df}
+
+    import trendspy
+    monkeypatch.setattr(trendspy, "Trends", _FakeTrends)
+
+    result = fscout._gtrends_related("Re:Zero")
+
+    assert isinstance(result, list)
+    assert result, "ожидался непустой список запросов из rising DataFrame"
+    assert all(isinstance(q, str) for q in result)
+    assert "рем аниме" in result
+
+
 def test_tmdb_credits_missing_key_returns_empty(monkeypatch):
     monkeypatch.setattr(fscout.config, "TMDB_API_KEY", "")
     assert fscout._tmdb_credits("Some Show") == []
