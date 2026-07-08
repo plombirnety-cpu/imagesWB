@@ -1,0 +1,86 @@
+[
+  {
+    "id": "01_gothic_gold",
+    "name": "Готическое золото-барокко",
+    "moment": "Камина в полный рост (фигура занимает 75-80% высоты кадра), голый мускулистый торс развёрнут к зрителю в дерзкой боевой стойке, синие колючие волосы взметнулись вверх, фирменные остроконечные красно-оранжевые очки-треугольники ярко бликуют, красный плащ-накидка с рваным низом бьётся за спиной от ветра, бинты на предплечьях, правая рука вскинута вверх с указующим пальцем в небо — вокруг фигуры и по краю кадра орнаментальная барочная рамка из тонких золотых завитков и языков пламени вместо растительного узора, будто гравировка на латунной пластине.",
+    "art_style": "high-detail anime key visual с элементами гравюры-барокко: чёткая обводка фигуры, но фон и рамка проработаны как металлическая гравировка, глубокие тени, глянцевые блики на коже и очках",
+    "text_content": {
+      "main": "WHO THE HELL DO YOU THINK I AM",
+      "secondary": "",
+      "vertical_jp": "カミナ"
+    },
+    "typography": "Main phrase set in an ornate blackletter-meets-antiqua display face (character like UnifrakturCook or Cinzel Black with decorative swash caps on the first and last letter), rendered in glossy metallic gold (radial gradient light-yellow to deep amber) with a thin engraved bronze outline (stroke_width approx 0.05x cap-height) and a soft drop shadow in dark maroon offset 2% down-right. Phrase is long (six words) so it is split across two gently curved arcs stacked one above the other, both following the curvature of the ornamental frame's top edge, sitting ABOVE Kamina's head in the empty space between his hair spikes and the frame border — never overlapping the figure. Each word appears exactly once, no repetition between the two arcs. Letters are wide-tracked: gap between words is 0.06x cap-height. Cap-height starts at 0.095x figure width (smaller than a short phrase would allow, to fit six words legibly across two lines), line-gap between the two arcs 1.2x cap-height. The vertical kanji column カミナ is placed fully inside the ornamental frame on the right margin, outside the figure's silhouette (not overlapping Kamina), rendered in matching glossy gold with the same bronze outline, glyph size 0.09x figure width, one clean unbroken column of exactly three glyphs, gap between glyphs 0.05x glyph height, appears exactly once.",
+    "palette": "blood red, burnt orange, antique gold, aged bronze, near-black charcoal",
+    "chroma": "green"
+  },
+  {
+    "id": "08_y2k_chrome_metallic",
+    "name": "Y2K хром-металлик с бликами",
+    "moment": "Камина в полный рост, 76% высоты кадра, динамичная поза с резким разворотом на пятке, синие колючие волосы взметнулись, красный рваный плащ хлопает на ветру за спиной, голый мускулистый торс и бинты на предплечьях остаются в НАТУРАЛЬНЫХ анатомических тонах кожи (кожа и плащ НЕ хромируются, хром применяется только к типографике), фирменные красно-оранжевые очки-треугольники ловят яркий блик, длинная катана-нодати с кольцом на цубе занесена наискось перед собой, за спиной размытый шлейф скорости.",
+    "art_style": "Y2K chrome aesthetic ограниченно применённая к тексту и спецэффектам: hyper-glossy specular streak-блики только на металле катаны и на леттеринге; фигура (кожа, волосы, плащ, очки) рендерится в чистой насыщенной anime cel-shading палитре канона — без металлизации кожи или брони, лёгкая пыльца пиксель-спарклов вдоль контура плаща",
+    "text_content": {
+      "main": "GO BEYOND THE IMPOSSIBLE",
+      "secondary": "ROW ROW FIGHT THE POWER",
+      "vertical_jp": ""
+    },
+    "typography": "Main line 'GO BEYOND THE IMPOSSIBLE' set in a bulbous chrome-bubble Y2K display face (thick rounded terminals, inflated balloon-letter look) with a full chrome-metallic gradient fill (bright white hot-spot highlight streak diagonally across the upper third of each letter, fading to steel-grey then to deep blue-black at the letter base, mimicking liquid chrome) and a thin fire-orange outer glow stroke (0.03x cap-height, matching Kamina's glasses color instead of Madara's hot-pink), positioned arcing slightly upward directly above Kamina's head with generous clearance, cap-height 0.10x figure width (slightly reduced from the reference to fit four words on one arc), word gap 0.055x cap-height, each word appears exactly once. Secondary line 'ROW ROW FIGHT THE POWER' sits beneath in a smaller matching chrome style but as a flat single-line block, centered under the figure at the bottom margin (not overlapping the figure, 4% canvas height below the feet), cap-height 0.04x figure width, word gap 0.04x cap-height, same chrome-gradient fill but without the outer glow (visually subordinate to the main line above); the repeated word 'ROW' appearing twice here is the actual canon chant lyric and is intentional (not a duplication error), all other words appear exactly once. No other text anywhere on the print.",
+    "palette": "chrome silver-white, fire-orange glow, blood red plaid accent, cobalt blue hair tone, warm skin tone",
+    "chroma": "green"
+  },
+  {
+    "id": "09_ring_medallion_arc",
+    "name": "Кольцо-медальон: текст по дуге вокруг фигуры",
+    "moment": "Камина в полный рост, 74% высоты кадра, стоит по центру в статичной фронтальной позе, руки скрещены на голой груди, фирменные красно-оранжевые очки-треугольники смотрят прямо на зрителя, красный плащ расправлен симметрично за спиной как крылья, катана-нодати воткнута в землю перед ним рукоятью вверх — вокруг всей фигуры на равном радиальном расстоянии проходит тонкое декоративное кольцо/окружность (как медальон-печать), внутри которого вписана вся композиция — классическая структура герба бригады Гуррен.",
+    "art_style": "emblem / medallion badge design — фигура в анимеклассической целл-заливке в центре, тонкая декоративная окружность и орнаментальные засечки в виде языков пламени формируют кольцевую рамку вокруг неё, как монета или цеховой герб",
+    "text_content": {
+      "main": "KAMINA • GURREN BRIGADE •",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "The ring text reads 'KAMINA • GURREN BRIGADE •' running EXACTLY ONCE around the full 360 degrees of the decorative circular medallion border that frames the figure — this is a strict rule: the words KAMINA and GURREN BRIGADE each appear only a single time on the ring, they are never mirrored, never repeated a second time to fill the loop, and never duplicated top-and-bottom. Because the phrase is short relative to the ring's circumference, the remaining arc length is filled with wide letter-spacing (0.09x cap-height between letters, roughly 50% wider than the Madara reference) plus two small bullet/dot separators (•) — one placed after KAMINA and one placed after GURREN BRIGADE closing the loop back to the start — so the ring reads continuously KAMINA • [gap] • GURREN BRIGADE • [gap] • with the two dot-separators visually marking the seams instead of restating any word. Typeface a clean bold condensed caps (even stroke weight so curved letters stay legible at any rotation), cap-height constant at 0.058x figure width regardless of position on the ring (no perspective-shrinking), letters individually rotated to stay perpendicular to the ring's radius at their position. A small orange flame-emblem glyph (echoing Kamina's glasses silhouette) marks the top seam of the ring where the loop closes, replacing the Uchiha fan reference. Fill deep black with a thin orange-red keyline stroke (0.02x cap-height) matching the medallion border's flame-motif tone. No text exists anywhere outside the ring, and no word or phrase repeats anywhere on the print — the circle IS the only typographic element, used exactly once.",
+    "palette": "aged gold ring, matte black letters, fire-orange keyline and flame emblem, blood-red accent, ivory medallion field",
+    "chroma": "green"
+  },
+  {
+    "id": "11_gunbai_propaganda_poster",
+    "name": "Агитплакат восходящего солнца",
+    "moment": "Камина в полный рост, 82% высоты кадра, героическая поза плаката соцреализма — стоит широко расставив ноги на груде обломков (намёк на разбитую механическую конечность гандерробота), одна рука сжимает рукоять нодати у бедра, вторая вскинута вверх со сжатым кулаком, красный плащ развевается симметрично, взгляд сквозь фирменные красно-оранжевые очки-треугольники устремлён вдаль поверх зрителя, за спиной — крупный графичный диск восходящего солнца с расходящимися прямыми лучами (сунрей), силуэт гандерробота Гуррен на дальнем плане внутри диска.",
+    "art_style": "японский агитационный плакат 1930-40х в переработке под аниме-целл: плоские насыщенные заливки без градиентов, жёсткие геометричные лучи солнца, лёгкая печатная зернистость и минимальное смещение цветных слоёв как на старой литографии, драматичный ракурс снизу",
+    "text_content": {
+      "main": "GO BEYOND",
+      "secondary": "GURREN BRIGADE",
+      "vertical_jp": "グレン団"
+    },
+    "typography": "Main phrase 'GO BEYOND' set in a heavy geometric propaganda-poster slab display face (blocky, high-contrast stroke, slightly condensed like Cyrillic-constructivist posters), fill solid flat crimson red with a thin cream-white keyline (0.03x cap-height), positioned in a straight horizontal band across the upper third of the canvas directly in front of the sun-disc rays but behind nothing (text sits on the topmost layer, rays visible only around it), cap-height 0.135x figure width, word gap 0.05x cap-height, each word appears exactly once. Secondary line 'GURREN BRIGADE' set in a smaller matching slab weight directly below the main phrase, stacked with a line-gap of 1.1x cap-height, cap-height 0.06x figure width, fill flat cream-white with a thin crimson keyline (inverse of the main line for poster-contrast rhythm), word gap 0.045x cap-height. The vertical kanji column グレン団 (Gurren-dan, the brigade name) is placed inside the lower-left margin beside Kamina's leg, outside the figure's silhouette, rendered as a bold flat-red stamp-style column matching the poster's stencil character, glyph size 0.08x figure width, one clean unbroken column of three glyphs, gap between glyphs 0.04x glyph height, appears exactly once. No other text anywhere on the print.",
+    "palette": "crimson red, cream off-white, deep charcoal-black, burnt orange sun-disc, cobalt blue hair accent",
+    "chroma": "green"
+  },
+  {
+    "id": "12_irezumi_tattoo_composition",
+    "name": "Ирэдзуми: текст как часть тату-композиции",
+    "moment": "Камина показан по пояс, но крупно — торс и плечи занимают 78% высоты кадра, развёрнут вполоборота так, чтобы были видны его татуировки-пламя на плече и лопатке, голый мускулистый торс без плаща (плащ соскользнул на одно плечо, придерживается локтем), бинты на предплечьях частично размотаны, фирменные очки-треугольники сдвинуты на лоб, взгляд дерзкий и прямой, поза расслабленно-вызывающая как на японской тату-гравюре.",
+    "art_style": "irezumi ukiyo-e tattoo illustration — фигура прорисована как классическая японская тату-гравюра: жёсткий чёрный контур (bokashi-градиенты только у волн и пламени), кожа оставлена почти чистой (естественный тон), а сами татуировки-пламя на теле прорисованы плотным traditional-irezumi орнаментом с растушёванными краями",
+    "text_content": {
+      "main": "GO BEYOND THE IMPOSSIBLE",
+      "secondary": "",
+      "vertical_jp": "カミナ"
+    },
+    "typography": "The phrase 'GO BEYOND THE IMPOSSIBLE' is NOT a separate text layer sitting on top of the art — it is rendered as if hand-inked directly into the tattoo composition itself, integrated as a horizontal tattoo banner-scroll (a classic irezumi ribbon motif) that wraps across Kamina's chest and over the top of his shoulder tattoo, following the muscle contour so the ribbon curves slightly with the pectoral and deltoid shape. Letters set in a bold traditional tattoo-script caps (even, slightly rounded strokes, like old sailor-tattoo lettering), fill solid black ink matching the irezumi line-work exactly (same stroke weight family as the flame tattoo linework beside it, 0.045x cap-height stroke), sitting inside the painted scroll-ribbon shape which itself has a thin red bokashi-gradient fill echoing the flame tattoo's red accent. Cap-height 0.075x figure width, word gap 0.05x cap-height, each word appears exactly once across the single ribbon (wrapping the ribbon in one continuous read left-to-right, not split into two separate banners). The vertical kanji column カミナ (his name) is inked as a small separate traditional tattoo-column on his upper arm/bicep, outside the ribbon, rendered in the same solid black ink line style with a thin red outline, glyph size 0.06x figure width, one clean column of three glyphs, gap between glyphs 0.045x glyph height, appears exactly once. No text exists anywhere else on the print — the tattoo ribbon and the arm column are the only two typographic elements.",
+    "palette": "sumi ink black, traditional tattoo red, warm natural skin tone, faded indigo wave-background accent",
+    "chroma": "green"
+  },
+  {
+    "id": "13_varsity_jersey_number",
+    "name": "Варсити-джерси: номер игрока команды Гуррен",
+    "moment": "Камина в полный рост, 80% высоты кадра, поза уличного спорта-пафоса — стоит вполоборота, одна рука уперта в бедро, вторая держит нодати на плече как бейсбольную биту, голый торс частично прикрыт расстёгнутой варсити-курткой поверх плаща (плащ выглядывает из-под куртки как подклад), фирменные красно-оранжевые очки-треугольники, синие колючие волосы стилизованы под спортивный зачёс, фон — упрощённый геометричный градиент трибуны/прожекторов стадиона.",
+    "art_style": "varsity sport-jersey graphic design — плоские векторные заливки как на спортивной экипировке, толстые контрастные контуры (двойная окантовка бело-чёрная как на нашивках), лёгкая текстура ткани/сетки только на куртке, никакого целл-шейдинг реализма в фоне — фон чистый градиент как студийный спортивный портрет",
+    "text_content": {
+      "main": "KAMINA",
+      "secondary": "GURREN 01",
+      "vertical_jp": ""
+    },
+    "typography": "Main word 'KAMINA' set in a bold collegiate block-serif varsity typeface (like a classic letterman jacket chest print), fill solid crimson red with a thick cream-white outer stroke (0.06x cap-height) and a thinner navy-black inner keyline (0.02x cap-height) for the classic triple-layer varsity look, arched slightly following a shallow upward curve across the upper chest area of the jacket, cap-height 0.12x figure width, word gap none needed (single word), appears exactly once. Secondary text 'GURREN 01' styled as an athletic jersey number-and-team tag: 'GURREN' in a smaller condensed varsity block-caps directly above a large numeral '01' — the numeral rendered big and bold like a real jersey number, cap-height of 'GURREN' 0.045x figure width, numeral '01' cap-height 0.09x figure width, both centered on the lower-back area of the plate as if printed on the reverse of the jacket panel showing through, fill cream-white with crimson outline (inverse of the main wordmark for jersey-panel contrast), word/number gap 1.0x cap-height vertical stack. Each text element appears exactly once, no repetition, no footer.",
+    "palette": "crimson red, cream-white, navy-black trim, cobalt blue hair accent, burnt-orange glasses accent",
+    "chroma": "green"
+  }
+]

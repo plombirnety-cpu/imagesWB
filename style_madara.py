@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""style_madara.py — прогон 10 стилевых рецептов Мадары Учихи (docs/MADARA_RECIPES.json)
-через боевой путь batch_print.render_design (референс персонажа подтягивается сам через
-character_ref, QC-гейт границ хромакея, OCR-контроль спеллинга, вырезка фона) —
-каждый рецепт задаёт РАДИКАЛЬНО разное размещение типографики относительно фигуры
-(не только смену шрифта), проверка гипотезы дизайнера про "скучный" плейсмент.
+"""style_madara.py — прогон стилевых дизайн-рецептов (по умолчанию — 10 рецептов
+Мадары Учихи, docs/MADARA_RECIPES.json) через боевой путь batch_print.render_design
+(референс персонажа подтягивается сам через character_ref, QC-гейт границ хромакея,
+OCR-контроль спеллинга, вырезка фона) — каждый рецепт задаёт РАДИКАЛЬНО разное
+размещение типографики относительно фигуры (не только смену шрифта), проверка
+гипотезы дизайнера про "скучный" плейсмент.
 
-Каждый рецепт docs/MADARA_RECIPES.json превращается в design-dict формата
-art_director/batch_print (те же ключи, что в out_batch/daily_*/*_design.json):
-prompt (сцена: moment + art_style + палитра словами, канон-приметы), chroma,
-slogan/quote (= text_content.main), slogan_color, kana/name_jp (= text_content.vertical_jp,
-для OCR), character_en/title_en (для character_ref-референса), signature_props (gunbai
-war fan, где рецепт его упоминает), text_mode/text_modes_v3/mood/type_spec (typography-
-поля пайплайна — заполнены так, чтобы _exact_spelling_phrase/_expected_text_phrases
-взяли РОВНО текст рецепта, type_spec = typography-абзац рецепта почти дословно).
+Скрипт обобщён под ЛЮБОЙ набор рецептов той же схемы (--recipes/--outdir/--character/
+--title) — так прогоняется, например, docs/KAMINA_RECIPES.json для Камины из Gurren
+Lagann без правки кода, дефолты сохраняют обратную совместимость с исходным
+мадаровским прогоном.
 
-Результат — out_batch/madara_styles/<id>_raw.png + _diecut.png + _ongreen.png +
-_design.json (через render_design) + summary.json (сводка по всем 10).
+Каждый рецепт из файла --recipes превращается в design-dict формата art_director/
+batch_print (те же ключи, что в out_batch/daily_*/*_design.json): prompt (сцена:
+moment + art_style + палитра словами, канон-приметы), chroma, slogan/quote
+(= text_content.main), slogan_color, kana/name_jp (= text_content.vertical_jp,
+для OCR), character_en/title_en (для character_ref-референса — берутся из самого
+рецепта, если он их задаёт полями "character_en"/"title_en", иначе из --character/
+--title), signature_props (gunbai war fan, где рецепт его упоминает), text_mode/
+text_modes_v3/mood/type_spec (typography-поля пайплайна — заполнены так, чтобы
+_exact_spelling_phrase/_expected_text_phrases взяли РОВНО текст рецепта, type_spec =
+typography-абзац рецепта почти дословно).
+
+Результат — <outdir>/<id>_raw.png + _diecut.png + _ongreen.png + _design.json
+(через render_design) + summary.json (сводка по всем прогнанным рецептам).
 
 Использование:
-  python style_madara.py                 # все 10 рецептов, 2 потока
-  python style_madara.py --workers 1      # последовательно
+  python style_madara.py                                    # 10 рецептов Мадары, 2 потока
+  python style_madara.py --workers 1                        # последовательно
   python style_madara.py --only 01_gothic_gold 09_ring_medallion_arc
+  python style_madara.py --recipes docs/KAMINA_RECIPES.json --outdir out_batch/kamina_styles \
+      --character "Kamina" --title "Tengen Toppa Gurren Lagann"
 """
 import argparse
 import json
@@ -40,11 +50,14 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import batch_print  # noqa: E402
 
-RECIPES_PATH = HERE / "docs" / "MADARA_RECIPES.json"
-OUTDIR = HERE / "out_batch" / "madara_styles"
+# Дефолты — исходный мадаровский прогон (обратная совместимость: без флагов скрипт
+# работает как раньше). --recipes/--outdir/--character/--title переопределяют их для
+# любого другого набора рецептов той же схемы (напр. docs/KAMINA_RECIPES.json).
+DEFAULT_RECIPES_PATH = HERE / "docs" / "MADARA_RECIPES.json"
+DEFAULT_OUTDIR = HERE / "out_batch" / "madara_styles"
 
-CHARACTER_EN = "Madara Uchiha"
-TITLE_EN = "Naruto"
+DEFAULT_CHARACTER_EN = "Madara Uchiha"
+DEFAULT_TITLE_EN = "Naruto"
 
 # slogan/slogan_color санация в art_director._parse режет slogan регексом
 # [^A-Za-z0-9 !?'\-] и обрезает до 34 симв — рецепт 06 ("DANCE, MADARA!" содержит
@@ -58,8 +71,8 @@ def _sanitize_slogan(text: str) -> str:
     return _SLOGAN_SANITIZE_RE.sub("", text).strip()[:34]
 
 
-def load_recipes() -> list:
-    with open(RECIPES_PATH, encoding="utf-8") as f:
+def load_recipes(recipes_path: Path) -> list:
+    with open(recipes_path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -78,10 +91,18 @@ def _mood_for_recipe(art_style: str, typography: str) -> str:
     return "duotone_quote"
 
 
-def recipe_to_design(recipe: dict) -> dict:
-    """docs/MADARA_RECIPES.json[i] -> design-dict формата art_director/batch_print
+def recipe_to_design(recipe: dict, character_en: str, title_en: str) -> dict:
+    """docs/*_RECIPES.json[i] -> design-dict формата art_director/batch_print
     (см. docstring модуля). Единственный источник текста type_spec/quote/slogan —
-    typography+text_content самого рецепта, ничего не придумываем поверх."""
+    typography+text_content самого рецепта, ничего не придумываем поверх.
+
+    character_en/title_en: рецепт может задать их сам полями "character_en"/
+    "title_en" (переопределяет для конкретного персонажа внутри смешанного набора
+    рецептов); если рецепт их не задаёт — берутся значения по умолчанию, переданные
+    вызывающим кодом (--character/--title CLI или DEFAULT_*)."""
+    character_en = str(recipe.get("character_en") or character_en or "").strip()
+    title_en = str(recipe.get("title_en") or title_en or "").strip()
+
     text_content = recipe.get("text_content", {}) or {}
     main = str(text_content.get("main") or "").strip()
     secondary = str(text_content.get("secondary") or "").strip()
@@ -98,8 +119,9 @@ def recipe_to_design(recipe: dict) -> dict:
     # обычном пайплайне art_director.build_prompt собирает их раздельно). Прямым
     # текстом называем пол (мужчина) и канон-приметы согласно требованиям
     # art_director._COMMON_RULES_BASE (2-3 приметы, точный термин оружия).
+    who = f"{character_en} from {title_en}" if title_en else character_en
     prompt = (
-        f"An adult man, Madara Uchiha from Naruto, is shown as follows: {moment} "
+        f"An adult man, {who}, is shown as follows: {moment} "
         f"Rendered in {art_style}. Palette: {palette}, rich saturated anime cel-shading "
         f"colors with bold clean ink outlines, no pastel softness. The full figure is "
         f"completely unclipped inside the frame, with generous even chroma-key margin "
@@ -179,8 +201,8 @@ def recipe_to_design(recipe: dict) -> dict:
         "slogan": slogan,
         "slogan_color": "orange",
         "kana": kana,
-        "character_en": CHARACTER_EN,
-        "title_en": TITLE_EN,
+        "character_en": character_en,
+        "title_en": title_en,
         "signature_props": signature_props,
         "text_mode": text_mode,
         "text_modes_v3": [],
@@ -195,9 +217,9 @@ def recipe_to_design(recipe: dict) -> dict:
     }
 
 
-def run_recipe(recipe: dict, outdir: Path) -> dict:
+def run_recipe(recipe: dict, outdir: Path, character_en: str, title_en: str) -> dict:
     tag = recipe.get("id", "unknown")
-    design = recipe_to_design(recipe)
+    design = recipe_to_design(recipe, character_en, title_en)
     t0 = time.time()
     try:
         res = batch_print.render_design(design, tag, outdir, timeout_retries=2,
@@ -221,14 +243,28 @@ def main() -> None:
             pass
 
     ap = argparse.ArgumentParser()
+    ap.add_argument("--recipes", type=Path, default=DEFAULT_RECIPES_PATH,
+                     help=f"путь к JSON с рецептами (дефолт {DEFAULT_RECIPES_PATH.name} — "
+                          "Мадара)")
+    ap.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR,
+                     help=f"папка результатов (дефолт {DEFAULT_OUTDIR.name})")
+    ap.add_argument("--character", default=DEFAULT_CHARACTER_EN,
+                     help="character_en для character_ref-референса, если рецепт сам "
+                          "его не задаёт полем \"character_en\" (дефолт Madara Uchiha)")
+    ap.add_argument("--title", default=DEFAULT_TITLE_EN,
+                     help="title_en (франшиза) для character_ref, если рецепт сам его "
+                          "не задаёт полем \"title_en\" (дефолт Naruto)")
     ap.add_argument("--workers", type=int, default=2,
                      help="сколько рецептов генерировать параллельно (дефолт 2 — не "
                           "ловить лимиты API)")
     ap.add_argument("--only", nargs="*", default=None,
-                     help="прогнать только эти id рецептов (по умолчанию — все 10)")
+                     help="прогнать только эти id рецептов (по умолчанию — все из файла)")
     args = ap.parse_args()
 
-    recipes = load_recipes()
+    recipes_path = args.recipes if args.recipes.is_absolute() else HERE / args.recipes
+    outdir = args.outdir if args.outdir.is_absolute() else HERE / args.outdir
+
+    recipes = load_recipes(recipes_path)
     if args.only:
         wanted = set(args.only)
         recipes = [r for r in recipes if r.get("id") in wanted]
@@ -236,16 +272,17 @@ def main() -> None:
         if missing:
             print(f"!! не найдены id рецептов: {sorted(missing)}", flush=True)
 
-    OUTDIR.mkdir(parents=True, exist_ok=True)
-    print(f"рецептов к прогону: {len(recipes)} -> {OUTDIR}\n", flush=True)
+    outdir.mkdir(parents=True, exist_ok=True)
+    print(f"рецептов к прогону: {len(recipes)} -> {outdir}\n", flush=True)
 
     results = []
     if args.workers <= 1:
         for r in recipes:
-            results.append(run_recipe(r, OUTDIR))
+            results.append(run_recipe(r, outdir, args.character, args.title))
     else:
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            futs = {pool.submit(run_recipe, r, OUTDIR): r for r in recipes}
+            futs = {pool.submit(run_recipe, r, outdir, args.character, args.title): r
+                    for r in recipes}
             for fut in as_completed(futs):
                 results.append(fut.result())
 
@@ -270,9 +307,9 @@ def main() -> None:
         "failed": len(results) - ok_count,
         "results": results,
     }
-    summary_path = OUTDIR / "summary.json"
+    summary_path = outdir / "summary.json"
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\nГотово: {ok_count}/{len(results)} -> {OUTDIR}")
+    print(f"\nГотово: {ok_count}/{len(results)} -> {outdir}")
     print(f"сводка: {summary_path}")
 
 
