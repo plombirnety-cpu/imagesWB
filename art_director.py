@@ -175,6 +175,14 @@ def _signature_props_schema() -> str:
 # колонка кандзи name_jp, если есть. Пустая строка — тексту не место (эквивалент
 # text_mode=none/text_modes_v3=[]). build_prompt() оборачивает это в exact-spelling
 # инструкцию отдельно — здесь ТОЛЬКО стиль/размещение/цвета, без самих слов слогана.
+#
+# Одиннадцатый заход, живой баг (out_batch/20260708_211920/02, Тандзиро): Claude
+# описал ДВЕ отдельные зоны размещения для ОДНОЙ и той же цитаты (quote) — "quote text
+# ... tucked tightly below the figure's feet" ПЛЮС отдельно "placed tilted along the
+# bottom of the composition" — модель честно нарисовала обе (мелкая копия под фигурой
+# + крупная копия внизу). Явное правило "ОДНА зона размещения" ниже — предотвращает
+# описание двух мест ДЛЯ ОДНОЙ ФРАЗЫ в самом type_spec, до того как это дойдёт до
+# генерации картинки.
 _TYPE_SPEC_SCHEMA = (
     "\"type_spec\":\"<АНГЛИЙСКОЕ описание ВСТРОЕННОЙ типографики для этого дизайна, "
     "СТИЛЬ по mood (docs/PRINT_STYLE_GUIDE.md раздел 2/4.2): mood='duotone_quote' -> "
@@ -186,10 +194,14 @@ _TYPE_SPEC_SCHEMA = (
     "the bottom, tilted / behind the figure, huge scale / integrated near the chest, "
     "как уместно композиции), (c) ЦВЕТА СЛОВАМИ из палитры СЦЕНЫ (напр. 'bright "
     "blood-red with dark outline', НЕ hex-код — просто цвет тем же словом, что и в "
-    "остальном промпте). Если у персонажа есть name_jp — добавь фразу про "
-    "'a vertical column of Japanese calligraphy beside the figure'. ПУСТАЯ строка "
-    "\\\"\\\", если тексту на этом принте не место (эквивалент text_mode='none' И "
-    "text_modes_v3=[])>\","
+    "остальном промпте). ГЛАВНАЯ ФРАЗА (quote/slogan) ДОЛЖНА иметь РОВНО ОДНУ зону "
+    "размещения — НЕ описывай для неё два разных места на композиции (например НЕ "
+    "пиши 'tucked below the figure's feet' И ОТДЕЛЬНО 'along the bottom' для одной и "
+    "той же фразы — выбери ОДНО место). Если у персонажа есть name_jp — добавь фразу "
+    "про 'a vertical column of Japanese calligraphy beside the figure' (это ОТДЕЛЬНЫЙ "
+    "блок кандзи, не сама фраза slogan/quote — его не считай второй зоной фразы). "
+    "ПУСТАЯ строка \\\"\\\", если тексту на этом принте не место (эквивалент "
+    "text_mode='none' И text_modes_v3=[])>\","
 )
 
 
@@ -456,15 +468,46 @@ def _parse(text: str) -> list:
 
 def _chroma_bg(color: str) -> str:
     """Явный кусок промпта про фон-хромакей нужного цвета — nano-banana честно рисует
-    ровный насыщенный хромакей, если просить ПРЯМО с hex-значением (граблю см. GOTCHAS)."""
+    ровный насыщенный хромакей, если просить ПРЯМО с hex-значением (граблю см. GOTCHAS).
+
+    Одиннадцатый заход (2026-07-08): живой кейс (out_batch/20260708_205007/01) — модель
+    нарисовала БЕЛЫЙ фон вместо хромакея (стикер-рамку) и пустила запрошенный зелёный
+    ВНУТРЬ дизайна как ауру вокруг фигуры. Два усиления: (а) явный запрет белой
+    подложки/стикер-рамки вокруг дизайна — фон должен быть хромакеем от края до края,
+    не окантовкой; (б) явный запрет использовать сам цвет хромакея КАК ЦВЕТ ВНУТРИ
+    артворка (никаких зелёных/синих свечений/аур/акцентов при соответствующем фоне) —
+    иначе QC-гейт (batch_print._border_chroma_coverage) не поможет вырезке: если
+    хромакей-цвет есть и на фоне, и в самом дизайне, colour-key неизбежно вырезает его
+    из дизайна тоже.
+
+    Живой РЕГРЕСС того же семейства дефектов (2026-07-08, out_batch/20260708_211920/02,
+    Тандзиро, ПОСЛЕ усиления выше) — попиксельно подтверждена ТОЛСТАЯ чисто белая
+    полоса, обрамляющая ВНЕШНИЙ КОНТУР водно-огненной ауры вокруг фигуры (не рамка
+    кадра — та честно осталась синим хромакеем, coverage=1.00; это декоративная белая
+    обводка САМОГО силуэта эффектов внутри дизайна, "sticker outline"/die-cut stroke).
+    Старая формулировка запрещала только "border"/"mount"/"frame around the artwork"
+    (интерпретируется как рамка/подложка КАДРА целиком) — не называла явно запрет
+    именно обводки ВОКРУГ силуэта персонажа/эффектов внутри самой композиции. Третье
+    усиление ниже называет этот конкретный паттерн прямо (die-cut sticker outline
+    hugging the silhouette of the character or the flame/energy effects)."""
     color = color if color in ("green", "blue") else "green"
     hexv = {"green": "0 177 64", "blue": "0 71 255"}[color]
     return (f"The entire background behind the subject is a solid, perfectly uniform "
             f"bright {color} chroma-key screen, RGB {hexv}, like a professional film "
             f"{color}-screen studio backdrop — one single flat tone filling the whole "
-            f"frame around the character, no gradient, no texture, no grain, no shadow "
-            f"or vignette on the backdrop, no {color} glow or rim light bleeding onto the "
-            f"subject.")
+            f"frame around the character, edge to edge, corner to corner, no gradient, "
+            f"no texture, no grain, no shadow or vignette on the backdrop, no white "
+            f"border, no white sticker-style mount or frame around the artwork — the "
+            f"chroma-key colour itself must reach every edge of the image. The chroma "
+            f"background color must appear ONLY as the flat background, never inside "
+            f"the artwork (no glow, aura, outline or accent in that color) — do not use "
+            f"{color} anywhere on the character, clothing, weapon or effects, to avoid "
+            f"blending with the background during keying. Do NOT draw a white sticker-"
+            f"style die-cut outline or stroke hugging the silhouette of the character "
+            f"or the flame/energy/aura effects around them — the edge where the "
+            f"character and effects meet the {color} background must be a direct clean "
+            f"line straight into the chroma-key color, with no white or light-colored "
+            f"ring, halo outline, or contour stroke of any kind separating them.")
 
 
 # Явный запрет любых букв в артворк — используется build_prompt, когда дизайну
@@ -495,7 +538,24 @@ def _text_render_block(design: dict) -> str:
     type_spec (стиль/размещение/цвета) + EXACT-SPELLING инструкция построчно с фразой
     + 'No other text anywhere'. Возвращает пустую строку, если типографика этому
     дизайну не нужна (design['type_spec'] пусто ИЛИ нет фразы для exact-spelling) —
-    вызывающий код (build_prompt) в этом случае добавляет _NO_TEXT_TAIL вместо этого."""
+    вызывающий код (build_prompt) в этом случае добавляет _NO_TEXT_TAIL вместо этого.
+
+    Одиннадцатый заход (2026-07-08): живой кейс (out_batch/20260708_205007) — модель
+    рисовала фразу ДВАЖДЫ (крупно + мелкий дубль, дизайн 02) и слепляла соседние слова
+    без видимого пробела ("BORN TO" читалось как "BORNTO", дизайн 03). Два усиления
+    инструкции: (а) явный запрет дубликатов фразы где-либо ещё на дизайне; (б) явное
+    требование видимого зазора между словами, буквы соседних слов не должны касаться/
+    сливаться.
+
+    Живой РЕГРЕСС того же дефекта (2026-07-08, out_batch/20260708_211920/02, Тандзиро,
+    ПОСЛЕ первого усиления выше) — модель снова нарисовала фразу дважды: мелкая белая
+    копия сразу под фигурой ("тизер"/echo рядом с силуэтом) + крупная красная копия в
+    нижней полосе. Правило "no duplicates elsewhere" оказалось недостаточно КОНКРЕТНЫМ
+    — модель явно не расценивала маленькую копию у фигуры как "дубликат" в том же
+    смысле. Третье усиление ниже называет этот конкретный паттерн прямо: явно
+    запрещает именно "маленькое эхо/тизер фразы рядом с фигурой + отдельная крупная
+    копия внизу" как named anti-pattern, плюс закрывает лазейку "другая формулировка
+    того же смысла" (модель не должна перефразировать фразу как обходной путь)."""
     type_spec = str(design.get("type_spec") or "").strip()
     phrase = _exact_spelling_phrase(design)
     if not type_spec or not phrase:
@@ -506,6 +566,16 @@ def _text_render_block(design: dict) -> str:
         f"The design INCLUDES integrated typography as part of the artwork: "
         f"{type_spec_sentence}",
         f"Spell the phrase EXACTLY, letter by letter: {phrase}.",
+        "Write the phrase exactly ONCE — no duplicates elsewhere, no repeated or "
+        "smaller copy of the same text anywhere else in the artwork.",
+        "Specifically: do NOT add a small echo or teaser copy of the phrase near the "
+        "figure in addition to the main lettering placement — there is only ONE "
+        "lettering placement for this phrase on the entire composition, nowhere else, "
+        "not even in a smaller size or different color. Do not rephrase or repeat the "
+        "same meaning in different words either — the phrase appears as this exact "
+        "wording, one single time, period.",
+        "Leave clear, visible spacing between words — words must never touch or "
+        "merge together; each word stays legible as a separate cluster of letters.",
     ]
     if name_jp:
         parts.append(

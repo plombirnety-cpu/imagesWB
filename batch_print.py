@@ -28,6 +28,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+# cp1251-консоль Windows падает UnicodeEncodeError на кандзи в print() (например,
+# OCR-транскрипт с 竈門炭治郎 в _verify_text) — стандартная защита проекта.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 import cv2                    # noqa: E402
 import numpy as np            # noqa: E402
 from PIL import Image, ImageEnhance  # noqa: E402
@@ -55,15 +60,62 @@ _REFERENCE_PREFIX = (
 
 # ── QC-гейт границ кадра (перенесено дословно из comfyui-print-server/batch_print.py) ──
 
-def _border_chroma_coverage(img_rgb: Image.Image, tol: float = 52.0) -> float:
+# Эталонные RGB хромакея (те же значения, что art_director._chroma_bg подставляет в
+# промпт и что batch_print.render_design кладёт под финальный ongreen-composite) в
+# YCrCb — используются _border_chroma_coverage, чтобы отличить "рамка однотонная, но
+# НЕ того цвета" (например модель нарисовала белую подложку/стикер-рамку вместо
+# хромакея) от реального хромакея. CrCb, не RGB — устойчивее к яркостным вариациям
+# самого хромакея между генерациями (тень/грейн), которых нанобанана иногда чуть
+# подсвечивает светлее/темнее, но по цветности остаётся зелёным/синим.
+_CHROMA_REF_RGB = {"green": (0, 177, 64), "blue": (0, 71, 255)}
+
+
+def _ycrcb(rgb: tuple) -> np.ndarray:
+    arr = np.array(rgb, dtype=np.uint8).reshape(1, 1, 3)
+    return cv2.cvtColor(arr, cv2.COLOR_RGB2YCrCb)[0, 0].astype(np.float32)
+
+
+_CHROMA_REF_YCC = {c: _ycrcb(v) for c, v in _CHROMA_REF_RGB.items()}
+
+# Порог расстояния (CrCb-плоскость) рамки кадра до эталонного цвета хромакея —
+# КАЛИБРОВАНО на живых raw (2026-07-08, одиннадцатый заход): реальные "правильные"
+# зелёные raw прошлых прогонов дают дистанцию рамки до эталона green RGB(0,177,64) в
+# диапазоне ~9..63 (медиана рамки чуть темнее/desaturated эталона — обычная вариация
+# nanobanana), белофонный кейс (модель нарисовала БЕЛЫЙ фон вместо хромакея,
+# out_batch/20260708_205007/01_raw.png) даёт ~83.5 — зазор ~20 единиц. 70 — с запасом
+# выше максимума реальных зелёных (63), заметно ниже белого outlier (83.5).
+_CHROMA_COLOR_TOL = 70.0
+
+
+def _border_chroma_coverage(img_rgb: Image.Image, tol: float = 52.0,
+                            chroma: str = "green") -> float:
     """Доля пикселей рамки кадра (ширина 1% от min(W,H), сэмплинг каждые 4px),
     близких к цвету хромакея — QC-гейт против «персонаж/эффекты упираются в край
     кадра, хромакей-фона не осталось». tol=52 — то же калиброванное значение, что
-    и в cutout_green (НЕ менять — подобрано под nanobanana)."""
+    и в cutout_green (НЕ менять — подобрано под nanobanana).
+
+    ВТОРОЙ гейт (одиннадцатый заход): даже если рамка ОДНОТОННАЯ (высокое coverage
+    по расстоянию до МЕДИАНЫ САМОЙ рамки), она может быть однотонной НЕ ТОГО цвета —
+    например модель нарисовала белую подложку/стикер-рамку вместо хромакея, а
+    хромакей-цвет (green) просочился ВНУТРЬ дизайна как аура/свечение вокруг фигуры.
+    Проверяем: расстояние МЕДИАНЫ рамки до ЭТАЛОННОГО RGB запрошенного chroma
+    (_CHROMA_REF_YCC) в CrCb < _CHROMA_COLOR_TOL. Не сошлось -> coverage=0.0 (весь
+    обычный ретрай-механизм render_design перегенерит попытку как есть, ничего
+    дополнительно чинить не нужно)."""
     rgb = np.array(img_rgb.convert("RGB"))
     h, w = rgb.shape[:2]
     key = chroma_remove._border_key(rgb).astype(np.uint8)
     keyy = cv2.cvtColor(key.reshape(1, 1, 3), cv2.COLOR_RGB2YCrCb)[0, 0].astype(np.float32)
+
+    ref_ycc = _CHROMA_REF_YCC.get(chroma, _CHROMA_REF_YCC["green"])
+    color_dist = float(np.sqrt(
+        (keyy[1] - ref_ycc[1]) ** 2 + (keyy[2] - ref_ycc[2]) ** 2))
+    if color_dist >= _CHROMA_COLOR_TOL:
+        print(f"  !! фон не хромакей: рамка ~{tuple(int(v) for v in key)} "
+              f"(dist={color_dist:.1f} >= {_CHROMA_COLOR_TOL}), ожидался {chroma}",
+              flush=True)
+        return 0.0
+
     ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
     dist = np.sqrt((ycc[:, :, 1] - keyy[1]) ** 2 + (ycc[:, :, 2] - keyy[2]) ** 2)
 
@@ -160,15 +212,34 @@ def _normalize_for_compare(text: str) -> str:
     return text
 
 
+def _count_nonoverlapping(haystack: str, needle: str) -> int:
+    """Число НЕПЕРЕСЕКАЮЩИХСЯ вхождений needle в haystack (str.count делает ровно
+    это — считает от найденной позиции + len(needle), не пересекающиеся вхождения не
+    складываются в завышенное число для коротких/повторяющихся фраз)."""
+    if not needle:
+        return 0
+    return haystack.count(needle)
+
+
 def _verify_text(image: Image.Image, expected_phrases: list) -> bool:
     """OCR-контроль спеллинга (TEXT_RENDER=image): дешёвая текстовая модель Gemini
     (providers.verify_text_in_image) транскрибирует ВЕСЬ текст на картинке, нормализует
     и сверяет — КАЖДАЯ непустая фраза из expected_phrases должна ВХОДИТЬ в транскрипт
-    (нормализованное substring-вхождение). expected_phrases без непустых элементов ->
-    True (нечего проверять, деградация не нужна). Любой сбой самого OCR-вызова
-    (сеть/HTTP/нет ключа) -> False (трактуем как непройденную проверку — не блокируем
-    ретрай/фолбэк, лучше лишний раз перегенерировать/откатиться на код, чем молча
-    выпустить принт с потенциально неверным текстом)."""
+    (нормализованное substring-вхождение) РОВНО ОДИН РАЗ. expected_phrases без непустых
+    элементов -> True (нечего проверять, деградация не нужна). Любой сбой самого
+    OCR-вызова (сеть/HTTP/нет ключа) -> False (трактуем как непройденную проверку — не
+    блокируем ретрай/фолбэк, лучше лишний раз перегенерировать/откатиться на код, чем
+    молча выпустить принт с потенциально неверным текстом).
+
+    Одиннадцатый заход, живой баг (out_batch/20260708_211920/02): модель нарисовала
+    фразу слогана ДВАЖДЫ (мелкая копия под фигурой + крупная копия внизу) — старая
+    версия проверяла ТОЛЬКО substring-вхождение (`in`), дубль в транскрипте формально
+    "содержит" ожидаемую фразу и проходил как OK, хотя реальный визуальный дефект
+    (тот самый, который _text_render_block уже пытается запретить промптом) остаётся
+    на финальной картинке. Теперь считаем непересекающиеся вхождения нормализованной
+    фразы в транскрипте — больше одного вхождения -> провал (тот же ретрай/фолбэк
+    механизм, что и при отсутствии фразы вовсе, ничего дополнительно чинить не
+    нужно)."""
     phrases = [p for p in (expected_phrases or []) if str(p or "").strip()]
     if not phrases:
         return True
@@ -178,10 +249,18 @@ def _verify_text(image: Image.Image, expected_phrases: list) -> bool:
         print(f"  !! OCR-контроль спеллинга упал: {e}", flush=True)
         return False
     norm_transcript = _normalize_for_compare(transcript)
-    ok = all(_normalize_for_compare(p) in norm_transcript for p in phrases)
+    missing = [p for p in phrases if _normalize_for_compare(p) not in norm_transcript]
+    duplicated = [p for p in phrases
+                  if _count_nonoverlapping(norm_transcript, _normalize_for_compare(p)) > 1]
+    ok = not missing and not duplicated
     if not ok:
-        print(f"  OCR-контроль: транскрипт={transcript!r} НЕ содержит все ожидаемые "
-              f"фразы {phrases!r}", flush=True)
+        reasons = []
+        if missing:
+            reasons.append(f"отсутствуют фразы {missing!r}")
+        if duplicated:
+            reasons.append(f"фразы повторены ДВАЖДЫ+ (дубль на картинке) {duplicated!r}")
+        print(f"  OCR-контроль: транскрипт={transcript!r} — {'; '.join(reasons)}",
+              flush=True)
     return ok
 
 
@@ -292,7 +371,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             print(f"{p} !! попытка {attempt + 1} упала: {e}", flush=True)
             result["error"] = str(e)
             continue
-        cov = _border_chroma_coverage(attempt_img)
+        cov = _border_chroma_coverage(attempt_img, chroma=design["chroma"])
         print(f"{p} border coverage={cov:.2f}", flush=True)
         if cov > best_cov:
             best_img, best_cov, best_seed = attempt_img, cov, try_seed
@@ -351,7 +430,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             attempts_used += 1
             fb_img = providers.generate_image(fallback_prompt, seed=fb_seed,
                                               reference=reference)
-            fb_cov = _border_chroma_coverage(fb_img)
+            fb_cov = _border_chroma_coverage(fb_img, chroma=design["chroma"])
             print(f"{p} фолбэк-генерация (без текста) border coverage={fb_cov:.2f}",
                   flush=True)
             raw_img, best_cov = fb_img, fb_cov
