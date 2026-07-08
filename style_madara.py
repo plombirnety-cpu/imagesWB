@@ -258,7 +258,9 @@ def main() -> None:
                      help="сколько рецептов генерировать параллельно (дефолт 2 — не "
                           "ловить лимиты API)")
     ap.add_argument("--only", nargs="*", default=None,
-                     help="прогнать только эти id рецептов (по умолчанию — все из файла)")
+                     help="прогнать только эти id рецептов (по умолчанию — все из файла); "
+                          "можно через пробел (--only a b c) ИЛИ через запятую "
+                          "(--only a,b,c), оба варианта эквивалентны")
     args = ap.parse_args()
 
     recipes_path = args.recipes if args.recipes.is_absolute() else HERE / args.recipes
@@ -266,7 +268,10 @@ def main() -> None:
 
     recipes = load_recipes(recipes_path)
     if args.only:
-        wanted = set(args.only)
+        # --only принимает и "a b c" (nargs="*" разбивает по пробелу сам), и одну
+        # строку "a,b,c" (запятая) — каждый переданный токен ещё раз режем по запятой
+        # и чистим пробелы, так оба стиля вызова дают одинаковый набор id.
+        wanted = {tok.strip() for raw in args.only for tok in raw.split(",") if tok.strip()}
         recipes = [r for r in recipes if r.get("id") in wanted]
         missing = wanted - {r.get("id") for r in recipes}
         if missing:
@@ -286,14 +291,35 @@ def main() -> None:
             for fut in as_completed(futs):
                 results.append(fut.result())
 
-    # Стабильный порядок сводки — по id рецепта (как в исходном JSON), не по порядку
-    # завершения потоков.
-    order = {r.get("id"): i for i, r in enumerate(recipes)}
-    results.sort(key=lambda r: order.get(r["id"], 999))
+    # summary.json ПО --only ЗАТИРАЛ результаты рецептов, не вошедших в этот прогон
+    # (баг перезаписи) — если файл уже существовал ДО этого запуска, подмешиваем
+    # прежние results по id: новые результаты (results, только что прогнанные)
+    # ПЕРЕКРЫВАЮТ старые записи с тем же id, а результаты рецептов, которые в этот
+    # раз не запускались (--only их не выбрал), остаются как были. Полный прогон без
+    # --only просто перезаписывает всё как раньше (merged == results).
+    all_recipes_path = args.recipes if args.recipes.is_absolute() else HERE / args.recipes
+    full_recipe_ids = [r.get("id") for r in load_recipes(all_recipes_path)]
+    summary_path = outdir / "summary.json"
+    prior_by_id = {}
+    if summary_path.exists():
+        try:
+            prior = json.loads(summary_path.read_text(encoding="utf-8"))
+            prior_by_id = {r.get("id"): r for r in prior.get("results", [])}
+        except Exception as e:  # noqa: BLE001 — битый/старый summary.json не должен ронять прогон
+            print(f"!! не удалось прочитать прежний summary.json ({e}) — пишем только "
+                  f"новые результаты этого прогона", flush=True)
 
-    ok_count = sum(1 for r in results if r["ok"])
+    new_by_id = {r["id"]: r for r in results}
+    merged_by_id = {**prior_by_id, **new_by_id}
+    # Порядок сводки — по ПОЛНОМУ списку id из файла рецептов (не только отфильтрованных
+    # --only), плюс любые «осиротевшие» id из прежнего summary в хвосте (на случай если
+    # рецепт был удалён из JSON между прогонами — не теряем его результат молча).
+    order = {rid: i for i, rid in enumerate(full_recipe_ids)}
+    merged = sorted(merged_by_id.values(), key=lambda r: order.get(r.get("id"), 999))
+
+    ok_count = sum(1 for r in merged if r["ok"])
     print(f"\n{'id':<28} {'статус':<6} {'попыт.':<7} {'coverage':<9} {'OCR-фолбэк':<11} ошибка")
-    for r in results:
+    for r in merged:
         status = "ok" if r["ok"] else "FAIL"
         fb = "да" if r.get("text_fallback") else "нет"
         err = r.get("error") or ""
@@ -302,14 +328,14 @@ def main() -> None:
 
     summary = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "total": len(results),
+        "total": len(merged),
         "ok": ok_count,
-        "failed": len(results) - ok_count,
-        "results": results,
+        "failed": len(merged) - ok_count,
+        "results": merged,
     }
-    summary_path = outdir / "summary.json"
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\nГотово: {ok_count}/{len(results)} -> {outdir}")
+    print(f"\nГотово (этот прогон {len(results)} рецепт(ов), сводка объединена: "
+          f"{ok_count}/{len(merged)}) -> {outdir}")
     print(f"сводка: {summary_path}")
 
 
