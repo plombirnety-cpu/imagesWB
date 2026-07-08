@@ -18,6 +18,13 @@ TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 # Модель Claude для арт-директора (идея + промпт + слоган + kana).
 MODEL = os.getenv("MODEL", "claude-sonnet-4-6")
 
+# Бренд-лейбл для подвала-этикетки типографики v3 (typography_v3.compose_text_v3,
+# режим collection_footer, docs/PRINT_STYLE_GUIDE.md раздел 3.4) — не хардкод внутри
+# модуля типографики, конфиг-константа.
+# ПУСТОЙ по умолчанию: бренд на принты НЕ наносим (правка владельца 2026-07-08),
+# подвал рисует только TITLE | CHARACTER. Задать значение — вернуть блок бренда.
+BRAND_LABEL = os.getenv("BRAND_LABEL", "")
+
 # gemini (дефолт — Pollinations-кошелёк студии периодически пуст, Gemini дешевле в
 # 4-7 раз на объёме 500 принтов/день) | pollinations (шлюз gen.pollinations.ai).
 IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "gemini").strip().lower()

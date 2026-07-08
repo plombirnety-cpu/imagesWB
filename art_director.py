@@ -39,9 +39,17 @@ _COMMON_RULES = (
     "ВЕРНОЕ число фирменных деталей (не плоди лишнее оружие/конечности). "
     "(2а) Если у персонажа есть КАНОНИЧНОЕ фирменное оружие/атрибут (меч конкретной формы, "
     "посох, маска и т.п.) — опиши его В ПРОМПТЕ С ТОЙ ЖЕ СТРОГОСТЬЮ, что и внешность "
-    "персонажа: точная форма клинка/предмета, цвет, характерные детали отделки. НЕ обобщай "
-    "до 'a sword'/'a weapon' — если канон говорит, что клинок длинный и зазубренный с "
-    "рукоятью в бинтах, так и опиши, а не просто 'меч'. "
+    "персонажа: точная форма клинка/предмета, цвет, характерные детали отделки. "
+    "ТЕРМИНОЛОГИЯ ОРУЖИЯ — ИСПОЛЬЗУЙ ТОЧНЫЙ японский/каноничный термин предмета, НЕ "
+    "обобщай до общего 'a sword'/'a blade'/'a weapon': katana, nodachi, zanpakuto, "
+    "wakizashi, naginata, tanto, kusarigama, tessen и т.п. — какой термин каноничен ИМЕННО "
+    "для этого персонажа/франшизы, такой и пиши. Например: у Кенпачи Зараки (Bleach) не "
+    "'a sword'/'a machete' и не обобщённый 'nodachi' — это ИЗНОШЕННАЯ КАТАНА-ДЗАНПАКТО "
+    "(zanpakuto) с зазубренной, щербатой кромкой клинка и рукоятью в потрёпанных бинтах, "
+    "так и опиши: 'his zanpakuto: a battered, unusually long katana blade with a heavily "
+    "notched and chipped cutting edge, hilt wrapped in worn bandages'. Если канон говорит, "
+    "что клинок длинный и зазубренный, так и опиши форму, но термин предмета — точный, не "
+    "обобщённый. "
     "(3) ПОЛНЫЙ СИЛУЭТ С ШИРОКИМИ ПОЛЯМИ: персонаж (и любые эффекты вокруг) ПОЛНОСТЬЮ "
     "помещается в кадр, ничего не обрезано и не упирается в край — явно опиши широкие "
     "равномерные поля хромакей-фона со всех сторон вокруг фигуры. "
@@ -70,13 +78,45 @@ _TEXT_MODE_SCHEMA = (
     "осознанно под конкретную сцену>\","
 )
 
+# Типографика v3 (docs/PRINT_STYLE_GUIDE.md) — новые поля ПОВЕРХ text_mode (v2). Если
+# text_modes_v3 непустой массив — типографика v3 (typography_v3.compose_text_v3)
+# используется ВМЕСТО text_mode; пустой массив — старый путь v2 без изменений.
+_TEXT_MODE_V3_SCHEMA = (
+    "\"text_modes_v3\":\"<пустой массив [] ИЛИ подмножество из ['quote_bottom',"
+    "'kanji_on','editorial','collection_footer'], согласно правилам комбинирования "
+    "(docs/PRINT_STYLE_GUIDE.md раздел 3.6): 'editorial' — ВСЕГДА соло, никогда не "
+    "комбинируется с другими; 'quote_bottom'+'kanji_on'+'collection_footer' — каноничная "
+    "тройка (можно любым поднабором); максимум 3 визуальных текстовых блока. Включай "
+    "v3-режимы примерно в 55-65% дизайнов (не в 100% — иначе конвейер снова монотонный), "
+    "пустой массив [] в остальных 35-45% случаев (тогда используется text_mode v2 выше), "
+    "предпочитая [] для тем без сильного персонажа-драмы (машины, бытовые концепты)>\","
+    "\"quote\":\"<короткая цитата ЛАТИНИЦЕЙ, 4-10 слов, каноничная реплика персонажа или "
+    "уместная авторская фраза под тему; ПУСТАЯ строка \\\"\\\", если text_modes_v3 не "
+    "включает 'quote_bottom' И mood не 'pop_trash' (для pop_trash цитата уходит в подвал, "
+    "см. стайлгайд раздел 4.3, даже без отдельного quote_bottom)>\","
+    "\"name_jp\":\"<кандзи ИЛИ катакана имени персонажа для 'kanji_on'/подзаголовка "
+    "'editorial', 2-6 знаков; ПУСТАЯ строка \\\"\\\", если не уверен в точном написании — "
+    "приоритет иероглифов (кандзи) над катаканой, если у имени есть каноничное "
+    "кандзи-написание (например 伏黒甚爾 для Тодзи Фусигуро), иначе катакана>\","
+    "\"mood\":\"<одно слово: 'duotone_quote' | 'fashion_editorial' | 'pop_trash' — "
+    "настроение, определяющее выбор палитровых ролей/шрифтовой пары/набора режимов v3 "
+    "(docs/PRINT_STYLE_GUIDE.md раздел 4.2): 'duotone_quote' — мрачный/жёсткий персонаж, "
+    "кровь/тени/проклятия, ограниченная 2-цветная аура; 'fashion_editorial' — статусный/"
+    "элегантный/взрослый персонаж, тема моды/аристократии/сцены, спокойная палитра; "
+    "'pop_trash' — агрессивный/кислотный/хоррор-комедийный персонаж, контрастные яркие "
+    "эффекты, растровая/поп фактура. ПУСТАЯ строка \\\"\\\", если text_modes_v3 пустой>\","
+)
+
 
 def _signature_props_schema() -> str:
     return (
         "\"signature_props\":\"<короткое АНГЛИЙСКОЕ описание канон-оружия/ключевого "
-        "атрибута персонажа с 2-3 опознавательными признаками формы/цвета/отделки "
-        "(например для Кенпачи Зараки: \\\"his nodachi: an extremely long, thin, heavily "
-        "chipped and jagged blade with a rectangular guard wrapped in bandages\\\"); "
+        "атрибута персонажа с 2-3 опознавательными признаками формы/цвета/отделки. "
+        "ОБЯЗАН содержать ТОЧНЫЙ японский/каноничный термин предмета (katana, nodachi, "
+        "zanpakuto, naginata, tanto и т.п.) — НЕ обобщай до 'sword'/'blade'/'weapon' "
+        "(например для Кенпачи Зараки: \\\"his zanpakuto: a battered, unusually long "
+        "katana blade with a heavily notched and chipped cutting edge, hilt wrapped in "
+        "worn bandages\\\", НЕ 'a nodachi'/'a machete'/'a sword'); "
         "пустая строка \\\"\\\", если у персонажа/темы нет знакового предмета>\","
     )
 
@@ -103,7 +143,8 @@ SYSTEM_CUTOUT = (
     "\"title_en\":\"<франшиза/тайтл персонажа ЛАТИНИЦЕЙ (напр. \\\"Bleach\\\"); ПУСТАЯ "
     "строка \\\"\\\", если character_en пустой или франшиза неизвестна>\","
     + _signature_props_schema() +
-    _TEXT_MODE_SCHEMA.rstrip(",") +
+    _TEXT_MODE_SCHEMA +
+    _TEXT_MODE_V3_SCHEMA.rstrip(",") +
     "}. "
     "Отвечай СТРОГО JSON-массивом таких объектов, без markdown и пояснений."
 )
@@ -135,7 +176,8 @@ SYSTEM_DIECUT = (
     "\"title_en\":\"<франшиза/тайтл персонажа ЛАТИНИЦЕЙ (напр. \\\"Bleach\\\"); ПУСТАЯ "
     "строка \\\"\\\", если character_en пустой или франшиза неизвестна>\","
     + _signature_props_schema() +
-    _TEXT_MODE_SCHEMA.rstrip(",") +
+    _TEXT_MODE_SCHEMA +
+    _TEXT_MODE_V3_SCHEMA.rstrip(",") +
     "}. "
     "Отвечай СТРОГО JSON-массивом таких объектов, без markdown и пояснений."
 )
@@ -148,7 +190,8 @@ def _ask_claude(theme: str, n: int, fmt: str) -> str:
     user = (f"Запрос: {theme}. Дай ровно {n} разных дизайн(ов). JSON-массив из {n} "
             f"объектов {{\"prompt\":..., \"chroma\":..., \"slogan\":..., "
             f"\"slogan_color\":..., \"kana\":..., \"character_en\":..., \"title_en\":..., "
-            f"\"signature_props\":..., \"text_mode\":...}}.")
+            f"\"signature_props\":..., \"text_mode\":..., \"text_modes_v3\":..., "
+            f"\"quote\":..., \"name_jp\":..., \"mood\":...}}.")
     resp = client.messages.create(
         model=MODEL,
         max_tokens=1500,
@@ -160,7 +203,7 @@ def _ask_claude(theme: str, n: int, fmt: str) -> str:
 
 def make_ideas(theme: str, n: int, fmt: str = "cutout") -> list:
     """N дизайнов: список dict {prompt, chroma, slogan, slogan_color, kana, character_en,
-    title_en, signature_props, text_mode}.
+    title_en, signature_props, text_mode, text_modes_v3, quote, name_jp, mood}.
 
     НЕ откатываемся тихо на сырую тему при сбое парсинга JSON: 1 ретрай запроса,
     затем ЯВНАЯ ошибка (вызывающий код пропускает этот дизайн с сообщением).
@@ -189,6 +232,19 @@ _COLORS = ("red", "orange", "white", "yellow", "purple", "black")
 # как "punch", ближе всего к прежнему поведению v1, а не падают и не теряют текст молча,
 # см. комментарий у _parse ниже).
 TEXT_MODES = ("none", "under", "punch", "kana_side")
+
+# text_modes_v3 — режимы типографики v3 (typography_v3.compose_text_v3). Список
+# продублирован (не импортируем typography_v3 сюда — art_director не должен тянуть
+# palette/PIL-тяжёлую логику типографики, та же причина, по которой typography.py уже
+# не импортирует art_director, зависимости идут только в одну сторону художник -> текст).
+TEXT_MODES_V3 = ("quote_bottom", "kanji_on", "editorial", "collection_footer")
+
+# name_jp допускает И катакану (゠-ヿ), И диапазон кандзи (CJK Unified Ideographs
+# 一-鿿, раздел 4.1 стайлгайда), плюс знак долготы/разделитель/пробел — шире, чем
+# _KANA_RE, который остаётся только катаканой для обратной совместимости "kana".
+_NAME_JP_RE = re.compile(r"^[゠-ヿー・ 一-鿿]+$")
+
+_MOODS = ("duotone_quote", "fashion_editorial", "pop_trash")
 
 
 def _parse(text: str) -> list:
@@ -244,10 +300,50 @@ def _parse(text: str) -> list:
         text_mode = str(x.get("text_mode") or "").strip().lower()
         text_mode = text_mode if text_mode in TEXT_MODES else "punch"
 
+        # text_modes_v3: массив режимов типографики v3 (docs/PRINT_STYLE_GUIDE.md раздел
+        # 3.6/4.1). Дефолт [] при отсутствии/невалидном значении — обратная совместимость
+        # со старым JSON без этого поля (typography_v3 просто не вызывается, остаётся
+        # text_mode v2). Защитный код (антиправило 7): если editorial пришёл ВМЕСТЕ с
+        # другими режимами — editorial приоритизируется, остальные отбрасываются (не
+        # падаем, но и не рисуем всё сразу).
+        raw_modes = x.get("text_modes_v3")
+        text_modes_v3 = []
+        if isinstance(raw_modes, list):
+            text_modes_v3 = [str(m).strip().lower() for m in raw_modes
+                             if str(m).strip().lower() in TEXT_MODES_V3]
+            # Дедуп, сохраняя порядок появления.
+            seen = set()
+            text_modes_v3 = [m for m in text_modes_v3
+                             if not (m in seen or seen.add(m))]
+            if "editorial" in text_modes_v3:
+                text_modes_v3 = ["editorial"]
+
+        # quote: короткая цитата в кавычках для quote_bottom/pop_trash-подвала (раздел
+        # 3.1/4.3). Санация той же схемой, что slogan, но длиннее (до 70 символов —
+        # антиправило 4 стайлгайда: не ужимать кегль ниже порога ради длинной строки,
+        # вместо этого код переносит на 2-ю строку/использует другой размер).
+        quote = re.sub(r"[^A-Za-z0-9 !?'\-]", "", str(x.get("quote") or "")).strip()[:70]
+
+        # name_jp: кандзи ИЛИ катакана имени персонажа (раздел 4.1) — санация допускает
+        # ОБА диапазона (в отличие от kana выше, только катакана). Дефолт "" при
+        # отсутствии/невалидном значении.
+        name_jp = str(x.get("name_jp") or "").strip()
+        if not (2 <= len(name_jp) <= 6 and _NAME_JP_RE.match(name_jp)):
+            name_jp = ""
+
+        # mood: настроение, определяющее палитровые роли/шрифтовую пару/набор режимов
+        # v3 (раздел 4.2). Дефолт "" при отсутствии/невалидном значении — пустая строка
+        # ЯВНО означает "v3 не применяется по mood" (typography_v3 сам обрабатывает
+        # пустой mood как дефолт duotone_quote-подобный набор ролей, см. _mood_font_pair).
+        mood = str(x.get("mood") or "").strip().lower()
+        mood = mood if mood in _MOODS else ""
+
         out.append({"prompt": prompt, "chroma": chroma,
                     "slogan": slogan, "slogan_color": scolor, "kana": kana,
                     "character_en": character_en, "title_en": title_en,
-                    "signature_props": signature_props, "text_mode": text_mode})
+                    "signature_props": signature_props, "text_mode": text_mode,
+                    "text_modes_v3": text_modes_v3, "quote": quote,
+                    "name_jp": name_jp, "mood": mood})
     return out
 
 

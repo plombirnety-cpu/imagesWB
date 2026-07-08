@@ -38,6 +38,7 @@ import chroma_remove           # noqa: E402
 import config                  # noqa: E402
 import providers               # noqa: E402
 import typography              # noqa: E402
+import typography_v3           # noqa: E402
 
 
 # Блок промпта, форсирующий рисование ПО РЕФЕРЕНСУ (см. character_ref.get_reference) —
@@ -222,12 +223,21 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         kana = design.get("kana", "")
 
         if text_style == "auto":
-            # Типографика v2: режим решает Claude (design["text_mode"]) ПО КОМПОЗИЦИИ
-            # конкретного дизайна — compose_text сам расширяет холст по необходимости
-            # и кропит итог до контента (текст+фигура) с полями 4-6%, без мёртвой
-            # пустой полосы, которую оставлял старый блок расширения 1.28.
-            text_mode = design.get("text_mode", "none")
-            final = typography.compose_text(cut, text_mode, slogan, slogan_color, kana)
+            text_modes_v3 = design.get("text_modes_v3") or []
+            if text_modes_v3:
+                # Типографика v3 (docs/PRINT_STYLE_GUIDE.md): режимы решает Claude
+                # (design["text_modes_v3"], может быть комбинацией), цвета текста —
+                # ТОЛЬКО из палитры конкретной иллюстрации (typography_v3.compose_text_v3
+                # сам вызывает palette.extract_palette), не typography._TITLE_COLORS.
+                final = typography_v3.compose_text_v3(
+                    cut, text_modes_v3, design, brand_label=config.BRAND_LABEL)
+            else:
+                # Типографика v2: режим решает Claude (design["text_mode"]) ПО КОМПОЗИЦИИ
+                # конкретного дизайна — compose_text сам расширяет холст по необходимости
+                # и кропит итог до контента (текст+фигура) с полями 4-6%, без мёртвой
+                # пустой полосы, которую оставлял старый блок расширения 1.28.
+                text_mode = design.get("text_mode", "none")
+                final = typography.compose_text(cut, text_mode, slogan, slogan_color, kana)
         else:
             # Явный --text-style из typography.STYLES (v1, обратная совместимость):
             # приоритетнее text_mode. Старая калибровка v1 расчитана на портретный
