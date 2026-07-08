@@ -11,7 +11,19 @@ prose-стиль nanobanana с нуля.
 Форматы:
 - cutout  — просто персонаж на хромакее (без обрамления, без слогана).
 - diecut  — персонаж в обрамлении пламени/энергии, образующем внешний силуэт,
-            + слоган-катчфраза снизу (наносится typography.py КОДОМ).
+            + слоган-катчфраза снизу.
+
+ТЕКСТ В ГЕНЕРАЦИИ (config.TEXT_RENDER, десятый заход, 2026-07-08): новые поколения
+nano-banana (gemini-3.1-flash-image = Nano Banana 2) рисуют встроенный текст БЕЗ
+орфографических ошибок и гармоничнее, чем кодовая типографика поверх — подтверждено
+A/B оркестратора (out_batch/ab_models/). TEXT_RENDER=image (дефолт) — системный
+промпт требует ВСТРОЕННУЮ типографику (см. схему `type_spec` ниже + exact-spelling
+блок в build_prompt), СТАРЫЙ повсеместный запрет букв (пункт 6 ниже) заменяется на
+условный: запрет остаётся ТОЛЬКО когда text_mode/text_modes_v3 реально пустые (текст
+дизайну не нужен вовсе). TEXT_RENDER=code — старое поведение 1:1 (текст всегда
+запрещён в артworк, накладывается кодом typography.py/typography_v3.py) — остаётся
+рабочим фолбэком (в т.ч. автоматическим при провале OCR-контроля спеллинга, см.
+batch_print._verify_text).
 """
 import json
 import re
@@ -24,7 +36,7 @@ MODEL = config.MODEL
 
 # ── Общие требования к идее (для обоих форматов) ───────────────────────────────
 
-_COMMON_RULES = (
+_COMMON_RULES_BASE = (
     "Ты арт-директор ПРЕМИАЛЬНЫХ принтов для футболок (топ-мерч / аниме key-visual, "
     "не скучный портрет и не сток). Пишешь ПРОМПТ ДЛЯ nano-banana (Google Gemini Image) — "
     "модель понимает КИНЕМАТОГРАФИЧНУЮ ПРОЗУ (связное описание сцены, как режиссёрская "
@@ -58,12 +70,47 @@ _COMMON_RULES = (
     "эффектами/аурой/энергией вокруг него, не вторым телом. "
     "(5) Стиль рендера — сочный насыщенный аниме cel-shading (яркие плотные заливки, "
     "чёткий контур, высокая насыщенность цвета), НЕ пастель и НЕ размытая живопись. "
+)
+
+# Пункт (6) — TEXT_RENDER=code (старое поведение): текст ВСЕГДА запрещён в артворк,
+# накладывается кодом typography.py/typography_v3.py отдельно.
+_RULE6_TEXT_CODE = (
     "(6) В КОНЦЕ промпта ЯВНО запрети текст на самой картинке: no letters, no words, "
     "no typography, no lettering, no watermarks, no signature in the artwork — весь текст "
     "накладывается кодом отдельно, диффузия текст не рисует. "
+)
+
+# Пункт (6) — TEXT_RENDER=image (дефолт, десятый заход): текст ВСТРАИВАЕТСЯ в саму
+# генерацию, когда он реально нужен композиции — запрет остаётся условным (описан в
+# JSON-схеме через type_spec/text_mode ниже, конкретный exact-spelling блок собирает
+# build_prompt). Здесь только общее указание, что при НАЛИЧИИ текста он должен быть
+# частью художественной композиции, а не наклейкой.
+_RULE6_TEXT_IMAGE = (
+    "(6) ТИПОГРАФИКА — ЧАСТЬ ХУДОЖЕСТВЕННОЙ КОМПОЗИЦИИ. Если по твоему выбору (см. "
+    "поля text_mode/text_modes_v3/type_spec ниже) на принте есть текст — рисуй его "
+    "КАК ДЕТАЛЬ АРТА (стиль леттеринга/размещение/цвета — по стайлгайду, см. "
+    "type_spec), не как отдельно приклеенную табличку. Если ты решил, что тексту на "
+    "ЭТОМ принте не место (text_mode='none' И text_modes_v3=[]) — тогда явно запрети "
+    "буквы: no letters, no words, no typography, no lettering, no watermarks, no "
+    "signature. Собственно exact-spelling инструкцию и запрет прочего текста добавит "
+    "код отдельным блоком — в самом художественном промпте вставлять слова строкой в "
+    "кавычках НЕ нужно, только описывай стиль/размещение через type_spec. "
+)
+
+# ЦВЕТ ФОНА-ХРОМАКЕЯ — общий хвост правила (6), не зависит от TEXT_RENDER.
+_RULE6_TAIL = (
     "ЦВЕТ ФОНА-ХРОМАКЕЯ в сам художественный промпт НЕ включай (код добавит отдельным "
     "явным куском текста) — только опиши поля/пространство вокруг фигуры. "
 )
+
+
+def _common_rules() -> str:
+    """_COMMON_RULES_BASE + пункт (6), выбранный по config.TEXT_RENDER ('image' —
+    условный запрет + встроенная типографика, 'code' — старый безусловный запрет
+    букв). Функция, а не константа-строка — TEXT_RENDER читается на момент КАЖДОГО
+    вызова (важно для тестов, которые monkeypatch'ят config.TEXT_RENDER)."""
+    rule6 = _RULE6_TEXT_CODE if config.TEXT_RENDER == "code" else _RULE6_TEXT_IMAGE
+    return _COMMON_RULES_BASE + rule6 + _RULE6_TAIL
 
 # Общий кусок JSON-схемы про типографику — Claude сам решает, нужен ли текст на принте и
 # в каком виде, ПО КОМПОЗИЦИИ конкретного дизайна (не фиксированный стиль на все случаи).
@@ -120,8 +167,38 @@ def _signature_props_schema() -> str:
         "пустая строка \\\"\\\", если у персонажа/темы нет знакового предмета>\","
     )
 
-SYSTEM_CUTOUT = (
-    _COMMON_RULES +
+
+# type_spec (десятый заход, TEXT_RENDER=image) — англ. описание ВСТРОЕННОЙ типографики
+# по правилам стайлгайда (docs/PRINT_STYLE_GUIDE.md разделы 2-3): стиль леттеринга по
+# mood, размещение относительно фигуры, цвета СЛОВАМИ (не hex — генерация текста не
+# умеет точный hex, но понимает "deep purple"/"bone white" и т.п.), вертикальная
+# колонка кандзи name_jp, если есть. Пустая строка — тексту не место (эквивалент
+# text_mode=none/text_modes_v3=[]). build_prompt() оборачивает это в exact-spelling
+# инструкцию отдельно — здесь ТОЛЬКО стиль/размещение/цвета, без самих слов слогана.
+_TYPE_SPEC_SCHEMA = (
+    "\"type_spec\":\"<АНГЛИЙСКОЕ описание ВСТРОЕННОЙ типографики для этого дизайна, "
+    "СТИЛЬ по mood (docs/PRINT_STYLE_GUIDE.md раздел 2/4.2): mood='duotone_quote' -> "
+    "bold aggressive brush-graffiti lettering; mood='fashion_editorial' -> elegant "
+    "high-contrast serif display lettering (Playfair-style); mood='pop_trash' -> "
+    "gothic blackletter-style lettering; без mood/для простых тем -> крепкий street "
+    "capital леттеринг. ОПИШИ: (a) характер шрифта СЛОВАМИ (bold brush / elegant serif "
+    "/ gothic blackletter / street caps), (b) РАЗМЕЩЕНИЕ относительно фигуры (along "
+    "the bottom, tilted / behind the figure, huge scale / integrated near the chest, "
+    "как уместно композиции), (c) ЦВЕТА СЛОВАМИ из палитры СЦЕНЫ (напр. 'bright "
+    "blood-red with dark outline', НЕ hex-код — просто цвет тем же словом, что и в "
+    "остальном промпте). Если у персонажа есть name_jp — добавь фразу про "
+    "'a vertical column of Japanese calligraphy beside the figure'. ПУСТАЯ строка "
+    "\\\"\\\", если тексту на этом принте не место (эквивалент text_mode='none' И "
+    "text_modes_v3=[])>\","
+)
+
+
+def _build_system(fmt_body: str) -> str:
+    """_common_rules() (динамически по TEXT_RENDER) + тело формата (cutout/diecut)."""
+    return _common_rules() + fmt_body
+
+
+_CUTOUT_BODY = (
     "ФОРМАТ: cutout — просто персонаж крупным планом (в полный рост или динамичный "
     "поясной кадр) на чистом хромакей-фоне, БЕЗ декоративного обрамления и БЕЗ слогана "
     "в самой картинке. "
@@ -144,20 +221,19 @@ SYSTEM_CUTOUT = (
     "строка \\\"\\\", если character_en пустой или франшиза неизвестна>\","
     + _signature_props_schema() +
     _TEXT_MODE_SCHEMA +
-    _TEXT_MODE_V3_SCHEMA.rstrip(",") +
+    _TEXT_MODE_V3_SCHEMA +
+    _TYPE_SPEC_SCHEMA.rstrip(",") +
     "}. "
     "Отвечай СТРОГО JSON-массивом таких объектов, без markdown и пояснений."
 )
 
-SYSTEM_DIECUT = (
-    _COMMON_RULES +
+_DIECUT_BODY = (
     "ФОРМАТ: diecut — вырезной мерч-принт. Персонаж в полный рост, ПОЛНОСТЬЮ ОКРУЖЁННЫЙ "
     "стилизованным пламенем/энергией/аурой (цвет и характер эффекта — под тему персонажа: "
     "огонь, молнии, чакра, тёмная энергия и т.п.), эти эффекты плотно обрамляют фигуру со "
     "всех сторон и ОБРАЗУЮТ ВНЕШНИЙ СИЛУЭТ всей композиции (как форма постера/наклейки) — "
     "опиши это явно как часть сцены. Ниже персонажа и эффектов должно остаться пустое "
-    "пространство хромакей-фона для слогана (его наносит код после генерации, не рисуй "
-    "текст). "
+    "пространство хромакей-фона для слогана. "
     "Выдай N РАЗНЫХ дизайнов. Для КАЖДОГО верни JSON-объект: "
     "{\"prompt\":\"<готовый англ. промпт-проза целиком, без цвета фона>\","
     "\"chroma\":\"<green ИЛИ blue — green по умолчанию, blue если у персонажа/пламени есть "
@@ -177,12 +253,31 @@ SYSTEM_DIECUT = (
     "строка \\\"\\\", если character_en пустой или франшиза неизвестна>\","
     + _signature_props_schema() +
     _TEXT_MODE_SCHEMA +
-    _TEXT_MODE_V3_SCHEMA.rstrip(",") +
+    _TEXT_MODE_V3_SCHEMA +
+    _TYPE_SPEC_SCHEMA.rstrip(",") +
     "}. "
     "Отвечай СТРОГО JSON-массивом таких объектов, без markdown и пояснений."
 )
 
-_SYSTEMS = {"cutout": SYSTEM_CUTOUT, "diecut": SYSTEM_DIECUT}
+
+def system_cutout() -> str:
+    """SYSTEM_CUTOUT как функция — _common_rules() читает config.TEXT_RENDER на
+    момент КАЖДОГО вызова (важно для тестов, monkeypatch'ящих config.TEXT_RENDER)."""
+    return _build_system(_CUTOUT_BODY)
+
+
+def system_diecut() -> str:
+    """SYSTEM_DIECUT как функция — см. system_cutout()."""
+    return _build_system(_DIECUT_BODY)
+
+
+# SYSTEM_CUTOUT/SYSTEM_DIECUT — обратная совместимость (модули/тесты, читающие эти
+# константы напрямую): снимок на момент ИМПОРТА модуля (TEXT_RENDER из .env на старте
+# процесса). Живой путь (_ask_claude ниже) использует функции выше, не эти константы.
+SYSTEM_CUTOUT = system_cutout()
+SYSTEM_DIECUT = system_diecut()
+
+_SYSTEMS_FN = {"cutout": system_cutout, "diecut": system_diecut}
 
 
 def _ask_claude(theme: str, n: int, fmt: str) -> str:
@@ -191,11 +286,12 @@ def _ask_claude(theme: str, n: int, fmt: str) -> str:
             f"объектов {{\"prompt\":..., \"chroma\":..., \"slogan\":..., "
             f"\"slogan_color\":..., \"kana\":..., \"character_en\":..., \"title_en\":..., "
             f"\"signature_props\":..., \"text_mode\":..., \"text_modes_v3\":..., "
-            f"\"quote\":..., \"name_jp\":..., \"mood\":...}}.")
+            f"\"quote\":..., \"name_jp\":..., \"mood\":..., \"type_spec\":...}}.")
+    system_fn = _SYSTEMS_FN.get(fmt, system_cutout)
     resp = client.messages.create(
         model=MODEL,
         max_tokens=1500,
-        system=_SYSTEMS.get(fmt, SYSTEM_CUTOUT),
+        system=system_fn(),
         messages=[{"role": "user", "content": user}],
     )
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
@@ -203,7 +299,7 @@ def _ask_claude(theme: str, n: int, fmt: str) -> str:
 
 def make_ideas(theme: str, n: int, fmt: str = "cutout") -> list:
     """N дизайнов: список dict {prompt, chroma, slogan, slogan_color, kana, character_en,
-    title_en, signature_props, text_mode, text_modes_v3, quote, name_jp, mood}.
+    title_en, signature_props, text_mode, text_modes_v3, quote, name_jp, mood, type_spec}.
 
     НЕ откатываемся тихо на сырую тему при сбое парсинга JSON: 1 ретрай запроса,
     затем ЯВНАЯ ошибка (вызывающий код пропускает этот дизайн с сообщением).
@@ -338,12 +434,21 @@ def _parse(text: str) -> list:
         mood = str(x.get("mood") or "").strip().lower()
         mood = mood if mood in _MOODS else ""
 
+        # type_spec: англ. описание ВСТРОЕННОЙ типографики (TEXT_RENDER=image, десятый
+        # заход) — характер шрифта/размещение/цвета словами, БЕЗ самих слов слогана
+        # (build_prompt добавляет exact-spelling блок отдельно). Санация мягче, чем у
+        # slogan/quote (это описательная английская проза, не короткая фраза) — просто
+        # ограничение длины и запрет управляющих символов, до 400 симв. Дефолт "" —
+        # обратная совместимость со старым JSON без этого поля (build_prompt тогда не
+        # добавляет текст-блок вообще, как раньше).
+        type_spec = re.sub(r"[\r\n\t]+", " ", str(x.get("type_spec") or "")).strip()[:400]
+
         out.append({"prompt": prompt, "chroma": chroma,
                     "slogan": slogan, "slogan_color": scolor, "kana": kana,
                     "character_en": character_en, "title_en": title_en,
                     "signature_props": signature_props, "text_mode": text_mode,
                     "text_modes_v3": text_modes_v3, "quote": quote,
-                    "name_jp": name_jp, "mood": mood})
+                    "name_jp": name_jp, "mood": mood, "type_spec": type_spec})
     return out
 
 
@@ -362,13 +467,69 @@ def _chroma_bg(color: str) -> str:
             f"subject.")
 
 
+# Явный запрет любых букв в артворк — используется build_prompt, когда дизайну
+# текст НЕ нужен вовсе (design['type_spec'] пусто, эквивалент text_mode='none' +
+# text_modes_v3=[]), даже при TEXT_RENDER=image. Идентичен старому пункту (6)
+# _RULE6_TEXT_CODE — тот же список запретов, чтобы не рисовать случайные буквы, когда
+# ни один режим типографики не выбран.
+_NO_TEXT_TAIL = (
+    "No letters, no words, no typography, no lettering, no watermarks, no signature "
+    "anywhere in the artwork."
+)
+
+
+def _exact_spelling_phrase(design: dict) -> str:
+    """Какую фразу требовать exact-spelling в тексте-блоке (TEXT_RENDER=image):
+    приоритет 'quote' (типографика v3, quote_bottom/pop_trash-цитата — она обычно
+    длиннее и содержательнее), иначе 'slogan' (v2 путь). Пустая строка, если ни того,
+    ни другого нет — тогда текст-блок не собирается вовсе (см. build_prompt)."""
+    quote = str(design.get("quote") or "").strip()
+    if quote:
+        return quote
+    return str(design.get("slogan") or "").strip()
+
+
+def _text_render_block(design: dict) -> str:
+    """TEXT_RENDER=image: собирает блок промпта со ВСТРОЕННОЙ типографикой — точный
+    приём из эталонного A/B-промпта оркестратора (out_batch/ab_models/ab_models_text.py):
+    type_spec (стиль/размещение/цвета) + EXACT-SPELLING инструкция построчно с фразой
+    + 'No other text anywhere'. Возвращает пустую строку, если типографика этому
+    дизайну не нужна (design['type_spec'] пусто ИЛИ нет фразы для exact-spelling) —
+    вызывающий код (build_prompt) в этом случае добавляет _NO_TEXT_TAIL вместо этого."""
+    type_spec = str(design.get("type_spec") or "").strip()
+    phrase = _exact_spelling_phrase(design)
+    if not type_spec or not phrase:
+        return ""
+    name_jp = str(design.get("name_jp") or design.get("kana") or "").strip()
+    type_spec_sentence = type_spec if type_spec.endswith((".", "!", "?")) else type_spec + "."
+    parts = [
+        f"The design INCLUDES integrated typography as part of the artwork: "
+        f"{type_spec_sentence}",
+        f"Spell the phrase EXACTLY, letter by letter: {phrase}.",
+    ]
+    if name_jp:
+        parts.append(
+            f"Also include a vertical Japanese calligraphy column with the kanji "
+            f"{name_jp} placed beside the figure."
+        )
+    parts.append("No other text anywhere.")
+    return " ".join(parts)
+
+
 def build_prompt(design: dict) -> str:
     """Идея (dict из make_ideas) -> финальный промпт для generate_image.
 
     Если design['signature_props'] непусто — вставляется явное предложение, что
     фирменное оружие/атрибут персонажа должно совпадать с каноном ТОЧНО (форма/цвет/
     отделка), а не обобщаться до "a sword" — вставляется ПЕРЕД хромакей-хвостом, сразу
-    после художественного промпта, где Claude уже описал сцену."""
+    после художественного промпта, где Claude уже описал сцену.
+
+    TEXT_RENDER=image (десятый заход, дефолт): если у дизайна есть type_spec и фраза
+    для exact-spelling (quote ИЛИ slogan) — вставляется блок ВСТРОЕННОЙ типографики
+    (см. _text_render_block); иначе — старый безусловный запрет букв (_NO_TEXT_TAIL),
+    ровно как раньше, дизайну текст не нужен. TEXT_RENDER=code — ВСЕГДА запрет букв
+    (текст накладывается кодом typography.py/typography_v3.py после генерации, как в
+    девятом заходе и раньше) — text_mode/type_spec для самой генерации не участвуют."""
     parts = [design["prompt"]]
     signature_props = str(design.get("signature_props") or "").strip()
     if signature_props:
@@ -376,5 +537,12 @@ def build_prompt(design: dict) -> str:
             f"The character's signature weapon/prop must match canon exactly: "
             f"{signature_props}."
         )
+
+    if config.TEXT_RENDER == "image":
+        text_block = _text_render_block(design)
+        parts.append(text_block if text_block else _NO_TEXT_TAIL)
+    else:
+        parts.append(_NO_TEXT_TAIL)
+
     parts.append(_chroma_bg(design["chroma"]))
     return " ".join(parts)

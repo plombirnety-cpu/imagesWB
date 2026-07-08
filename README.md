@@ -97,6 +97,77 @@ gemini-2.5-flash-image принимает на вход не только тек
 QC-гейт границ кадра, ретраи, вырезка фона и типографика слогана работают одинаково
 и с референсом, и без — референс влияет только на сам вызов генерации картинки.
 
+## Текст в генерации (`.env: TEXT_RENDER`, десятый заход)
+
+**Проблема с кодовой типографикой**: до этого захода буквы ВСЕГДА рисовались кодом
+(`typography.py`/`typography_v3.py`) ПОСЛЕ генерации, потому что ранние поколения
+nano-banana (`gemini-2.5-flash-image`) рисовали текст с орфографическими ошибками
+или вообще не рисовали (см. грабля №3 ниже — теперь пересмотрена). A/B оркестратора
+(2026-07-08, `out_batch/ab_models/`, три модели на одном эталонном промпте с текстом)
+подтвердил: новые поколения (`gemini-3.1-flash-image` = Nano Banana 2) рисуют
+встроенный текст БЕЗ ошибок спеллинга и гармоничнее кодовой типографики — буквы
+органично ложатся на форму дизайна, а не приклеены поверх.
+
+**Решение — `.env: TEXT_RENDER` (дефолт `image`)**:
+
+| `TEXT_RENDER` | Что делает |
+|---|---|
+| `image` (ДЕФОЛТ) | Текст ВСТРАИВАЕТСЯ прямо в генерацию nano-banana. Систем-промпт арт-директора (`art_director.py`) вместо безусловного запрета букв требует ВСТРОЕННУЮ типографику через новое поле схемы `type_spec` (стиль леттеринга по `mood`/размещение относительно фигуры/цвета словами из палитры сцены — см. таблицу ниже), `build_prompt` добавляет EXACT-SPELLING инструкцию («Spell the phrase EXACTLY, letter by letter: \<фраза\>») + «No other text anywhere». После генерации `batch_print._verify_text` — OCR-контроль ДЕШЁВОЙ текстовой моделью `gemini-2.5-flash` (`providers.verify_text_in_image`) сверяет транскрипт с ожидаемой фразой; при провале — ретрай генерации (общий счётчик `attempts` с QC-гейтом границ), при исчерпании — ЧЕСТНЫЙ ОТКАТ: одна доп. генерация БЕЗ текст-блока + типографика КОДОМ (`typography_v3`/`typography`), как раньше. |
+| `code` | Старое поведение 1:1 (девятый заход и раньше) — текст ВСЕГДА запрещён в артворк (`no letters, no words, no typography...`), накладывается кодом `typography.py`/`typography_v3.py` после генерации. Остаётся рабочим фолбэком. |
+
+**Поле `type_spec`** (новое в JSON-схеме `art_director.py`, применяется только при
+`TEXT_RENDER=image`) — англ. описание стиля/размещения/цветов встроенной
+типографики, БЕЗ самих слов слогана (сама фраза берётся из `quote`/`slogan`):
+
+| `mood` | Стиль леттеринга в `type_spec` |
+|---|---|
+| `duotone_quote` | bold aggressive brush-graffiti lettering |
+| `fashion_editorial` | elegant high-contrast serif display lettering (Playfair-style) |
+| `pop_trash` | gothic blackletter-style lettering |
+| без `mood` / простые темы | крепкий street capital леттеринг |
+
+Пустой `type_spec` — эквивалент `text_mode='none'` и `text_modes_v3=[]`: дизайну
+текст не нужен, `build_prompt` вставляет старый безусловный запрет букв (правило
+«иногда текст не нужен» сохраняется буквально — арт-директор реально выбирает этот
+вариант в ~20-30% дизайнов, как и раньше).
+
+**Выбор exact-spelling фразы** (`art_director._exact_spelling_phrase`): приоритет
+`quote` (типографика v3, цитата обычно длиннее/содержательнее) над `slogan` (v2).
+Если есть `name_jp`/`kana` — текст-блок дополнительно просит вертикальную колонку
+японской каллиграфии рядом с фигурой (тот же приём, что эталонный A/B-промпт
+оркестратора).
+
+**Защита букв при вырезке** (`batch_print.drop_small_islands`, параметр
+`protect_text_islands`): встроенный текст у нижнего/бокового края диеката часто
+рисуется как ОТДЕЛЬНЫЕ альфа-острова (буквы/апостроф не касаются основного силуэта
+персонажа) — старый порог `min_frac` считался ОТ площади главного силуэта, из-за
+чего целые буквы могли попасть под удаление наравне с мусорными водяными знаками.
+При `protect_text_islands=True` (включается автоматически в `render_design`, когда
+`TEXT_RENDER=image` и текст реально ожидается и НЕ ушёл в code-фолбэк) остров НЕ
+удаляется, если его площадь `>= 0.04%` площади всего кадра — совсем крошечный
+шумовой остров (1-2px) по-прежнему срезается.
+
+**Когда кодовая типографика всё-таки применяется при `TEXT_RENDER=image`**:
+1. `text_fallback=True` — OCR-контроль не сошёлся за все попытки (см. таблицу выше).
+2. У дизайна вообще нет `type_spec` (тексту не место) — `typography_v3`/`typography`
+   в этом случае тоже ничего не рисуют (`text_mode='none'`/`text_modes_v3=[]`), но
+   технически путь остаётся «кодовым» на случай воспроизведения старых дампов через
+   `reprocess_typo.py` (design.json без `type_spec` — обратная совместимость).
+
+Если текст встроен генерацией И подтверждён OCR — код НЕ накладывает НИЧЕГО поверх
+вырезки, диекат = вырезка «как есть» (`chroma_remove.cutout_green` +
+`drop_small_islands` + `juice`).
+
+**Модель** (`.env: GEMINI_MODEL`, дефолт `gemini-3.1-flash-image` = Nano Banana 2) —
+переключено вместе с `TEXT_RENDER` по итогам A/B: заметно лучше и текст, и общая
+гармоничность композиции при той же цене, что `gemini-2.5-flash-image`.
+`GEMINI_MODEL_PREMIUM` (дефолт `gemini-3-pro-image`, Nano Banana Pro) — задел на
+будущее, `providers.generate_image`/`_generate_gemini` принимают параметр `model`
+для точечного переключения на премиум, использование НЕ обязательно в этом заходе
+(боевой путь идёт через `GEMINI_MODEL`). `COST_PER_IMAGE_USD["gemini"]` оставлена
+`$0.04` без изменений — уточнить по факту биллинга NB2, официальный прайсинг под
+рукой не было на момент переключения.
+
 ## Типографика v2 — текст КАК ЧАСТЬ КОМПОЗИЦИИ (`typography.compose_text`)
 
 **Проблема**: типографика v1 (5 стилей — см. раздел ниже) ужимала слоган в отдельную
@@ -418,10 +489,18 @@ schtasks /delete /tn "PrintFactoryNB-Daily" /f
 реализациями:
 
 - **gemini** (ДЕФОЛТ — дешевле Pollinations в 3.5 раза, важно на объёме 500/день) —
-  напрямую Google Gemini API, модель `gemini-2.5-flash-image` (она же nano-banana),
-  ключ `GEMINI_API_KEY`, обычный `requests.POST` без SDK.
+  напрямую Google Gemini API, модель `.env: GEMINI_MODEL` (дефолт
+  `gemini-3.1-flash-image` = Nano Banana 2, она же nano-banana), ключ
+  `GEMINI_API_KEY`, обычный `requests.POST` без SDK. `generate_image`/
+  `_generate_gemini` принимают опциональный `model` для точечного override
+  (задел на `GEMINI_MODEL_PREMIUM` = `gemini-3-pro-image`, Nano Banana Pro).
 - **pollinations** — модель `nanobanana` через `gen.pollinations.ai`, токен
   `POLLINATIONS_TOKEN`.
+
+`providers.verify_text_in_image(image)` — ОТДЕЛЬНАЯ дешёвая точка входа (модель
+`gemini-2.5-flash`, текстовая, НЕ image) для OCR-контроля спеллинга встроенного
+текста (`TEXT_RENDER=image`, см. раздел «Текст в генерации» выше) —
+`batch_print._verify_text` её вызывает после каждой генерации.
 
 Переключение — одна строка в `.env`:
 ```
@@ -436,9 +515,17 @@ IMAGE_PROVIDER=gemini   # или pollinations
    (регистронезависимо) — хромакей принудительно `blue`, даже если Claude выбрал green
    (`art_director._parse`). `ongreen`-версия всё равно кладётся кодом на RGB(0,177,64)
    независимо от того, какой хромакей был при генерации.
-3. Текст на принте — только кодом через `typography.py` (v2: `compose_text`, дефолт
-   `--text-style auto`; v1: `apply_style`, вручную через явный `--text-style`); в
-   промпт картинки — явный запрет любых букв/леттеринга/вотермарков.
+3. **(УСТАРЕЛО для NB>=2, см. раздел «Текст в генерации» выше)** Изначально считалось,
+   что текст на принте можно наносить ТОЛЬКО кодом (`typography.py`) — ранние
+   поколения nano-banana (`gemini-2.5-flash-image`) рисовали буквы с ошибками
+   спеллинга или не рисовали вовсе, поэтому промпт картинки безусловно запрещал
+   любые буквы/леттеринг/вотермарки. С `gemini-3.1-flash-image` (Nano Banana 2,
+   десятый заход, `.env: TEXT_RENDER=image`, дефолт) это правило БОЛЬШЕ НЕ ВЕРНО —
+   модель рисует встроенный текст без ошибок и гармоничнее кодовой типографики, OCR-
+   контроль (`batch_print._verify_text`) подтверждает спеллинг после каждой
+   генерации. Кодовый путь (`typography.py`/`typography_v3.py`, `TEXT_RENDER=code`)
+   ОСТАЁТСЯ рабочим фолбэком — автоматически включается при провале OCR-контроля за
+   все попытки, а также остаётся ручным режимом переключения через `.env`.
 4. Слоган = каноничная коронная фраза персонажа (для не-персонажных тем — уместная
    короткая фраза), плюс `kana` — имя катаканой для стиля `kana`.
 5. QC-гейт границ кадра (`_border_chroma_coverage` в `batch_print.py`): рамка 1% кадра
@@ -562,6 +649,9 @@ print-factory-nb/
 | `TMDB_API_KEY` | нет | используется `franchise_scout.py::_tmdb_credits` (каст неаниме-франшиз) и `trend-watch/pop_watch.py` (источник `tmdb` в pop-ленте) — тот же ключ, без него оба места пропускают TMDB-сигнал |
 | `FRANCHISE_DEEP_N` | да (есть дефолт 3) | для скольких самых высокоскоровых аниме-тайтлов дня `theme_scout.py` запускает глубокое досье `franchise_scout.build_dossier` перед вызовом тематизатора |
 | `BRAND_LABEL` | да (есть дефолт `"ANICLOT COLLECTION"`) | бренд-лейбл подвала-этикетки типографики v3 (`typography_v3.compose_text_v3`, режим `collection_footer`) |
+| `TEXT_RENDER` | да (есть дефолт `image`) | `image` — текст встраивается ПРЯМО в генерацию nano-banana (см. раздел «Текст в генерации» выше), `code` — текст всегда накладывается кодом (`typography.py`/`typography_v3.py`), фолбэк-режим |
+| `GEMINI_MODEL` | да (есть дефолт `gemini-3.1-flash-image`) | модель Gemini (nano-banana), переключена на Nano Banana 2 по итогам A/B оркестратора |
+| `GEMINI_MODEL_PREMIUM` | да (есть дефолт `gemini-3-pro-image`) | Nano Banana Pro — задел на будущее, `providers.generate_image(model=...)` принимает переопределение, использование не обязательно в этом заходе |
 
 ## Откуда что взято
 
@@ -592,7 +682,15 @@ print-factory-nb/
   (2а в `_COMMON_RULES`) — точный японский/каноничный термин (katana/nodachi/
   zanpakuto/naginata и т.п.), не обобщённый "sword"/"blade"; для Кенпачи Зараки
   эталонный термин — изношенная КАТАНА-ДЗАНПАКТО (zanpakuto) с зазубренной кромкой,
-  не тесак и не обобщённый "nodachi".
+  не тесак и не обобщённый "nodachi". Поле `type_spec` — новое (десятый заход, см.
+  раздел «Текст в генерации»), `_COMMON_RULES` разбит на `_COMMON_RULES_BASE` +
+  условный пункт (6) по `config.TEXT_RENDER` (`_common_rules()` — функция, не
+  константа, читает `TEXT_RENDER` на момент каждого вызова, важно для тестов);
+  `SYSTEM_CUTOUT`/`SYSTEM_DIECUT` остались константами (снимок на импорте, обратная
+  совместимость), живой путь `_ask_claude` использует новые `system_cutout()`/
+  `system_diecut()`. `build_prompt` — эталонный A/B-промпт оркестратора
+  (`out_batch/ab_models/ab_models_text.py`) послужил образцом формата text-блока
+  (exact-spelling построчно + запрет прочего текста).
 - `typography_v3.py` — новый файл (восьмой+ заход), не перенесён ниоткуда.
   Импортирует низкоуровневые примитивы `typography.py` (`_font`, `_measure`,
   `_draw_spaced`, `_hard_shadow_text`, `_alpha_bbox`, `_crop_to_content`) напрямую —
@@ -615,6 +713,15 @@ print-factory-nb/
   не `Media.characters`), т.к. нужен один персонаж по имени, а не ростер тайтла.
 - `generator.py` (market-content-bot) — источник паттерна вызова Pollinations
   (`gen.pollinations.ai`, Bearer-токен, перебор с ретраями) и стиля письма прозой.
+- `batch_print.py`/`providers.py` (десятый заход, TEXT_RENDER=image) — новый код, не
+  перенесён ниоткуда. `providers.verify_text_in_image` (OCR-модель `gemini-2.5-flash`)
+  и `batch_print._verify_text`/`_normalize_for_compare`/`_expected_text_phrases` —
+  собственная реализация по требованиям задачи лида (транскрипция + нормализация +
+  substring-сравнение), формат текст-блока `build_prompt` сверен построчно с
+  эталонным A/B-скриптом оркестратора (`out_batch/ab_models/ab_models_text.py`).
+  `drop_small_islands(protect_text_islands=...)` — точечное расширение существующей
+  функции (перенесённой из `comfyui-print-server/batch_print.py` в приёмке MVP),
+  сама логика защиты островов новая.
 - `theme_scout.py` — источник данных (CSV-формат, парсеры) — `trend-watch/media_watch.py`
   и `anime_watch.py` (запускаются subprocess'ом, сам `trend-watch/` не изменён).
 - `franchise_scout.py` — эндпоинты и паттерны обработки ошибок (429/Retry-After,

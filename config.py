@@ -32,8 +32,24 @@ IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "gemini").strip().lower()
 # Модель Pollinations под nano-banana.
 POLLINATIONS_MODEL = os.getenv("POLLINATIONS_MODEL", "nanobanana")
 
-# Модель Gemini (nano-banana напрямую).
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-image")
+# Модель Gemini (nano-banana напрямую) — дефолт gemini-3.1-flash-image (Nano Banana 2):
+# A/B оркестратора (2026-07-08, out_batch/ab_models/) подтвердил заметно лучшее
+# качество текста ВСТРОЕННОГО в артworк и общую гармоничность композиции против
+# gemini-2.5-flash-image при той же цене — см. TEXT_RENDER ниже.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-image")
+
+# Премиум-модель Gemini (Nano Banana Pro) — задел на будущее, providers.generate_image
+# принимает параметр model, использование премиума НЕ обязательно в этом заходе (пока
+# просто доступный конфиг, боевой путь по умолчанию идёт через GEMINI_MODEL выше).
+GEMINI_MODEL_PREMIUM = os.getenv("GEMINI_MODEL_PREMIUM", "gemini-3-pro-image")
+
+# image — ВСТРОЕННЫЙ текст на самой генерации (nano-banana >= NB2 рисует буквы без
+# ошибок и органичнее кодовой типографики, art_director просит exact-spelling блок
+# вместо запрета букв, batch_print НЕ накладывает typography_v3/typography кодом) |
+# code — старый путь: генерация БЕЗ текста, типографика накладывается кодом
+# (typography_v3.compose_text_v3 / typography.compose_text) — остаётся фолбэком на
+# случай провала OCR-контроля спеллинга (см. batch_print._verify_text).
+TEXT_RENDER = os.getenv("TEXT_RENDER", "image").strip().lower()
 
 IMG_SIZE = int(os.getenv("IMG_SIZE", "1536"))
 
@@ -54,7 +70,9 @@ MAX_DAILY_COST_USD = float(os.getenv("MAX_DAILY_COST_USD", "50"))
 
 # Ориентировочная цена ОДНОЙ успешной генерации по провайдерам (USD/шт, включая типовой
 # QC-ретрай) — для сметы дня в daily_prints.py. Не биллинговая точность, а плановая
-# оценка для предохранителя.
+# оценка для предохранителя. gemini: оценка ПЕРЕНЕСЕНА без изменений с gemini-2.5-
+# flash-image на gemini-3.1-flash-image (Nano Banana 2) — уточнить по факту биллинга
+# NB2, официальный прайсинг на момент переключения (2026-07-08) под рукой не было.
 COST_PER_IMAGE_USD = {"gemini": 0.04, "pollinations": 0.14}
 
 # Для скольких САМЫХ высокоскоровых аниме-тайтлов дня (из pop:anilist/pop:jikan групп

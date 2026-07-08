@@ -96,21 +96,110 @@ def juice(rgba: Image.Image) -> Image.Image:
     return out
 
 
-def drop_small_islands(rgba: Image.Image, min_frac: float = 0.002) -> Image.Image:
+# Доля площади КАДРА (не главного силуэта), при которой остров ЗАЩИЩЁН от удаления
+# при protect_text_islands=True — буквы встроенного текста (TEXT_RENDER=image) у
+# нижнего/бокового края фигуры часто рисуются как ОТДЕЛЬНЫЕ альфа-острова (не
+# касаются основного силуэта персонажа), включая совсем мелкие (апостроф, точка,
+# тонкая засечка) — старый порог min_frac считался ОТ areas.max() (главного силуэта),
+# из-за чего целые буквы могли попасть под удаление как "мусор". 0.04% кадра —
+# калибровка из задачи лида.
+_TEXT_ISLAND_PROTECT_FRAC = 0.0004
+
+
+def drop_small_islands(rgba: Image.Image, min_frac: float = 0.002,
+                        protect_text_islands: bool = False) -> Image.Image:
     """Убрать мусорные острова после хромакей-вырезки (водяные знаки, крапинки по
     углам) — остаётся главный силуэт и всё крупнее min_frac от него. Перенесено
-    дословно из comfyui-print-server/batch_print.py."""
+    дословно из comfyui-print-server/batch_print.py.
+
+    protect_text_islands (десятый заход, TEXT_RENDER=image): когда встроенный текст
+    ожидается на диекате, буквы у края фигуры могут лежать ОТДЕЛЬНЫМИ альфа-островами
+    (не связаны с основным силуэтом) — при True остров НЕ удаляется, если его площадь
+    >= _TEXT_ISLAND_PROTECT_FRAC ДОЛИ ВСЕГО КАДРА (не areas.max(), в отличие от
+    обычного min_frac-порога), даже если по обычному критерию (< areas.max()*min_frac)
+    он попал бы под удаление — иначе целые буквы/апостроф могли попасть под удаление
+    как "мусорный остров" наравне с водяными знаками."""
     a = np.array(rgba.getchannel("A"))
     n, labels, stats, _ = cv2.connectedComponentsWithStats((a > 0).astype(np.uint8), 8)
     if n <= 2:
         return rgba
     areas = stats[1:, cv2.CC_STAT_AREA]
-    kill = [i + 1 for i, ar in enumerate(areas) if ar < areas.max() * min_frac]
+    frame_area = a.shape[0] * a.shape[1]
+    protect_px = frame_area * _TEXT_ISLAND_PROTECT_FRAC
+
+    def _should_kill(area_px: int) -> bool:
+        if area_px >= areas.max() * min_frac:
+            return False
+        if protect_text_islands and area_px >= protect_px:
+            return False
+        return True
+
+    kill = [i + 1 for i, ar in enumerate(areas) if _should_kill(ar)]
     if not kill:
         return rgba
     a[np.isin(labels, kill)] = 0
     out = rgba.copy()
     out.putalpha(Image.fromarray(a))
+    return out
+
+
+# ── OCR-контроль спеллинга (TEXT_RENDER=image, десятый заход) ───────────────────
+
+def _normalize_for_compare(text: str) -> str:
+    """Нормализация для сравнения OCR-транскрипта с ожидаемой фразой: верхний регистр,
+    убрать пунктуацию/апострофы/переводы строк, схлопнуть повторные пробелы. Кандзи/
+    катакана сравниваются КАК ЕСТЬ (regex ниже не трогает диапазон CJK/катакана —
+    только убирает ASCII-пунктуацию и whitespace, не буквы любого алфавита)."""
+    import re as _re
+    text = text.upper()
+    text = _re.sub(r"[\r\n\t]+", " ", text)
+    # Убираем пунктуацию/апострофы (ASCII), но НЕ буквы/цифры/CJK/катакану/пробелы.
+    text = _re.sub(r"[^\w\s]", "", text, flags=_re.UNICODE)
+    text = _re.sub(r"_", "", text)  # \w включает "_", слоганы его не содержат
+    text = _re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _verify_text(image: Image.Image, expected_phrases: list) -> bool:
+    """OCR-контроль спеллинга (TEXT_RENDER=image): дешёвая текстовая модель Gemini
+    (providers.verify_text_in_image) транскрибирует ВЕСЬ текст на картинке, нормализует
+    и сверяет — КАЖДАЯ непустая фраза из expected_phrases должна ВХОДИТЬ в транскрипт
+    (нормализованное substring-вхождение). expected_phrases без непустых элементов ->
+    True (нечего проверять, деградация не нужна). Любой сбой самого OCR-вызова
+    (сеть/HTTP/нет ключа) -> False (трактуем как непройденную проверку — не блокируем
+    ретрай/фолбэк, лучше лишний раз перегенерировать/откатиться на код, чем молча
+    выпустить принт с потенциально неверным текстом)."""
+    phrases = [p for p in (expected_phrases or []) if str(p or "").strip()]
+    if not phrases:
+        return True
+    try:
+        transcript = providers.verify_text_in_image(image)
+    except Exception as e:  # noqa: BLE001
+        print(f"  !! OCR-контроль спеллинга упал: {e}", flush=True)
+        return False
+    norm_transcript = _normalize_for_compare(transcript)
+    ok = all(_normalize_for_compare(p) in norm_transcript for p in phrases)
+    if not ok:
+        print(f"  OCR-контроль: транскрипт={transcript!r} НЕ содержит все ожидаемые "
+              f"фразы {phrases!r}", flush=True)
+    return ok
+
+
+def _expected_text_phrases(design: dict) -> list:
+    """Какие фразы ДОЛЖНЫ появиться на картинке при TEXT_RENDER=image (для OCR-
+    контроля) — та же логика выбора, что art_director._exact_spelling_phrase (quote
+    приоритетнее slogan), плюс name_jp/kana отдельным элементом (кандзи-колонка).
+    Пустой список — тексту на этом дизайне не место (type_spec пуст), OCR не нужен."""
+    type_spec = str(design.get("type_spec") or "").strip()
+    if not type_spec:
+        return []
+    quote = str(design.get("quote") or "").strip()
+    slogan = str(design.get("slogan") or "").strip()
+    phrase = quote or slogan
+    out = [p for p in (phrase,) if p]
+    name_jp = str(design.get("name_jp") or design.get("kana") or "").strip()
+    if name_jp:
+        out.append(name_jp)
     return out
 
 
@@ -137,8 +226,12 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     text_mode (обратная совместимость v1).
 
     Возвращает {"ok": bool, "attempts": int, "coverage": float, "error": str|None,
-    "raw": path|None, "diecut": path|None, "ongreen": path|None, "design_json": path}
-    — attempts нужен вызывающему коду для точного учёта стоимости (QC-ретраи считаются)."""
+    "raw": path|None, "diecut": path|None, "ongreen": path|None, "design_json": path,
+    "text_fallback": bool} — attempts нужен вызывающему коду для точного учёта
+    стоимости (QC-ретраи И OCR-ретраи спеллинга считаются в один общий счётчик).
+    text_fallback=True — TEXT_RENDER=image не сошёлся по OCR-контролю спеллинга за
+    все попытки, финальная картинка сгенерирована БЕЗ встроенного текста и текст
+    наложен кодовой типографикой (см. раздел «Текст в генерации» в README)."""
     p = log_prefix or f"[{tag}]"
     design_json_path = outdir / f"{tag}_design.json"
     design_json_path.write_text(
@@ -146,7 +239,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
 
     result = {"ok": False, "attempts": 0, "coverage": 0.0, "error": None,
               "raw": None, "diecut": None, "ongreen": None,
-              "design_json": str(design_json_path)}
+              "design_json": str(design_json_path), "text_fallback": False}
 
     prompt = art_director.build_prompt(design)
     seed = random.randint(0, 2**31 - 1)
@@ -172,9 +265,21 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             print(f"{p} референс для {character_en!r} не найден — генерация по тексту, "
                   f"как раньше", flush=True)
 
-    # QC-гейт границ кадра: до timeout_retries доп. попыток генерации (итого максимум
-    # 1+timeout_retries попыток), берём попытку с максимальным coverage рамки хромакеем.
+    # TEXT_RENDER=image (десятый заход): встроенная типографика ожидает конкретные
+    # фразы на картинке — OCR-контроль спеллинга (_verify_text) проверяет каждую
+    # попытку в ТОМ ЖЕ цикле, что QC-гейт границ. Если design не просит текст
+    # (type_spec пуст) — expected_phrases пуст, OCR всегда True (нечего проверять).
+    text_render_image = config.TEXT_RENDER == "image"
+    expected_phrases = _expected_text_phrases(design) if text_render_image else []
+
+    # QC-гейт границ кадра + OCR-контроль спеллинга: до timeout_retries доп. попыток
+    # генерации (итого максимум 1+timeout_retries попыток), берём попытку с
+    # максимальным coverage рамки хромакеем СРЕДИ попыток, прошедших OCR (если
+    # expected_phrases непуст) — попытка с провальным OCR не выбирается лучшей, пока
+    # есть хоть одна прошедшая; если НИ ОДНА не прошла OCR — берём лучшую по coverage
+    # как есть (сработает text-fallback ниже).
     best_img, best_cov, best_seed = None, -1.0, seed
+    best_img_ocr_ok, best_cov_ocr_ok = None, -1.0
     attempts_used = 0
     for attempt in range(1 + timeout_retries):
         try_seed = seed + 101 * attempt
@@ -191,10 +296,28 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         print(f"{p} border coverage={cov:.2f}", flush=True)
         if cov > best_cov:
             best_img, best_cov, best_seed = attempt_img, cov, try_seed
-        if cov >= 0.90:
+
+        ocr_ok = True
+        if expected_phrases:
+            # OCR-вызов — отдельный факт, НЕ платный image-вызов; НЕ увеличивает
+            # attempts_used (тот считает именно image-генерации для сметы
+            # daily_prints/COST_PER_IMAGE_USD, OCR копеечный текстовый вызов
+            # gemini-2.5-flash) — сам факт вызова залогирован print()'ом ниже.
+            ocr_ok = _verify_text(attempt_img, expected_phrases)
+            print(f"{p} OCR-контроль спеллинга: {'OK' if ocr_ok else 'провал'} "
+                  f"(факт вызова залогирован)", flush=True)
+        if ocr_ok and cov > best_cov_ocr_ok:
+            best_img_ocr_ok, best_cov_ocr_ok = attempt_img, cov
+
+        if cov >= 0.90 and ocr_ok:
             break
         if attempt < timeout_retries:
-            print(f"{p} coverage {cov:.2f} < 0.90 -> retry", flush=True)
+            reason = []
+            if cov < 0.90:
+                reason.append(f"coverage {cov:.2f} < 0.90")
+            if not ocr_ok:
+                reason.append("OCR не сошёлся")
+            print(f"{p} {' и '.join(reason)} -> retry", flush=True)
 
     result["attempts"] = attempts_used
     result["coverage"] = best_cov
@@ -203,18 +326,72 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         print(f"{p} !! ни одна попытка не дала картинку — пропуск", flush=True)
         result["error"] = result["error"] or "нет изображения ни на одной попытке"
         return result
+
+    # Выбор финального изображения + решение про text-fallback.
+    text_fallback = False
+    if expected_phrases and best_img_ocr_ok is not None:
+        # Хотя бы одна попытка прошла OCR — используем ЛУЧШУЮ ИЗ НИХ (не просто лучшую
+        # по coverage, чтобы не выпустить принт с неверным спеллингом ради чуть более
+        # ровной рамки).
+        raw_img, best_cov = best_img_ocr_ok, best_cov_ocr_ok
+    elif expected_phrases:
+        # НИ ОДНА попытка не прошла OCR за все timeout_retries+1 генераций — честный
+        # откат: одна ДОПОЛНИТЕЛЬНАЯ генерация БЕЗ текст-блока (design с пустым
+        # type_spec/quote -> art_director.build_prompt добавит обычный запрет букв),
+        # текст наносится кодовой типографикой (typography_v3/typography) ниже, как
+        # раньше при TEXT_RENDER=code.
+        print(f"{p} !! текст в генерации не сошёлся за {attempts_used} попыток "
+              f"(OCR) — откат на кодовый путь (доп. генерация БЕЗ текст-блока)",
+              flush=True)
+        fallback_design = dict(design)
+        fallback_design["type_spec"] = ""
+        fallback_prompt = art_director.build_prompt(fallback_design)
+        fb_seed = seed + 101 * (1 + timeout_retries)
+        try:
+            attempts_used += 1
+            fb_img = providers.generate_image(fallback_prompt, seed=fb_seed,
+                                              reference=reference)
+            fb_cov = _border_chroma_coverage(fb_img)
+            print(f"{p} фолбэк-генерация (без текста) border coverage={fb_cov:.2f}",
+                  flush=True)
+            raw_img, best_cov = fb_img, fb_cov
+            text_fallback = True
+        except Exception as e:  # noqa: BLE001
+            print(f"{p} !! фолбэк-генерация тоже упала: {e} — используем лучшую "
+                  f"попытку по coverage как есть (спеллинг НЕ подтверждён)", flush=True)
+            raw_img = best_img
+    else:
+        raw_img = best_img
+
+    result["attempts"] = attempts_used
+    result["coverage"] = best_cov
+    result["text_fallback"] = text_fallback
     if best_cov < 0.90:
         print(f"{p} !! warning: лучшая попытка coverage={best_cov:.2f} < 0.90, "
               f"используем её (seed={best_seed})", flush=True)
 
-    raw_img = best_img
     raw_path = outdir / f"{tag}_raw.png"
     raw_img.save(raw_path)
     result["raw"] = str(raw_path)
 
+    # code_typography: применять ли typography.py/typography_v3.py ПОВЕРХ вырезки.
+    # TEXT_RENDER=code — всегда (старое поведение). TEXT_RENDER=image — только если
+    # text_fallback сработал (встроенный текст не подтверждён, откатились на код) ИЛИ
+    # у дизайна вообще не было текст-блока для встраивания (expected_phrases пуст, но
+    # design может ВСЁ РАВНО просить typography_v3/typography — например старый дамп
+    # design.json без type_spec, воспроизводимый через reprocess_typo.py). Если текст
+    # встроен и OCR подтвердил (не text_fallback, expected_phrases непуст) — код НЕ
+    # накладывает ничего поверх, диекат = вырезка как есть.
+    apply_code_typography = (not text_render_image) or text_fallback or not expected_phrases
+
     try:
         cut = chroma_remove.cutout_green(raw_img, tol=52.0).convert("RGBA")
-        cut = drop_small_islands(cut)
+        # protect_text_islands: при TEXT_RENDER=image и реально ожидаемом встроенном
+        # тексте (expected_phrases непуст И текст НЕ ушёл в фолбэк) буквы у края
+        # фигуры могут лежать отдельными альфа-островами — не срезать их наравне с
+        # мусором водяных знаков (см. drop_small_islands/_TEXT_ISLAND_PROTECT_FRAC).
+        protect_islands = text_render_image and bool(expected_phrases) and not text_fallback
+        cut = drop_small_islands(cut, protect_text_islands=protect_islands)
         if not no_juice:
             cut = juice(cut)
 
@@ -222,7 +399,11 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         slogan_color = design.get("slogan_color", "orange")
         kana = design.get("kana", "")
 
-        if text_style == "auto":
+        if not apply_code_typography:
+            # TEXT_RENDER=image, текст встроен генерацией и подтверждён OCR — диекат
+            # = вырезка как есть, кодовая типографика НЕ накладывается поверх.
+            final = cut
+        elif text_style == "auto":
             text_modes_v3 = design.get("text_modes_v3") or []
             if text_modes_v3:
                 # Типографика v3 (docs/PRINT_STYLE_GUIDE.md): режимы решает Claude
@@ -262,7 +443,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         result["ongreen"] = str(ongreen_path)
 
         print(f"{p} ok -> {raw_path.name} + diecut.png + ongreen.png "
-              f"(slogan={slogan!r})", flush=True)
+              f"(slogan={slogan!r}, text_fallback={text_fallback})", flush=True)
         result["ok"] = True
         return result
     except Exception as e:  # noqa: BLE001
