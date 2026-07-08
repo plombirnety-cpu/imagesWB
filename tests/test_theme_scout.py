@@ -14,6 +14,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import anthropic  # noqa: E402
+import httpx  # noqa: E402
+
 import theme_scout as ts  # noqa: E402
 
 
@@ -112,8 +115,11 @@ def test_build_daily_plan_small_target_includes_pop_sources(monkeypatch):
         [{"lemma": "anilist-topic", "score": 95.0, "example_text": "", "sources": "anilist"}],
         [],
     ))
+    # franchise_scout: не дёргаем сеть в этом тесте (не про досье) — досье пусто.
+    monkeypatch.setattr(ts, "_collect_dossiers", lambda titles: {})
 
-    def _fake_ask_and_parse(media_rows, anime_rows, target_n, pop_rows=None, pop_is_anime=False):
+    def _fake_ask_and_parse(media_rows, anime_rows, target_n, pop_rows=None,
+                             pop_is_anime=False, dossiers=None):
         if pop_rows:
             # Симулируем реальность: тематизатор возвращает МЕНЬШЕ заданий по
             # pop-блоку, чем по общему блоку media+anime (типичный дисбаланс,
@@ -134,3 +140,56 @@ def test_build_daily_plan_small_target_includes_pop_sources(monkeypatch):
         f"trend:pop:anilist отсутствует в плане из {len(plan)} заданий: {plan}"
     )
     assert "trend" in sources_in_plan
+
+
+# ------------------------------------------------------------- graceful degradation Claude API
+def test_ask_claude_scout_api_failure_returns_empty_string_not_raises(monkeypatch):
+    """РЕГРЕССИЯ (найдено тестировщиком на реальном прогоне: анth.BadRequestError
+    из-за исчерпанного баланса Anthropic уронил daily_prints.py необработанным
+    traceback). _ask_claude_scout обязан ловить anthropic.APIError вокруг самого
+    client.messages.create и возвращать "" (тот же сигнал, что невалидный JSON),
+    а НЕ пробрасывать исключение наружу — иначе весь дневной контур падает вместо
+    graceful degradation, заявленной для остальных источников."""
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    class _FailingMessages:
+        def create(self, **kwargs):
+            raise anthropic.APIConnectionError(request=req)
+
+    class _FailingClient:
+        def __init__(self, api_key):
+            self.messages = _FailingMessages()
+
+    monkeypatch.setattr(ts.anthropic, "Anthropic", _FailingClient)
+
+    text = ts._ask_claude_scout([{"lemma": "x", "score": 1.0, "example_text": ""}], [],
+                                 target_n=10)
+    assert text == ""
+
+
+def test_ask_and_parse_with_retry_survives_claude_api_failure_end_to_end(monkeypatch):
+    """Сквозная регрессия ЧЕРЕЗ настоящий _ask_claude_scout (не подменённый), только
+    anthropic.Anthropic мокается на клиент, который дважды подряд бросает
+    APIConnectionError (как реальный сбой баланса/сети/rate-limit). Ожидание:
+    _ask_and_parse_with_retry не поднимает исключение наружу — ретраит один раз (тот
+    же путь, что и сбой парсинга JSON) и возвращает пустой список при двойном сбое,
+    вместо необработанного traceback, который раньше валил daily_prints.py целиком."""
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    calls = {"n": 0}
+
+    class _FailingMessages:
+        def create(self, **kwargs):
+            calls["n"] += 1
+            raise anthropic.APIConnectionError(request=req)
+
+    class _FailingClient:
+        def __init__(self, api_key):
+            self.messages = _FailingMessages()
+
+    monkeypatch.setattr(ts.anthropic, "Anthropic", _FailingClient)
+
+    tasks = ts._ask_and_parse_with_retry(
+        [{"lemma": "x", "score": 1.0, "example_text": ""}], [], target_n=10)
+
+    assert tasks is None or tasks == []
+    assert calls["n"] == 2, "ожидался ровно 1 ретрай (2 попытки), как при сбое парсинга"

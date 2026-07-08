@@ -10,6 +10,11 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 POLLINATIONS_TOKEN = os.getenv("POLLINATIONS_TOKEN", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+# Ключи franchise_scout.py (досье франшизы) — опциональны, каждый источник без
+# своего ключа просто пропускается (graceful degradation), см. franchise_scout.py.
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
+
 # Модель Claude для арт-директора (идея + промпт + слоган + kana).
 MODEL = os.getenv("MODEL", "claude-sonnet-4-6")
 
@@ -44,3 +49,10 @@ MAX_DAILY_COST_USD = float(os.getenv("MAX_DAILY_COST_USD", "50"))
 # QC-ретрай) — для сметы дня в daily_prints.py. Не биллинговая точность, а плановая
 # оценка для предохранителя.
 COST_PER_IMAGE_USD = {"gemini": 0.04, "pollinations": 0.14}
+
+# Для скольких САМЫХ высокоскоровых аниме-тайтлов дня (из pop:anilist/pop:jikan групп
+# и аниме-трендов) theme_scout.py запускает глубокое досье franchise_scout.build_dossier
+# перед вызовом тематизатора. Каждое досье с реальным YouTube-сигналом стоит ~101 юнит
+# квоты YouTube (100 search.list + 1 videos.list) — при дефолте 3 это ~303 юнита/день
+# из бесплатных 10000/сутки, с большим запасом.
+FRANCHISE_DEEP_N = int(os.getenv("FRANCHISE_DEEP_N", "3"))

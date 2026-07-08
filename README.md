@@ -126,6 +126,67 @@ python theme_scout.py --skip-collect          # без перезапуска п
 пропускает источник `youtube` (graceful degradation — остальные источники pop-ленты и
 весь остальной контур работают как обычно).
 
+### franchise_scout.py — «вскрытие франшизы» (измеренная популярность персонажей)
+
+**Зачем**: Claude по своим знаниям не в курсе, кто из героев СВЕЖЕГО тайтла реально
+выстрелил у фанатов ПРЯМО СЕЙЧАС — классический пример: в Re:Zero формально главная
+героиня Эмилия, но у Рем сильно больше favourites на AniList, и фанаты покупают
+принты именно с ней. `franchise_scout.py` подсовывает тематизатору ЧИСЛА из реальных
+источников вместо догадок модели.
+
+По названию тайтла (аниме/сериал/дорама/фильм) собирает сигналы из 5 источников
+(каждый — независимая graceful degradation, падение одного не мешает остальным):
+
+| Источник | Что даёт | Нужен ключ |
+|---|---|---|
+| AniList (GraphQL) | `favourites` на персонажа + роль MAIN/SUPPORTING | нет |
+| Jikan (MyAnimeList) | `favorites` на персонажа | нет |
+| TMDB | порядок каста (billing order) + popularity актёров — для неаниме | `TMDB_API_KEY` |
+| YouTube | топ-эдиты по теме + просмотры (сигнал МОМЕНТОВ, не только персонажей) | `YOUTUBE_API_KEY` |
+| Google Trends (trendspy) | rising related queries (что дописывают к тайтлу в поиске) | нет (неофициальная библиотека, капризная) |
+
+Все 5 сигналов сводятся в ОДИН вызов Claude (`build_dossier`), который взвешивает
+ЧИСЛА из входа (не свои знания) и возвращает JSON-досье: персонажи по убыванию
+`score` (0-100) с `why` (какие числа привели к этому score) и `print_moment`
+(конкретная сцена/арка/форма для принта). Парсинг — тот же приём, что в
+`theme_scout._parse_scout` (ремонт обрезанного по `max_tokens` JSON + 1 ретрай +
+дамп сырого ответа в `out_batch/scout_failures/` при двойном сбое — ЯВНАЯ ошибка,
+не тихий откат).
+
+**CLI (ручной инструмент владельца)**:
+```powershell
+python franchise_scout.py "Re:Zero"                    # kind=auto (пробует anilist/jikan+tmdb)
+python franchise_scout.py "Re:Zero" --kind anime        # только anilist/jikan
+python franchise_scout.py "Слово пацана" --kind tv      # только tmdb
+```
+Печатает ранжированных персонажей (score, why, print_moment) и топ-моменты
+(название эдита/запроса + просмотры/эвиденс).
+
+**Кэш** — `data/franchise_cache/<slug>_<YYYY-MM-DD>.json`: повторный запрос того же
+тайтла в тот же день читает кэш и НЕ дёргает сеть (экономит квоту YouTube). Проверить
+кэш просто: запустить CLI дважды подряд на один тайтл — вторая строка вывода будет
+`франшиза '<title>': досье взято из кэша (<file>.json), сеть не дёргалась`, вместо
+`собираю сигналы (kind=...)`.
+
+**Экономика квоты YouTube**: `search.list` (поиск эдитов) стоит **100 юнитов**
+из бесплатных 10000/сутки, `videos.list` (просмотры по id) — **1 юнит**. Функция
+`_youtube_edits` делает СТРОГО один `search.list` на тайтл — итого один `build_dossier`
+с реальным YouTube-сигналом тратит **~101 юнит**. Без `YOUTUBE_API_KEY` источник
+просто пропускается (досье строится по остальным 4 сигналам).
+
+**Интеграция в `theme_scout.py`** (`.env: FRANCHISE_DEEP_N`, дефолт 3): перед вызовом
+тематизатора `build_daily_plan` выбирает `FRANCHISE_DEEP_N` самых высокоскоровых
+аниме-тайтлов дня (из `anime_latest.csv` и pop:anilist/pop:jikan групп) и собирает
+для них досье (`_collect_dossiers`) — падение ОДНОГО тайтла (сеть/Claude) печатает
+предупреждение и не мешает ни другим тайтлам, ни всему циклу сбора трендов. Для
+тайтлов с досье в промпт тематизатора добавляется блок «ДОСЬЕ ФРАНШИЗЫ (ИЗМЕРЕННАЯ
+популярность — приоритет над твоими знаниями)» с ранжированными персонажами и
+`print_moment`; `SYSTEM_SCOUT` прямо требует строить ростер ИЗ ДОСЬЕ по убыванию
+score, а не по собственным знаниям Claude о том, кто в тайтле формально главный.
+При недоступном `franchise_scout` (сеть упала на всех 5 источниках, Claude дважды не
+собрал JSON) — тематизатор работает как раньше, без досье, просто с предупреждением
+в консоли.
+
 ### daily_prints.py — дневной оркестратор
 
 ```powershell
@@ -235,6 +296,16 @@ IMAGE_PROVIDER=gemini   # или pollinations
     `trend-watch/` (создаётся параллельно другим разработчиком) — `theme_scout.py`
     обрабатывает это идентично отсутствию `media_watch.py`/`anime_watch.py`:
     предупреждение в лог, план строится без pop-блока, цикл не падает.
+13. `franchise_scout.py` (глубокое досье персонажей для `FRANCHISE_DEEP_N`
+    самых горячих аниме-тайтлов дня) — падение ЛЮБОГО из 5 сигнальных источников
+    ИЛИ падение синтеза Claude для ОДНОГО тайтла не мешает ни остальным тайтлам,
+    ни всему циклу `theme_scout.py`: предупреждение в лог, тематизатор работает
+    по этому тайтлу как раньше (без досье, по своим знаниям).
+14. `trendspy.related_queries` возвращает `pandas.DataFrame` (не список/dict) —
+    прямая проверка `if rising:`/`rising or []` на DataFrame бросает
+    `ValueError: truth value of a DataFrame is ambiguous`; в `franchise_scout.
+    _gtrends_related` используется явный `isinstance`+`.to_dict("records")`
+    вместо булевой проверки объекта.
 
 ## Структура
 
@@ -242,6 +313,7 @@ IMAGE_PROVIDER=gemini   # или pollinations
 print-factory-nb/
   batch_print.py       — CLI разового батча; render_design() — переиспользуемое ядро
   theme_scout.py       — сбор трендов + Claude-тематизатор + evergreen-добор
+  franchise_scout.py   — «вскрытие франшизы»: измеренная популярность персонажей/моментов
   daily_prints.py      — дневной оркестратор (план -> смета -> журнал -> генерация)
   setup_daily_task.ps1 — регистрация в Планировщике Windows
   art_director.py      — Claude-арт-директор (промпты прозой под nanobanana)
@@ -252,6 +324,7 @@ print-factory-nb/
   fonts/               — шрифты для typography.py
   themes_test.txt      — приёмочные темы (разовый батч)
   evergreen_themes.txt — вечнозелёный пул тем для добора дневного плана
+  data/franchise_cache/ — кэш досье franchise_scout (data/ в .gitignore)
   requirements.txt
   .env / .env.example / .gitignore
   docs/PROJECT_STATE.md
@@ -263,7 +336,9 @@ print-factory-nb/
 |---|---|---|
 | `TREND_WATCH_DIR` | да (есть дефолт) | путь к соседнему `trend-watch/` |
 | `PRINTS_PER_DAY`, `WORKERS`, `MAX_DAILY_COST_USD` | да (есть дефолты) | объём/параллелизм/бюджет дня |
-| `YOUTUBE_API_KEY` | нет | используется `trend-watch/pop_watch.py` для источника `youtube` в pop-ленте; без ключа этот один источник пропускается, остальное (`anilist`/`jikan`/`gtrends`) работает |
+| `YOUTUBE_API_KEY` | нет | используется `trend-watch/pop_watch.py` для источника `youtube` в pop-ленте; ТАКЖЕ используется `franchise_scout.py::_youtube_edits` (топ-эдиты) — без ключа этот источник пропускается в обоих местах, остальное (`anilist`/`jikan`/`gtrends`/`tmdb`) работает |
+| `TMDB_API_KEY` | нет | используется `franchise_scout.py::_tmdb_credits` (каст неаниме-франшиз) и `trend-watch/pop_watch.py` (источник `tmdb` в pop-ленте) — тот же ключ, без него оба места пропускают TMDB-сигнал |
+| `FRANCHISE_DEEP_N` | да (есть дефолт 3) | для скольких самых высокоскоровых аниме-тайтлов дня `theme_scout.py` запускает глубокое досье `franchise_scout.build_dossier` перед вызовом тематизатора |
 
 ## Откуда что взято
 
@@ -284,6 +359,13 @@ print-factory-nb/
   (`gen.pollinations.ai`, Bearer-токен, перебор с ретраями) и стиля письма прозой.
 - `theme_scout.py` — источник данных (CSV-формат, парсеры) — `trend-watch/media_watch.py`
   и `anime_watch.py` (запускаются subprocess'ом, сам `trend-watch/` не изменён).
+- `franchise_scout.py` — эндпоинты и паттерны обработки ошибок (429/Retry-After,
+  таймауты, graceful degradation на []) сверены с уже рабочими провайдерами
+  `trend-watch/providers/anilist.py`, `jikan.py`, `tmdb.py`, `google_trends.py`,
+  `youtube_trending.py` (те же URL/параметры API, `trend-watch/` не изменён —
+  `franchise_scout.py` не импортирует эти файлы, а независимо повторяет те же
+  проверенные вызовы под свои данные — GraphQL-запрос AniList другой, нужны
+  персонажи и favourites, а не media/trending).
 
 ## Известные ограничения / блокеры
 
@@ -303,3 +385,9 @@ print-factory-nb/
   другой на том же коде — 0 из-за обрыва по `max_tokens`) — контур не падает
   (переходит на evergreen), но при желании максимизировать долю "из трендов" в плане
   дня можно снизить `_MAX_TASKS_PER_CALL` дальше 60.
+- `franchise_scout.py::_gtrends_related` на реальной проверке (2026-07-08) стабильно
+  ловил `API quota exceeded for related queries/topics` от `trendspy` (лимит именно на
+  `related_queries`, отдельный от лимита `trending_now`, который использует
+  `pop_watch.py`) — источник штатно деградирует в `[]` (см. try/except в функции),
+  досье собирается по остальным 4 сигналам. Не блокер, просто источник результата в
+  реальных досье редко непустой на данный момент.

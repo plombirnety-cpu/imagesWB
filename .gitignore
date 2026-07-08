@@ -1,6 +1,7 @@
 .env
 out_batch/
 themes_daily_*
+data/
 __pycache__/
 *.pyc
 .DS_Store

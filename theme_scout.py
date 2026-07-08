@@ -38,6 +38,7 @@ from pathlib import Path
 import anthropic
 
 import config
+import franchise_scout
 
 HERE = Path(__file__).resolve().parent
 
@@ -141,6 +142,62 @@ def read_trend_rows() -> tuple:
     return media, anime, pop_anime, pop_general
 
 
+# ── franchise_scout: глубокие досье для самых горячих аниме-тайтлов дня ────────
+
+def _pick_deep_dive_titles(anime_rows: list, pop_anime_rows: list, n: int) -> list:
+    """Выбирает n САМЫХ высокоскоровых аниме-тайтлов дня из аниме-трендов
+    (anime_rows) и pop:anilist/pop:jikan группы (pop_anime_rows) — именно те
+    источники, откуда theme_scout получает "лемма = название тайтла или
+    персонажа". Дедуп по точному совпадению строки (без учёта регистра),
+    сортировка по score по убыванию."""
+    seen = {}
+    for r in list(anime_rows) + list(pop_anime_rows):
+        title = str(r.get("lemma", "")).strip()
+        if not title:
+            continue
+        key = title.lower()
+        score = float(r.get("score", 0) or 0)
+        if key not in seen or score > seen[key][1]:
+            seen[key] = (title, score)
+    ranked = sorted(seen.values(), key=lambda x: x[1], reverse=True)
+    return [title for title, _ in ranked[:n]]
+
+
+def _collect_dossiers(titles: list) -> dict:
+    """Досье franchise_scout для каждого тайтла из titles. Падение ОДНОГО тайтла
+    (сеть/Claude/парсинг) печатает предупреждение и пропускается — не валит
+    сбор трендов дня. Возвращает {title: dossier}, тайтлы без досье просто
+    отсутствуют в результате."""
+    dossiers = {}
+    if not titles:
+        return dossiers
+    print(f"  franchise_scout: глубокое досье для {len(titles)} тайтлов дня: "
+          f"{', '.join(titles)}", flush=True)
+    for title in titles:
+        try:
+            dossiers[title] = franchise_scout.build_dossier(title, kind="anime")
+        except Exception as e:  # noqa: BLE001 — падение досье не валит цикл тематизатора
+            print(f"  !! franchise_scout не смог собрать досье для {title!r}: {e} "
+                  f"— тематизатор отработает по этому тайтлу как раньше, без досье",
+                  flush=True)
+    return dossiers
+
+
+def _dossier_block_text(title: str, dossier: dict) -> str:
+    """Текстовый блок «ДОСЬЕ ФРАНШИЗЫ» для одного тайтла — вставляется в user-
+    промпт тематизатора рядом с соответствующей леммой."""
+    characters = dossier.get("characters") or []
+    if not characters:
+        return ""
+    lines = [f"  ДОСЬЕ ФРАНШИЗЫ «{title}» (ИЗМЕРЕННАЯ популярность — приоритет над "
+             f"твоими знаниями, см. системную инструкцию):"]
+    for c in characters:
+        name = c.get("name_ru") or c.get("name_en") or "?"
+        moment = f" | принт: {c['print_moment']}" if c.get("print_moment") else ""
+        lines.append(f"    - {name} [score={c.get('score', 0):.0f}]{moment}")
+    return "\n".join(lines)
+
+
 # ── Claude-«тематизатор и расширитель» ──────────────────────────────────────────
 
 SYSTEM_SCOUT = (
@@ -163,6 +220,15 @@ SYSTEM_SCOUT = (
     "напрямую: аниме-тайтл -> ростер персонажей (та же логика, что в пункте 1), "
     "заголовок видео/поисковый запрос -> визуальный концепт по сути запроса (та же "
     "логика, что в пункте 2). Не пытайся расщепить готовое название на подслова. "
+    "(4) Если рядом с тайтлом идёт блок «ДОСЬЕ ФРАНШИЗЫ» — это ИЗМЕРЕННАЯ (не твоя "
+    "собственная) популярность персонажей этого конкретного тайтла из реальных "
+    "источников (AniList/MyAnimeList favourites, YouTube-эдиты, поисковые тренды). "
+    "В этом случае строй ростер СТРОГО ИЗ ДОСЬЕ, по порядку убывания score (а не по "
+    "своим знаниям о том, кто в тайтле формально главный) — если у досье указан "
+    "print_moment для персонажа, впиши именно его в поле theme (конкретная сцена/ "
+    "форма/поза), а не общее описание персонажа. Персонажей без досье для этого "
+    "тайтла не добавляй сверх того, что в досье, даже если знаешь других героев — "
+    "досье уже отражает, кто реально резонирует у фанатов ПРЯМО СЕЙЧАС. "
     "СТРОГИЙ ФИЛЬТР ПРИНТОПРИГОДНОСТИ (ОБЯЗАТЕЛЬНО, без исключений, ОДИНАКОВО "
     "применяется ко ВСЕМ блокам — общие тренды, аниме-тренды И поп-тренды, включая "
     "YouTube-заголовки, которые часто полны такими темами) — ОТСЕКАЙ МОЛЧА (просто не "
@@ -205,14 +271,34 @@ _MAX_TASKS_PER_CALL = 60
 
 
 def _ask_claude_scout(media_rows: list, anime_rows: list, target_n: int,
-                       pop_rows: list = None, pop_is_anime: bool = False) -> str:
+                       pop_rows: list = None, pop_is_anime: bool = False,
+                       dossiers: dict = None) -> str:
     """Один вызов тематизатора. pop_rows (если задан) добавляется отдельным блоком
     «ПОП-ТРЕНДЫ» с явной пометкой, что это готовые названия сущностей (тайтл/видео/
     запрос) — их нужно превращать в задания напрямую, а не парсить как леммы.
     pop_is_anime переключает подпись блока (тайтлы аниме vs общие видео/запросы) —
     сама логика разворачивания (пункт 3 SYSTEM_SCOUT) от неё не зависит, это только
-    для читаемости промпта."""
+    для читаемости промпта.
+
+    dossiers (если задан) — {title: dossier} из franchise_scout.build_dossier
+    (см. _collect_dossiers) — для лемм из anime_rows/pop_rows, совпадающих с
+    ключом досье (без учёта регистра), сразу под строкой леммы добавляется блок
+    «ДОСЬЕ ФРАНШИЗЫ» (см. пункт 4 SYSTEM_SCOUT)."""
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    dossiers = dossiers or {}
+    dossiers_lower = {k.lower(): (k, v) for k, v in dossiers.items()}
+
+    def _lemma_line(r: dict) -> list:
+        out_lines = [f"- {r['lemma']} (score={r['score']}): "
+                     f"{r.get('example_text', '')[:200]}"]
+        hit = dossiers_lower.get(str(r.get("lemma", "")).strip().lower())
+        if hit:
+            title, dossier = hit
+            block = _dossier_block_text(title, dossier)
+            if block:
+                out_lines.append(block)
+        return out_lines
+
     call_n = min(target_n, _MAX_TASKS_PER_CALL)
     # Соло-вызов на pop-группу из нескольких готовых сущностей: не просить полный
     # дневной объём с 5-8 строк — Claude раздувает ответ до потолка max_tokens и
@@ -221,16 +307,16 @@ def _ask_claude_scout(media_rows: list, anime_rows: list, target_n: int,
         call_n = min(call_n, max(6, len(pop_rows) * 4))
     lines = ["ОБЩИЕ ТРЕНДЫ (СМИ/соцсети):"]
     for r in media_rows:
-        lines.append(f"- {r['lemma']} (score={r['score']}): {r.get('example_text', '')[:200]}")
+        lines.extend(_lemma_line(r))
     lines.append("\nАНИМЕ-ТРЕНДЫ:")
     for r in anime_rows:
-        lines.append(f"- {r['lemma']} (score={r['score']}): {r.get('example_text', '')[:200]}")
+        lines.extend(_lemma_line(r))
     if pop_rows:
         label = "названия аниме-тайтлов" if pop_is_anime else "заголовки видео/поисковые запросы"
         lines.append(f"\nПОП-ТРЕНДЫ ({label}, ГОТОВЫЕ названия сущностей — см. пункт 3 "
                      f"инструкции, НЕ леммы для разбора):")
         for r in pop_rows:
-            lines.append(f"- {r['lemma']} (score={r['score']}): {r.get('example_text', '')[:200]}")
+            lines.extend(_lemma_line(r))
     lines.append(f"\nРазверни эти тренды примерно в {call_n} заданий на принты суммарно "
                  f"(ОРИЕНТИР, не жёсткий потолок — можно чуть меньше или больше). НЕ "
                  f"пытайся закрыть весь дневной объём одним тайтлом/темой — бери "
@@ -238,12 +324,20 @@ def _ask_claude_scout(media_rows: list, anime_rows: list, target_n: int,
                  f"более 15-20 на один тайтл, даже если у франшизы сотни персонажей), "
                  f"остальной объём дня доберётся из отдельного вечнозелёного пула.")
     user = "\n".join(lines)
-    resp = client.messages.create(
-        model=config.MODEL,
-        max_tokens=8000,
-        system=SYSTEM_SCOUT,
-        messages=[{"role": "user", "content": user}],
-    )
+    try:
+        resp = client.messages.create(
+            model=config.MODEL,
+            max_tokens=8000,
+            system=SYSTEM_SCOUT,
+            messages=[{"role": "user", "content": user}],
+        )
+    except anthropic.APIError as e:  # noqa: BLE001 — сеть/баланс/rate-limit/5xx Claude:
+        # не должно ронять daily_prints.py необработанным traceback. Пустая строка —
+        # тот же сигнал, что и невалидный JSON: _parse_scout("") -> None -> вызывающий
+        # _ask_and_parse_with_retry честно ретраит один раз, при двойном сбое печатает
+        # предупреждение и пропускает ТОЛЬКО этот блок (см. expand_trends_to_tasks).
+        print(f"  !! тематизатор: вызов Claude не удался: {e}", flush=True)
+        return ""
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
 
 
@@ -278,14 +372,17 @@ def _parse_scout(text: str) -> list:
 
 
 def _ask_and_parse_with_retry(media_rows: list, anime_rows: list, target_n: int,
-                               pop_rows: list = None, pop_is_anime: bool = False) -> list:
+                               pop_rows: list = None, pop_is_anime: bool = False,
+                               dossiers: dict = None) -> list:
     """Один вызов тематизатора + парсинг, с 1 ретраем при сбое JSON (та же схема,
     что раньше была inline в expand_trends_to_tasks). Пустой список = двойной сбой."""
-    text = _ask_claude_scout(media_rows, anime_rows, target_n, pop_rows, pop_is_anime)
+    text = _ask_claude_scout(media_rows, anime_rows, target_n, pop_rows, pop_is_anime,
+                              dossiers)
     tasks = _parse_scout(text)
     if tasks is None:  # именно сбой парсинга; валидный [] ретраить не нужно
         _dump_scout_failure(text, attempt=1)
-        text = _ask_claude_scout(media_rows, anime_rows, target_n, pop_rows, pop_is_anime)
+        text = _ask_claude_scout(media_rows, anime_rows, target_n, pop_rows, pop_is_anime,
+                                  dossiers)
         tasks = _parse_scout(text)
         if tasks is None:
             _dump_scout_failure(text, attempt=2)
@@ -306,7 +403,8 @@ def _dump_scout_failure(text: str, attempt: int) -> None:
 
 def expand_trends_to_tasks(media_rows: list, anime_rows: list, target_n: int,
                             pop_anime_rows: list = None,
-                            pop_general_rows: list = None) -> list:
+                            pop_general_rows: list = None,
+                            dossiers: dict = None) -> list:
     """Тематизатор Claude: тренды -> список заданий {theme, format, source}.
 
     НЕ откатывается тихо при сбое парсинга JSON (как art_director): 1 ретрай на каждый
@@ -319,13 +417,21 @@ def expand_trends_to_tasks(media_rows: list, anime_rows: list, target_n: int,
     sources (anilist/jikan/youtube/gtrends) и уходят ОТДЕЛЬНЫМ вызовом тематизатора
     каждая группа — так задания из pop-ленты получают точную метку источника
     "trend:pop:<sources>" без необходимости просить Claude возвращать это поле.
+
+    dossiers — {title: dossier} из franchise_scout (см. _collect_dossiers) для
+    самых высокоскоровых аниме-тайтлов дня; передаётся ТОЛЬКО в аниме-блоки
+    (media/anime и pop:anime группу) — досье в общем/pop:general блоке не нужно,
+    там лемм-тайтлов франшиз не бывает по построению (_pick_deep_dive_titles
+    берёт только из anime_rows/pop_anime_rows).
     """
     pop_anime_rows = pop_anime_rows or []
     pop_general_rows = pop_general_rows or []
+    dossiers = dossiers or {}
     all_tasks = []
 
     if media_rows or anime_rows:
-        tasks = _ask_and_parse_with_retry(media_rows, anime_rows, target_n)
+        tasks = _ask_and_parse_with_retry(media_rows, anime_rows, target_n,
+                                          dossiers=dossiers)
         if tasks:
             for t in tasks:
                 t["source"] = "trend"
@@ -349,7 +455,8 @@ def expand_trends_to_tasks(media_rows: list, anime_rows: list, target_n: int,
             groups.setdefault(src, []).append(r)
         for src, rows in groups.items():
             tasks = _ask_and_parse_with_retry([], [], target_n, pop_rows=rows,
-                                               pop_is_anime=is_anime)
+                                               pop_is_anime=is_anime,
+                                               dossiers=dossiers if is_anime else None)
             if tasks:
                 for t in tasks:
                     t["source"] = f"trend:pop:{src}"
@@ -423,8 +530,16 @@ def build_daily_plan(target_n: int) -> list:
     target_n. Возвращает список {theme, format, source}, source = "trend" |
     "trend:pop:<anilist|jikan|youtube|gtrends>" | "evergreen"."""
     media_rows, anime_rows, pop_anime_rows, pop_general_rows = read_trend_rows()
+
+    # franchise_scout: глубокое досье (измеренная популярность персонажей) для
+    # config.FRANCHISE_DEEP_N самых высокоскоровых аниме-тайтлов дня — падение
+    # ОДНОГО тайтла (сеть/Claude) не валит сбор трендов, см. _collect_dossiers.
+    deep_dive_titles = _pick_deep_dive_titles(anime_rows, pop_anime_rows,
+                                               config.FRANCHISE_DEEP_N)
+    dossiers = _collect_dossiers(deep_dive_titles)
+
     tasks = expand_trends_to_tasks(media_rows, anime_rows, target_n,
-                                   pop_anime_rows, pop_general_rows)
+                                   pop_anime_rows, pop_general_rows, dossiers)
     # Чередуем ПО ИСТОЧНИКАМ до финальной обрезки tasks[:target_n] ниже (и до
     # plan[:limit] в daily_prints.py) — иначе большой блок "trend" (media+anime)
     # съедает срез целиком, а "trend:pop:*" (добавляется позже в
