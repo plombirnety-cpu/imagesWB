@@ -1,0 +1,225 @@
+[
+  {
+    "id": "jdm_touge",
+    "name": "JDM-ретро — Тоге-дрифт",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single classic 1980s Japanese coupe (canonical AE86 hachiroku silhouette: boxy two-door body, round quad headlights, black-panel front grille, white-over-black two-tone paint) is captured full-body, SINGLE FIGURE, one clear three-quarter dynamic view only (no second view, no model-sheet, no alternate angle anywhere on the print), the car occupying 78% of frame width, frozen mid-drift on a narrow mountain pass road with both rear wheels kicked out sideways, a bold sweeping tire-smoke trail curling from the rear wheel arches, the car's pop-up headlights lit bright white cutting twin hard light-cones forward through the night air, a thin guardrail hugs the road's outer edge behind the car. ANATOMY: exactly four wheels, correct automotive proportions, no extra or duplicated wheels, no second vehicle or duplicate pose anywhere in the composition. Behind the car a steep dark mountain silhouette rises against a deep navy night sky studded with a few sparse stars, the winding touge road switches back visibly in the middle distance with small guardrail glints catching the headlight beams, a thin low ground-mist sits along the road surface without ever obscuring the car's silhouette.",
+    "art_style": "ретро-гоночный постер конца 80-х/начала 90-х в духе японских дорожных манга-постеров и VHS-обложек: плоские насыщенные заливки с резкими графичными бликами фар, диагональные скоростные линии позади машины, зернистая печатная текстура постера, никаких мягких фотореалистичных градиентов — чистая плакатная графика",
+    "text_content": {
+      "main": "TOUGE MASTER",
+      "secondary": "",
+      "vertical_jp": "峠"
+    },
+    "typography": "Main phrase 'TOUGE MASTER' is set as a bold italic-slanted motorsport display lettering block spanning the width of the canvas across the lower third beneath the car's tires, letterforms filled with flat racing-red and outlined with a thin white keyline for contrast against the dark road, aggressive speed-slanted display face with sharp terminals, cap-height 0.1x figure width, word gap 0.055x cap-height so both words read clearly separated, each word appears exactly once. The single vertical kanji 峠 (touge, mountain pass) is placed in the upper-right margin above the guardrail, outside the car's silhouette, rendered as a bold flat white column with a thin black keyline matching the poster's graphic linework, glyph size 0.09x figure width, one clean unbroken single glyph, appears exactly once. No other text anywhere on the print.",
+    "palette": "deep navy night sky, matte white-over-black car body, racing-red accent lettering, headlight white-yellow glow, charcoal mountain silhouette, pale grey tire-smoke",
+    "chroma": "green",
+    "chroma_note": "Палитра холодная навигационно-синяя ночь плюс бело-чёрный кузов и красный акцент, без зелёного — зелёный хромакей безопасен; при сведении проверить кромку белого дыма от шин отдельно, чтобы не слиться с зелёным фоном по яркости."
+  },
+  {
+    "id": "nasa_retro_mars",
+    "name": "Ретро-турпостер NASA — Visit Mars",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single astronaut in a bulky white pressurized spacesuit with a rounded reflective gold-visor helmet stands full figure, SINGLE FIGURE, one clear frontal three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 74% of frame height, planted in a relaxed confident explorer stance on a rust-red dune crest, one gloved hand raised shading the visor as if taking in the view, the other hand resting on a small planted flag-pole beside their boot, the suit rendered in flat poster layers with clean graphic panel-line details and a chest-mounted control unit. ANATOMY: exactly two arms and two legs, correct human anatomy inside the suit, no extra or duplicated limbs, no second figure anywhere in the composition. Behind the astronaut sweeping rust-red and burnt-orange dune ridges recede toward the horizon in flat layered bands, two small pale moons (Phobos and Deimos) hang in the dusty rose-colored sky at different heights, a distant rocky mesa silhouette sits low on the horizon line, the whole sky graduates in smooth flat bands from deep rust at the horizon to a soft dusty mauve overhead.",
+    "art_style": "винтажный туристический плакат 1960-х в духе классических NASA JPL travel-postersов: смелые плоские цветовые блоки, чёткое деление неба на горизонтальные band-полосы градиента без фотореализма, лёгкая печатная зернистость, декоративная типографика в духе авиакомпаний середины века",
+    "text_content": {
+      "main": "VISIT MARS",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase 'VISIT MARS' is set as a large centered mid-century travel-poster display lettering block spanning the width of the canvas across the lower third beneath the astronaut's boots, letterforms filled flat cream-white with a thin rust-red shadow offset, elegant rounded geometric sans-serif display face typical of 1960s airline posters, cap-height 0.11x figure width, word gap 0.06x cap-height so both words read clearly separated, each word appears exactly once. No other text anywhere on the print.",
+    "palette": "rust-red dune, burnt-orange midground, dusty mauve sky, cream-white suit and lettering, pale moon-grey, gold visor accent",
+    "chroma": "green",
+    "chroma_note": "Палитра целиком тёплая красно-оранжево-кремовая без зелёного — зелёный хромакей безопасен; фон плаката построен горизонтальными band-полосами, при сведении убедиться, что нижняя граница дюн не сливается с зелёным полем по контрасту."
+  },
+  {
+    "id": "neko_bushido",
+    "name": "Кот-самурай — Neko Bushido",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single anthropomorphic-posture battle cat stands upright full figure on its hind legs like a warrior, SINGLE FIGURE, one clear frontal three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 78% of frame height, planted in a still composed ready stance, its correct feline head with tall alert ears, sharp focused eyes and a serious closed-mouth expression (ANATOMY: correct cat head and facial proportions, no human facial features, no extra ears or eyes), wearing light lacquered samurai armor plates (kusazuri skirt segments, a chest cuirass, and shoulder guards) over its short-furred body rendered in flat woodblock-print layers, gripping a sheathed katana held horizontally across its body with both forepaws near the hilt in a calm two-handed guard grip, a long tail extending low behind for balance. ANATOMY: exactly two arms/forepaws and two legs/hindpaws in an upright bipedal battle stance, correct overall cat proportions and correct plantigrade cat leg bend, no extra or duplicated limbs, no second figure anywhere in the composition. Behind the cat a low rolling mist bank sits at ground level, a gnarled pine branch silhouette crosses the upper corner of the frame, a pale round moon glows softly high in the muted indigo sky without overlapping the cat's head.",
+    "art_style": "японская гравюра укиё-э: плоские насыщенные заливки, тонкие гравюрные контурные линии, характерная текстура печати на рисовой бумаге, сдержанная приглушённая палитра индиго/охра/чёрный тушь, композиция строится вокруг силуэта как на классической гравюре воина",
+    "text_content": {
+      "main": "NEKO BUSHIDO",
+      "secondary": "",
+      "vertical_jp": "猫武士道"
+    },
+    "typography": "Main phrase 'NEKO BUSHIDO' is set as a bold horizontal engraved title banner across the lower third of the canvas beneath the cat's stance, banner fill flat aged parchment-cream with a thin sumi-ink double-rule border (outer rule 0.03x cap-height, inner rule 0.015x cap-height, gap 0.02x cap-height), phrase set in a sturdy woodblock-carved serif display face, fill solid sumi-ink black, cap-height 0.09x figure width, word gap 0.05x cap-height so both words read clearly separated, each word appears exactly once. The vertical kanji column 猫武士道 (neko bushido, cat bushido) is placed in the upper-right margin beside the pine branch, outside the figure's silhouette, rendered as a bold flat sumi-ink column matching the woodblock linework, glyph size 0.07x figure width, one clean unbroken column of exactly four glyphs, gap between glyphs 0.04x glyph height, appears exactly once. No other text anywhere on the print.",
+    "palette": "deep indigo night, sumi-ink black linework, aged parchment-cream, warm tabby-brown fur tone, muted jade armor lacquer, pale moon-silver",
+    "chroma": "blue",
+    "chroma_note": "ВНИМАНИЕ: доспех кота описан в приглушённом jade-зелёном лаке — зелёный хромакей рисковал бы слиться с этим элементом, поэтому хромакей для сведения фона на этом принте СИНИЙ (chroma: blue)."
+  },
+  {
+    "id": "lone_wolf_moon",
+    "name": "Волк и луна — Lone Wolf",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single wolf stands full figure in profile-turned-toward-viewer three-quarter pose, SINGLE FIGURE, one clear view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 76% of frame height, planted on a rocky outcrop with all four legs braced, head tilted back and muzzle raised in a mid-howl pose toward the sky, correct lupine anatomy throughout (ANATOMY: correct wolf skull proportions, correct four-leg digitigrade stance, natural fur-covered tail, no human features, no extra or duplicated limbs, no second animal anywhere in the composition), its thick fur rendered in high-contrast flat poster layers with sharp graphic tufting along the ruff and tail, rim-lit along its back edge by the moonlight behind it.",
+    "art_style": "стритвир-графика для мерча: жёсткие плоские контрасты чёрного силуэта против луны, рваные потёртые края у типографики как на самиздатовской трафаретной печати, минимум деталей фона — акцент полностью на силуэте волка и луне, никаких мягких градиентов",
+    "text_content": {
+      "main": "LONE WOLF",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase 'LONE WOLF' is set as a large distressed streetwear display lettering block spanning the width of the canvas across the lower third beneath the rocky outcrop, letterforms filled flat off-white with a heavy rough torn-edge texture on every stroke (screen-print distress effect, not random noise obscuring readability), bold condensed grunge display face, cap-height 0.11x figure width, word gap 0.055x cap-height so both words read clearly separated, each word appears exactly once. No other text anywhere on the print.",
+    "palette": "charcoal-black silhouette, pale moon-silver disc, deep midnight-blue sky, off-white distressed lettering, cool grey rim-light",
+    "chroma": "green",
+    "chroma_note": "Палитра холодная чёрно-серебристо-синяя без зелёного — зелёный хромакей безопасен; силуэт волка почти чёрный, при сведении внимательно проверить контур ушей и хвоста на просвет."
+  },
+  {
+    "id": "capybara_zen",
+    "name": "Капибара-дзен — Pure Zen",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single capybara sits full figure chest-deep in a round wooden onsen tub, SINGLE FIGURE, one clear frontal view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 72% of frame height (slightly reduced to leave clean room for the rising steam and tub rim), correct capybara anatomy throughout (ANATOMY: correct blunt-snouted rodent head proportions, short rounded ears, stubby legs tucked beneath the waterline, no human features, no extra or duplicated limbs, no second animal anywhere in the composition), a small folded white towel balanced neatly on top of its head, eyes closed in a blissfully content expression, a single small orange mandarin resting afloat on the water surface beside it, both front paws resting relaxed on the tub's wooden rim. ANATOMY confirmed: exactly four legs tucked naturally, correct capybara head-to-body proportion, no distortion.",
+    "art_style": "минимализм с юмором: плоские мягкие заливки без сложных текстур, округлые дружелюбные формы, немного пара как единственный динамический элемент, чистая простая композиция в духе современных стикерпак-иллюстраций, тёплая уютная палитра",
+    "text_content": {
+      "main": "PURE ZEN",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase 'PURE ZEN' is set as a simple centered rounded display lettering block spanning the width of the canvas across the lower third beneath the tub, letterforms filled flat warm terracotta with soft rounded corners matching the illustration's friendly minimalist mood, cap-height 0.095x figure width, word gap 0.06x cap-height so both words read clearly separated, each word appears exactly once. No other text anywhere on the print.",
+    "palette": "warm terracotta tub-wood, soft sand-brown capybara fur, milky onsen-white water, citrus-orange mandarin accent, cloud-white towel and steam, pale sky-blue background",
+    "chroma": "green",
+    "chroma_note": "Палитра тёплая песочно-терракотовая без зелёного — зелёный хромакей безопасен; пар и вода светлые почти белые, при сведении проверить кромку пара отдельно, чтобы не съесть полупрозрачные края."
+  },
+  {
+    "id": "city_pop_tokyo",
+    "name": "City Pop 80-х — Tokyo Nights",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single stylish young woman in a retro 1980s anime-poster art style stands full figure leaning back against a parked convertible, SINGLE FIGURE, one clear three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 75% of frame height, her voluminous feathered shoulder-length hair rendered in flat glossy poster layers with soft airbrushed highlights typical of vintage city-pop album art, a relaxed confident half-smile looking off toward the skyline, wearing a breezy oversized blazer over a simple top and high-waisted trousers rendered in flat pastel-neon poster shading, one elbow resting casually on the convertible's window frame, the other hand loosely holding a light windbreaker jacket draped over one shoulder. ANATOMY: exactly two arms and two legs, correct human anatomy, no extra or duplicated limbs, no second figure anywhere in the composition. Behind her the convertible's glossy body catches soft neon reflections, a dense night skyline of Tokyo high-rises fills the background in flat layered silhouette bands, countless small square window-lights glow warm amber and cool cyan across the towers, a large soft-focus pastel moon-glow sits high above the skyline, faint horizontal light-streak reflections shimmer across the car's hood.",
+    "art_style": "city pop 80-х (альбомная обложка): глянцевые плоские заливки с мягким аэрографическим бликом, синтвейв-палитра заката и ночного неона, ретро-аниме типаж лица образца 80-х, никаких резких цифровых градиентов — только мягкий печатный глянец журнальной обложки",
+    "text_content": {
+      "main": "TOKYO NIGHTS",
+      "secondary": "",
+      "vertical_jp": "東京"
+    },
+    "typography": "Main phrase 'TOKYO NIGHTS' is set as a glossy retro display lettering block spanning the width of the canvas across the lower third beneath the convertible's door, letterforms filled with a soft chrome-to-pink gradient sheen and a thin cyan outline, rounded retro geometric display face typical of 80s album covers, cap-height 0.1x figure width, word gap 0.055x cap-height so both words read clearly separated, each word appears exactly once. The vertical kanji column 東京 (Tokyo) is placed in the upper-right margin beside the skyline, outside the figure's silhouette, rendered as a bold flat cyan-neon column with a thin magenta glow edge matching the skyline lights, glyph size 0.08x figure width, one clean unbroken column of exactly two glyphs, gap between glyphs 0.04x glyph height, appears exactly once. No other text anywhere on the print.",
+    "palette": "magenta-pink sunset glow, deep violet night sky, electric cyan window-lights, warm amber tower-lights, glossy chrome car body, soft pastel-lavender highlight",
+    "chroma": "blue",
+    "chroma_note": "ВНИМАНИЕ: синтвейв-неоновая палитра (магента/циан/фиолет) по опыту synthwave_vhs-рецепта склонна давать зеленоватый глитч-оттенок по краям градиентов и в бликах стекла — хромакей для сведения фона на этом принте СИНИЙ (chroma: blue), зелёный не использовать."
+  },
+  {
+    "id": "viking_raven",
+    "name": "Викинг и ворон — Valhalla Awaits",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single bearded Norse warrior stands full figure, SINGLE FIGURE, one clear frontal three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 78% of frame height, planted in a solid grounded stance, his thick braided beard and weathered stern face rendered in flat poster layers with sharp graphic highlights, wearing a simple plain rounded steel battle-helmet with a nose-guard (historically accurate, no horns), layered leather and fur pauldron armor over a woven tunic, one hand gripping the haft of a single-bladed war-axe resting head-down against the ground beside his boot, a single black raven perched calmly on his opposite shoulder with folded wings. ANATOMY: exactly two arms and two legs for the warrior, correct human anatomy, the raven has exactly two wings and two legs with correct bird anatomy, no extra or duplicated limbs on either figure, no second human figure anywhere in the composition, no blood, no gore, no severed elements. Behind him a faint circular ring of angular runic symbols glows softly pale gold, arranged in a perfect circle centered behind his head like a halo without overlapping his face, a muted stormy grey-blue sky with distant low mountain silhouettes fills the background.",
+    "art_style": "нордическая гравюрная иллюстрация: плоские приглушённые заливки кожи и стали, тонкая гравюрная штриховка на мехе и бороде, рунический круг как декоративный гало-элемент, сдержанная холодная палитра без крови и жестокости, спокойная монументальная композиция",
+    "text_content": {
+      "main": "VALHALLA AWAITS",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase 'VALHALLA AWAITS' is set as a bold engraved runic-style display lettering block spanning the width of the canvas across the lower third beneath the warrior's boots, letterforms filled flat weathered-iron grey with angular runic-inspired serif terminals, cap-height 0.1x figure width, word gap 0.055x cap-height so both words read clearly separated, each word appears exactly once. The runic circle behind his head carries a ring of small angular rune-glyphs, rendered flat pale gold matching the halo glow, individual glyph size 0.04x figure width, evenly spaced around the full circle, purely decorative arrangement (not forming a readable word), does not count as body text and does not repeat the main phrase.",
+    "palette": "weathered steel-grey armor, deep russet leather, muted stormy blue-grey sky, pale gold rune-glow, charcoal raven-black, warm skin-tone",
+    "chroma": "green",
+    "chroma_note": "Палитра холодная серо-стальная с приглушённым золотом без зелёного — зелёный хромакей безопасен; ворон почти чёрный, при сведении проверить кромку крыльев отдельно, чтобы не потерять тонкие перья на просвет."
+  },
+  {
+    "id": "astro_skater",
+    "name": "Космонавт-скейтер — Gravity Is Optional",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single astronaut in a bulky white spacesuit with a rounded clear-visor helmet is captured full figure mid-trick, SINGLE FIGURE, one clear dynamic three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 76% of frame height, frozen in a floating skateboard-grab pose with knees tucked and one gloved hand reaching down to grip the edge of a simple flat skateboard deck beneath their boots, the other arm extended outward for balance, the suit rendered in clean flat-illustration shapes with simple graphic panel-line details and a small chest control unit, the tether-cord trailing loosely behind in a soft weightless curl. ANATOMY: exactly two arms and two legs, correct human anatomy inside the suit, no extra or duplicated limbs, no second figure anywhere in the composition. Behind the astronaut a deep indigo-black starfield fills the frame with scattered small white and pale-blue stars of varying size, a distant curved sliver of a blue-and-white planet horizon glows softly in the lower corner without overlapping the figure, a few small flat geometric asteroid shapes drift at different depths around the composition.",
+    "art_style": "flat-иллюстрация (плоская векторная графика): чистые простые геометричные формы без текстур и градиентных теней, ограниченная насыщенная палитра, лёгкие мягкие тени только для намёка на объём, дружелюбный современный иллюстративный стиль как в мерче космических брендов",
+    "text_content": {
+      "main": "GRAVITY IS OPTIONAL",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase 'GRAVITY IS OPTIONAL' is set as a clean bold flat-illustration display lettering block spanning the width of the canvas across the lower third beneath the skateboard, letterforms filled flat off-white with a thin deep-indigo shadow offset, rounded geometric sans-serif display face, cap-height 0.09x figure width, word gap 0.055x cap-height so all three words read clearly separated, each word appears exactly once. No other text anywhere on the print.",
+    "palette": "deep indigo-black starfield, matte white spacesuit, sky-blue planet glow, warm accent orange skateboard deck, pale star-white highlights, cool grey suit shading",
+    "chroma": "green",
+    "chroma_note": "Палитра холодная тёмно-индиго со звёздами без зелёного — зелёный хромакей безопасен; скафандр белый почти сливается по светлоте с возможными светлыми участками фона, при сведении проверить кромку шлема и перчаток отдельно."
+  },
+  {
+    "id": "fuji_wanderlust",
+    "name": "Ретро-плакат нацпарка — Фудзи Wanderlust",
+    "character_en": "",
+    "title_en": "",
+    "moment": "The scene is a landscape-focused travel-poster composition (no human figure required): Mount Fuji's iconic snow-capped cone fills the upper two-thirds of the frame as the single dominant SINGLE FIGURE-equivalent subject, one clear frontal view only (no second view, no alternate angle anywhere on the print), the mountain occupying 74% of frame height, rendered in flat layered poster bands with a crisp snow-line silhouette against the sky, a calm still lake fills the foreground with a soft mirror reflection of the mountain, a vermillion torii gate stands partially in the shallow water at the lake's edge in the lower third, a single flowering sakura branch with soft pink blossom clusters arcs gently in from one side of the frame in the foreground, framing the composition without covering the mountain's peak. ANATOMY: not applicable (landscape composition), ensure no distortion of the torii gate's proportions and no duplicated torii gates, only one gate in the entire composition.",
+    "art_style": "винтажный тревел-постер национального парка середины XX века: смелые плоские цветовые band-слои для неба и воды, чёткие силуэтные контуры без фотореализма, лёгкая печатная зернистость, декоративная типографика в духе постеров японских железных дорог 1950-60-х",
+    "text_content": {
+      "main": "WANDERLUST",
+      "secondary": "",
+      "vertical_jp": "富士山"
+    },
+    "typography": "The vertical kanji column 富士山 (Fujisan, Mount Fuji) is set large and prominent in the upper-right margin beside the mountain's peak, outside the snow-line silhouette, rendered as a bold flat vermillion-red column matching the torii gate color, glyph size 0.13x figure width (large per the brief's 'crucially large' emphasis), one clean unbroken column of exactly three glyphs, gap between glyphs 0.045x glyph height, appears exactly once. Secondary phrase 'WANDERLUST' is set beneath the kanji column, noticeably smaller than the large kanji per the brief but never below the print's small-text legibility floor, fill flat cream-white with a thin vermillion keyline, elegant mid-century condensed serif display face, cap-height 0.078x figure width, letter-spacing slightly open for a refined travel-poster feel, appears exactly once as a single unbroken line. No other text anywhere on the print.",
+    "palette": "snow-white peak, deep slate-blue mountain shadow, soft powder-blue sky, mirror-calm lake teal, vermillion torii red, blush sakura pink",
+    "chroma": "blue",
+    "chroma_note": "ВНИМАНИЕ: озеро и небо в композиции сине-бирюзовые, но нижний ярус тревел-постеров часто содержит сосны/зелёные берега у кромки воды — зелёный хромакей рисковал бы слиться с прибрежной растительностью, поэтому хромакей для сведения фона на этом принте СИНИЙ (chroma: blue) заменён на действие через кромку воды: фактически используем chroma blue как основной ключ, задний план и так в сине-голубой гамме без насыщенного зелёного поля."
+  },
+  {
+    "id": "golden_dragon",
+    "name": "Золотой дракон — Paper-cut",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single traditional Chinese dragon is captured full figure in a dynamic serpentine coil, SINGLE FIGURE, one clear three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 80% of frame height, its long sinuous body winding through three graceful S-curves from lower-left to upper-right, correct dragon anatomy throughout (ANATOMY: one head with two horns, four clawed legs each with the correct number of digits, one continuous serpentine tail, a single row of dorsal spines running the length of the spine, no extra or duplicated heads or limbs, no second dragon anywhere in the composition), its head turned toward the viewer with an open jaw showing a stylized flowing whisker-mane and a single pearl held loosely beneath its chin, its long body covered in overlapping scale patterns rendered as flat cut-paper shapes with crisp die-cut edges, feathery cloud-scroll motifs trailing along its spine in place of literal fire.",
+    "art_style": "китайская вырезка из бумаги (paper-cut, jianzhi) с золотым тиснением по глубокому красному: каждый элемент — плоская силуэтная форма с идеально чистым резаным краем как настоящая вырезанная бумага, тонкие ажурные прорези внутри чешуи и облачных завитков, золотая фольга для контурных линий и деталей поверх сплошного красного фона, никаких мягких растушёвок или градиентов",
+    "text_content": {
+      "main": "GOLDEN DRAGON",
+      "secondary": "",
+      "vertical_jp": "龍"
+    },
+    "typography": "Main phrase 'GOLDEN DRAGON' is set as a thin elegant small-caps display lettering line spanning the width of the canvas across the lower third beneath the dragon's coiled tail, letterforms filled flat gold-foil with crisp die-cut paper-edge outlines matching the dragon's cut-paper technique, slender refined serif display face with generous tracking, cap-height 0.07x figure width, word gap 0.06x cap-height so both words read clearly separated, each word appears exactly once. The single vertical kanji 龍 (dragon) is placed in the upper-right margin beside the dragon's head, outside its silhouette, rendered as a bold flat gold-foil glyph with the same cut-paper edge treatment, glyph size 0.1x figure width, one clean unbroken single glyph, appears exactly once. No other text anywhere on the print.",
+    "palette": "deep lacquer-red background, brilliant gold-foil linework, warm amber scale-highlight, soft cream pearl accent, dark umber shadow-cut",
+    "chroma": "green",
+    "chroma_note": "Палитра целиком красно-золотая без зелёного — зелёный хромакей безопасен; чешуя дракона резная ажурная с множеством мелких прорезей, при сведении внимательно проверить мелкие сквозные вырезы, чтобы хромакей-фон не остался мелкими вкраплениями внутри тела дракона."
+  },
+  {
+    "id": "sport_messi",
+    "name": "Агитплакат — THE GOAT (Месси)",
+    "character_en": "Lionel Messi",
+    "title_en": "",
+    "moment": "A single footballer with Lionel Messi's real recognizable likeness (compact athletic build, short dark hair, light beard, tanned skin tone) stands full figure, SINGLE FIGURE, one clear frontal three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 78% of frame height, frozen in a triumphant goal-celebration pose with both arms raised wide overhead, fists loosely open, head tilted slightly back with an elated joyful expression looking upward, wearing the sky-blue-and-white vertically striped Argentina national jersey with the number 10 printed large on the chest, simple athletic shorts, one knee slightly bent as if mid-stride from the celebration run. ANATOMY: exactly two arms and two legs, correct human anatomy, no extra or duplicated limbs, no second figure anywhere in the composition, no ball, no crowd, no other players. Behind him a bold radiating sunburst of alternating sky-blue and white flat triangular rays fills the entire background edge to edge like a classic propaganda-poster starburst, a thin arc of small five-pointed stars traces the upper edge of the composition above his raised hands without overlapping his face.",
+    "art_style": "агитационный спорт-плакат в духе классических советских/латиноамериканских агитпостеров: плоские насыщенные заливки, монументальная героическая поза, лучевой звёздный фон вместо конкретной сцены стадиона, резкие плакатные контрасты света и тени, никакой фотореалистичной текстуры кожи",
+    "text_content": {
+      "main": "THE GOAT",
+      "secondary": "10",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase 'THE GOAT' is set as a bold heroic propaganda-poster display lettering block spanning the width of the canvas across the lower third beneath his boots, letterforms filled flat white with a thin sky-blue shadow offset, monumental condensed serif display face matching classic poster typography, cap-height 0.11x figure width, word gap 0.06x cap-height so both words read clearly separated, each word appears exactly once. The secondary numeral '10' is set large and bold on his jersey chest as part of the uniform graphic itself (not a floating overlay), fill flat solid white matching official kit numbering, cap-height 0.09x figure width, appears exactly once. No other text anywhere on the print.",
+    "palette": "sky-blue and white vertical jersey stripes, warm skin-tone, radiating sky-blue-and-white sunburst background, pale star-white accents, deep navy shadow-line",
+    "chroma": "green",
+    "chroma_note": "Палитра сине-белая (цвета Аргентины) без зелёного — зелёный хромакей безопасен; лучевой звёздный фон плотный и плашечный, при сведении проверить, что белые лучи не сливаются с белыми элементами фигуры по краю силуэта.",
+    "fallback_generic": "Если Gemini отклоняет реальное лицо: заменить на безымянного аргентинского футболиста номер 10 в той же бело-голубой форме и той же торжествующей позе с поднятыми руками, без портретного сходства с конкретным человеком, лицо — обобщённый атлетичный типаж без узнаваемых черт."
+  },
+  {
+    "id": "sport_curry",
+    "name": "Спорт-постер варсити — Chef Curry",
+    "character_en": "Stephen Curry",
+    "title_en": "",
+    "moment": "A single basketball player with Stephen Curry's real recognizable likeness (lean athletic build, short dark hair, light beard, warm brown skin tone) is captured full figure mid-jump-shot, SINGLE FIGURE, one clear dynamic three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 78% of frame height, frozen at the peak of a three-point jump shot with knees bent and both feet slightly off the ground, shooting arm fully extended overhead with wrist snapped forward in a follow-through release, the other arm bent for balance, wearing the royal-blue-and-yellow Golden State home jersey with the number 30 printed large on the chest, athletic shorts, a basketball just leaving his fingertips above his raised hand. ANATOMY: exactly two arms and two legs, correct human anatomy, no extra or duplicated limbs, no second figure anywhere in the composition, no crowd, no hoop, no other players. Behind him a bold varsity-style radiating halftone burst in royal-blue and gold fills the background, a thin arc of small motion-trail speed-lines trails from the basketball toward the upper corner of the frame without overlapping his face.",
+    "art_style": "спорт-постер варсити (college/pro sports poster): плоские насыщенные заливки, полутоновая (halftone) текстура на фоновом лучевом взрыве в духе спортивных карточек, динамичная замороженная поза действия, декоративные speed-lines движения мяча, чёткая графичная линия без фотореализма кожи",
+    "text_content": {
+      "main": "CHEF CURRY",
+      "secondary": "SPLASH",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase 'CHEF CURRY' is set as a bold varsity-style display lettering block spanning the width of the canvas across the lower third beneath his shooting-arm foot, letterforms filled flat royal-blue with a thin gold outline, classic collegiate block-serif display face, cap-height 0.1x figure width, word gap 0.055x cap-height so both words read clearly separated, each word appears exactly once. The secondary phrase 'SPLASH' is set along the basketball's motion-trail in the upper-right margin, outside the figure's silhouette, fill flat gold matching the jersey trim, bold condensed sans-serif display face, cap-height 0.078x figure width, appears exactly once as a single unbroken word. No other text anywhere on the print.",
+    "palette": "royal-blue jersey, warm gold trim and numerals, warm brown skin-tone, halftone royal-blue-and-gold burst background, basketball orange accent, pale motion-line white",
+    "chroma": "green",
+    "chroma_note": "Палитра сине-золотая (цвета Golden State) без зелёного — зелёный хромакей безопасен; полутоновая (halftone) текстура фона мелкоточечная, при сведении проверить, что мелкие точки на краю силуэта не остаются вкраплениями хромакея на фигуре.",
+    "fallback_generic": "Если Gemini отклоняет реальное лицо: заменить на безымянного баскетболиста-снайпера номер 30 в той же сине-золотой форме и той же позе трёхочкового броска в прыжке, без портретного сходства с конкретным человеком, лицо — обобщённый атлетичный типаж без узнаваемых черт."
+  },
+  {
+    "id": "sport_beast_gym",
+    "name": "Метал-знак — Beast Mode Gorilla",
+    "character_en": "",
+    "title_en": "",
+    "moment": "A single massive anthropomorphic gorilla stands full figure at a flat bench press setup, SINGLE FIGURE, one clear frontal three-quarter view only (no second view, no model-sheet, no alternate angle anywhere on the print), the figure occupying 79% of frame height, correct gorilla anatomy throughout (ANATOMY: correct silverback gorilla head and facial proportions, correct heavy-set torso and limb ratio, no human facial features, no extra or duplicated limbs, no second animal anywhere in the composition), massively muscled arms gripping a heavily-loaded barbell held overhead at full lockout in a triumphant finishing position, chalk-dust cloud puffing off both hands and wrists, a fierce determined snarl on its face with bared teeth, standing braced on two legs beside the bench, thick corded neck and shoulder muscles rendered in flat high-contrast poster shading with hard graphic highlight lines. ANATOMY confirmed: exactly two arms and two legs in a stable standing pose, correct gorilla proportions, no distortion.",
+    "art_style": "метал-знак (heavy-metal emblem/sign): агрессивная графичная плашечная подача, жёсткие контрасты света и тени без градиентов, металлическая эмблема-рамка вокруг композиции как значок спортзала, зубчатые акцентные элементы по углам, резкий индустриальный леттеринг",
+    "text_content": {
+      "main": "BEAST MODE",
+      "secondary": "NO PAIN NO GAIN",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase 'BEAST MODE' is set as a large aggressive metal-emblem display lettering block spanning the width of the canvas across the lower third beneath the bench, letterforms filled solid gunmetal-silver with a thin black bevel edge and small angular spike-terminal accents on the strokes while keeping every letter fully legible, heavy industrial condensed display face, cap-height 0.1x figure width, word gap 0.055x cap-height so both words read clearly separated, each word appears exactly once. The secondary phrase 'NO PAIN NO GAIN' is set small directly beneath the main phrase as a thin single-line subtitle, fill flat solid white, condensed industrial sans-serif face, cap-height 0.075x figure width (kept above the minimum small-text threshold for legibility), word gap 0.045x cap-height so all four words read clearly separated, appears exactly once as a single unbroken line. No other text anywhere on the print.",
+    "palette": "charcoal-black gym shadow, gunmetal-silver barbell and lettering, warm silverback-brown fur, chalk-white dust cloud, steel-blue highlight accent",
+    "chroma": "green",
+    "chroma_note": "Палитра тёмная чёрно-серебристая с тёплым коричневым мехом без зелёного — зелёный хромакей безопасен; меловое облако у рук светлое почти белое, при сведении проверить кромку пыли отдельно, чтобы не срезать полупрозрачные края облака."
+  }
+]
