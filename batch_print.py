@@ -29,11 +29,24 @@ import cv2                    # noqa: E402
 import numpy as np            # noqa: E402
 from PIL import Image, ImageEnhance  # noqa: E402
 
-import art_director           # noqa: E402
-import chroma_remove          # noqa: E402
-import config                 # noqa: E402
-import providers              # noqa: E402
-import typography             # noqa: E402
+import art_director            # noqa: E402
+import character_ref           # noqa: E402
+import chroma_remove           # noqa: E402
+import config                  # noqa: E402
+import providers               # noqa: E402
+import typography              # noqa: E402
+
+
+# Блок промпта, форсирующий рисование ПО РЕФЕРЕНСУ (см. character_ref.get_reference) —
+# добавляется СПЕРЕДИ художественного промпта, когда для темы нашёлся каноничный
+# портрет персонажа. Явно запрещает копировать позу/фон референса — референс только
+# про личность персонажа (лицо/причёска/костюм), не про композицию.
+_REFERENCE_PREFIX = (
+    "Use the reference image as the EXACT character identity: same face, same "
+    "hairstyle, same iconic outfit and accessories. Redraw this character in a NEW "
+    "pose and composition as described below. Do not copy the reference pose or "
+    "background. "
+)
 
 
 # ── QC-гейт границ кадра (перенесено дословно из comfyui-print-server/batch_print.py) ──
@@ -106,7 +119,10 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     типографика -> 4 файла (tag_raw.png/tag_diecut.png/tag_ongreen.png/tag_design.json)
     в outdir. Переиспользуется и CLI-батчем (run_one ниже), и daily_prints.py.
 
-    design: dict из art_director.make_ideas (prompt/chroma/slogan/slogan_color/kana).
+    design: dict из art_director.make_ideas (prompt/chroma/slogan/slogan_color/kana/
+    character_en/title_en). Если character_en непусто — перед генерацией достаётся
+    каноничный референс-портрет персонажа (character_ref.get_reference) и рисование
+    идёт ПО РЕФЕРЕНСУ (см. providers.generate_image(reference=...)), иначе как раньше.
     tag: базовое имя файлов без расширения (напр. "01" или "0137_kenpachi").
     Возвращает {"ok": bool, "attempts": int, "coverage": float, "error": str|None,
     "raw": path|None, "diecut": path|None, "ongreen": path|None, "design_json": path}
@@ -123,6 +139,27 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     prompt = art_director.build_prompt(design)
     seed = random.randint(0, 2**31 - 1)
 
+    # Рисование ПО РЕФЕРЕНСУ: если арт-директор распознал конкретного вымышленного
+    # персонажа (character_en непусто), достаём каноничный портрет (Jikan/AniList,
+    # см. character_ref.py) и подмешиваем его в запрос — иначе nano-banana рисует
+    # персонажа «по мотивам» (лицо/канон-приметы приблизительные). Любой сбой поиска
+    # референса -> None, генерация идёт по чистому тексту, как раньше (не падаем).
+    reference = None
+    character_en = str(design.get("character_en") or "").strip()
+    if character_en:
+        try:
+            reference = character_ref.get_reference(character_en, design.get("title_en", ""))
+        except Exception as e:  # noqa: BLE001 — поиск референса не должен ронять генерацию
+            print(f"{p} !! character_ref упал для {character_en!r}: {e} — без референса",
+                  flush=True)
+            reference = None
+        if reference is not None:
+            prompt = _REFERENCE_PREFIX + prompt
+            print(f"{p} референс найден: {character_en!r} — рисуем ПО РЕФЕРЕНСУ", flush=True)
+        else:
+            print(f"{p} референс для {character_en!r} не найден — генерация по тексту, "
+                  f"как раньше", flush=True)
+
     # QC-гейт границ кадра: до timeout_retries доп. попыток генерации (итого максимум
     # 1+timeout_retries попыток), берём попытку с максимальным coverage рамки хромакеем.
     best_img, best_cov, best_seed = None, -1.0, seed
@@ -133,7 +170,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         try:
             print(f"{p} генерация... seed={try_seed} chroma={design['chroma']} "
                   f"slogan={design.get('slogan')!r}", flush=True)
-            attempt_img = providers.generate_image(prompt, seed=try_seed)
+            attempt_img = providers.generate_image(prompt, seed=try_seed, reference=reference)
         except Exception as e:  # noqa: BLE001
             print(f"{p} !! попытка {attempt + 1} упала: {e}", flush=True)
             result["error"] = str(e)

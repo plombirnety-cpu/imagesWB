@@ -9,7 +9,14 @@ Image), с двумя реализациями:
   base64 в inlineData.
 
 Выбор через .env IMAGE_PROVIDER. Обе реализации отдают одинаковый контракт:
-generate_image(prompt, seed=None) -> PIL.Image (RGB).
+generate_image(prompt, seed=None, reference=None) -> PIL.Image (RGB).
+
+reference (опционально, PIL.Image) — каноничный портрет персонажа (см.
+character_ref.get_reference): рисование ПО РЕФЕРЕНСУ вместо чистого текстового
+описания — лечит проблему «похож по мотивам, но не канон» (напр. Кенпачи без
+фирменной повязки на глазу). Поддержано ТОЛЬКО gemini (contents.parts =
+[inline_data JPEG референса, text промпта] — референс идёт ПЕРЕД текстом).
+pollinations референс не поддерживает — печатает предупреждение и игнорирует.
 """
 import base64
 import io
@@ -62,8 +69,29 @@ def _generate_pollinations(prompt: str, seed: int, model: str = None,
     raise RuntimeError(f"Pollinations (nanobanana) не отдал картинку: {last_err}")
 
 
-def _generate_gemini(prompt: str, seed: int = None) -> Image.Image:
-    """Google Gemini API напрямую (gemini-2.5-flash-image = nano-banana), без SDK."""
+def _reference_to_inline_part(reference: Image.Image, max_side: int = 768) -> dict:
+    """Референс-картинка -> часть запроса Gemini {"inline_data": {...}}. Уменьшает
+    референс до max_side по большей стороне (nano-banana не требует оригинального
+    разрешения референса — достаточно узнаваемого лица/причёски/костюма, меньше
+    картинка = меньше токенов на запрос) и кодирует как JPEG base64."""
+    img = reference.convert("RGB")
+    w, h = img.size
+    scale = max_side / float(max(w, h))
+    if scale < 1.0:
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return {"inline_data": {"mime_type": "image/jpeg", "data": b64}}
+
+
+def _generate_gemini(prompt: str, seed: int = None,
+                      reference: Image.Image = None) -> Image.Image:
+    """Google Gemini API напрямую (gemini-2.5-flash-image = nano-banana), без SDK.
+
+    reference (опционально): PIL.Image канонiчного портрета персонажа — подмешивается
+    ПЕРЕД текстом в contents.parts, чтобы модель рисовала ПО РЕФЕРЕНСУ (та же личность
+    лица/причёски/костюма), а не «по мотивам» одного текстового описания."""
     if not config.GEMINI_API_KEY:
         raise RuntimeError(
             "GEMINI_API_KEY не задан в .env — нужен для IMAGE_PROVIDER=gemini "
@@ -71,8 +99,12 @@ def _generate_gemini(prompt: str, seed: int = None) -> Image.Image:
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{config.GEMINI_MODEL}:generateContent")
     headers = {"Content-Type": "application/json", "x-goog-api-key": config.GEMINI_API_KEY}
+    parts = []
+    if reference is not None:
+        parts.append(_reference_to_inline_part(reference))
+    parts.append({"text": prompt})
     body = {
-        "contents": [{"parts": [{"text": prompt}]}],
+        "contents": [{"parts": parts}],
         "generationConfig": {"responseModalities": ["IMAGE"]},
     }
     last_err = None
@@ -99,13 +131,22 @@ def _generate_gemini(prompt: str, seed: int = None) -> Image.Image:
     raise RuntimeError(f"Gemini (nano-banana) не отдал картинку: {last_err}")
 
 
-def generate_image(prompt: str, seed: int = None, model: str = None) -> Image.Image:
-    """Единая точка входа. Провайдер выбирается через config.IMAGE_PROVIDER."""
+def generate_image(prompt: str, seed: int = None, model: str = None,
+                    reference: Image.Image = None) -> Image.Image:
+    """Единая точка входа. Провайдер выбирается через config.IMAGE_PROVIDER.
+
+    reference (опционально): PIL.Image канонiчного портрета персонажа (см.
+    character_ref.get_reference) — рисование ПО РЕФЕРЕНСУ вместо чистого текста.
+    Поддержано только провайдером gemini; pollinations референс игнорирует (с явным
+    предупреждением в консоль) и генерирует как раньше — не падает."""
     seed = seed if seed is not None else random.randint(0, 2**31 - 1)
     provider = config.IMAGE_PROVIDER
     if provider == "gemini":
-        return _generate_gemini(prompt, seed)
+        return _generate_gemini(prompt, seed, reference=reference)
     if provider == "pollinations":
+        if reference is not None:
+            print("  !! providers: референс проигнорирован (pollinations) — генерирую "
+                  "по тексту, как раньше", flush=True)
         return _generate_pollinations(prompt, seed, model)
     raise RuntimeError(f"неизвестный IMAGE_PROVIDER={provider!r} (ожидается "
                        f"'pollinations' или 'gemini')")

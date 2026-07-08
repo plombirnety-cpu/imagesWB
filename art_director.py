@@ -66,7 +66,12 @@ SYSTEM_CUTOUT = (
     "даже если в cutout не используется>\","
     "\"slogan_color\":\"<red|orange|white|yellow|purple|black — контрастный цвет>\","
     "\"kana\":\"<имя персонажа катаканой, 2-8 знаков, напр. タンジロウ; если не уверен "
-    "в точном написании или тема не японская — пустая строка \\\"\\\">\"}. "
+    "в точном написании или тема не японская — пустая строка \\\"\\\">\","
+    "\"character_en\":\"<имя персонажа ЛАТИНИЦЕЙ, как в англоязычных базах данных "
+    "(напр. \\\"Kenpachi Zaraki\\\"); ПУСТАЯ строка \\\"\\\", если тема НЕ про конкретного "
+    "вымышленного персонажа (машина, бытовой концепт и т.п.)>\","
+    "\"title_en\":\"<франшиза/тайтл персонажа ЛАТИНИЦЕЙ (напр. \\\"Bleach\\\"); ПУСТАЯ "
+    "строка \\\"\\\", если character_en пустой или франшиза неизвестна>\"}. "
     "Отвечай СТРОГО JSON-массивом таких объектов, без markdown и пояснений."
 )
 
@@ -88,7 +93,12 @@ SYSTEM_DIECUT = (
     "не-персонажной темы (напр. машина) — короткая уместная фраза по теме; БЕЗ кириллицы>\","
     "\"slogan_color\":\"<red|orange|white|yellow|purple|black — контрастный низу дизайна>\","
     "\"kana\":\"<имя персонажа катаканой, 2-8 знаков, напр. タンジロウ; если не уверен в "
-    "точном написании или тема не японская — пустая строка \\\"\\\">\"}. "
+    "точном написании или тема не японская — пустая строка \\\"\\\">\","
+    "\"character_en\":\"<имя персонажа ЛАТИНИЦЕЙ, как в англоязычных базах данных "
+    "(напр. \\\"Kenpachi Zaraki\\\"); ПУСТАЯ строка \\\"\\\", если тема НЕ про конкретного "
+    "вымышленного персонажа (машина, бытовой концепт и т.п.)>\","
+    "\"title_en\":\"<франшиза/тайтл персонажа ЛАТИНИЦЕЙ (напр. \\\"Bleach\\\"); ПУСТАЯ "
+    "строка \\\"\\\", если character_en пустой или франшиза неизвестна>\"}. "
     "Отвечай СТРОГО JSON-массивом таких объектов, без markdown и пояснений."
 )
 
@@ -99,7 +109,7 @@ def _ask_claude(theme: str, n: int, fmt: str) -> str:
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     user = (f"Запрос: {theme}. Дай ровно {n} разных дизайн(ов). JSON-массив из {n} "
             f"объектов {{\"prompt\":..., \"chroma\":..., \"slogan\":..., "
-            f"\"slogan_color\":..., \"kana\":...}}.")
+            f"\"slogan_color\":..., \"kana\":..., \"character_en\":..., \"title_en\":...}}.")
     resp = client.messages.create(
         model=MODEL,
         max_tokens=1500,
@@ -166,8 +176,17 @@ def _parse(text: str) -> list:
         if not (2 <= len(kana) <= 8 and _KANA_RE.match(kana)):
             kana = ""
 
+        # character_en/title_en: имя персонажа и франшизы ЛАТИНИЦЕЙ (для character_ref.py —
+        # поиск каноничного референс-портрета на Jikan/AniList). Дефолт "" (обратная
+        # совместимость со старым JSON без этих полей — Claude их просто не пришлёт).
+        character_en = re.sub(r"[^A-Za-z0-9 .'\-]", "",
+                              str(x.get("character_en") or "")).strip()[:60]
+        title_en = re.sub(r"[^A-Za-z0-9 .:!'\-]", "",
+                          str(x.get("title_en") or "")).strip()[:60]
+
         out.append({"prompt": prompt, "chroma": chroma,
-                    "slogan": slogan, "slogan_color": scolor, "kana": kana})
+                    "slogan": slogan, "slogan_color": scolor, "kana": kana,
+                    "character_en": character_en, "title_en": title_en})
     return out
 
 

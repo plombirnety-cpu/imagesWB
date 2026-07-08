@@ -12,8 +12,9 @@
 ## Пайплайн одного дизайна
 
 ```
-тема -> Claude-арт-директор (идея + промпт + слоган + kana-имя)
-     -> nano-banana рисует дизайн на хромакей-фоне
+тема -> Claude-арт-директор (идея + промпт + слоган + kana-имя + character_en/title_en)
+     -> (если character_en распознан) character_ref.py: каноничный референс-портрет
+     -> nano-banana рисует дизайн на хромакей-фоне (по тексту, либо ПО РЕФЕРЕНСУ)
      -> вырезка фона кодом (chroma_remove.py)
      -> слоган накладывается КОДОМ (typography.py)
      -> 4 файла на дизайн
@@ -23,7 +24,8 @@
 - `NN_raw.png` — как сгенерилось (сырой хромакей-фон);
 - `NN_diecut.png` — прозрачный PNG (вырезка + типографика + juice-цвет);
 - `NN_ongreen.png` — та же вырезка на ровном зелёном фоне RGB(0,177,64);
-- `NN_design.json` — дамп идеи/промпта/слогана/kana/chroma для воспроизводимости.
+- `NN_design.json` — дамп идеи/промпта/слогана/kana/chroma/character_en/title_en для
+  воспроизводимости.
 
 Ядро пайплайна одного дизайна — функция `batch_print.render_design()`, переиспользуется
 и разовым батчем, и ежедневным оркестратором (не продублировано).
@@ -33,6 +35,45 @@
 - `cutout` — просто персонаж на хромакее, без обрамления и без художественного слогана.
 - `diecut` — персонаж в обрамлении пламени/энергии, образующем внешний силуэт дизайна,
   + слоган-катчфраза снизу (стиль см. ниже).
+
+## Референсы персонажей (`character_ref.py`)
+
+**Проблема**: аниме-персонажи по одному текстовому промпту выходят «по мотивам» — не
+похожими на канон (например у Кенпачи Зараки нет фирменной повязки на глазу), хотя
+реальные объекты (машины и т.п.) nano-banana рисует отлично без референса. Причина:
+gemini-2.5-flash-image принимает на вход не только текст, но и изображение — и умеет
+перерисовать персонажа в новой позе, СОХРАНИВ опознаваемость лица/причёски/костюма,
+если дать ей узнаваемый портрет-эталон.
+
+**Решение** — рисование ПО РЕФЕРЕНСУ вместо чистого текста:
+
+1. Арт-директор (`art_director.py`) теперь возвращает для каждого дизайна ещё два
+   поля: `character_en` (имя персонажа латиницей, напр. `"Kenpachi Zaraki"`; пустая
+   строка, если тема не про конкретного вымышленного персонажа) и `title_en`
+   (франшиза латиницей, напр. `"Bleach"`).
+2. Если `character_en` непусто, `batch_print.render_design()` вызывает
+   `character_ref.get_reference(character_en, title_en)` — функция ищет каноничный
+   портрет персонажа:
+   - Источник 1 — **Jikan** (MyAnimeList): `GET /v4/characters?q=<character_en>&limit=10`,
+     выбор лучшего совпадения по точности имени + максимуму `favorites`; при
+     неоднозначности топ-1/топ-2 (близкие favorites) — доп. запрос
+     `GET /v4/characters/{id}/anime`, побеждает кандидат, у которого встречается
+     `title_en`.
+   - Источник 2 (fallback) — **AniList** GraphQL `Character(search: ...) { image { large } }`.
+   - Кэш на диске: `data/char_refs/<slug>.jpg` — повторный запрос читает файл, сеть не
+     трогает.
+3. При успехе — к промпту СПЕРЕДИ добавляется явный блок: используй референс как
+   ТОЧНУЮ личность персонажа (лицо/причёска/костюм), но нарисуй НОВУЮ позу/композицию,
+   не копируй позу/фон референса. Референс кодируется в base64 JPEG (сжат до 768px по
+   большей стороне) и уходит в Gemini-запрос ПЕРЕД текстом промпта
+   (`providers.generate_image(..., reference=...)`, только провайдер `gemini` —
+   `pollinations` референс игнорирует с предупреждением, генерирует как раньше).
+4. Любой сбой (сеть недоступна, персонаж не найден ни на Jikan, ни на AniList) —
+   `get_reference` возвращает `None` с предупреждением в консоль, генерация идёт по
+   чистому тексту, как раньше (graceful degradation, ничего не падает).
+
+QC-гейт границ кадра, ретраи, вырезка фона и типографика слогана работают одинаково
+и с референсом, и без — референс влияет только на сам вызов генерации картинки.
 
 ## Разовый батч — запуск
 
@@ -306,6 +347,13 @@ IMAGE_PROVIDER=gemini   # или pollinations
     `ValueError: truth value of a DataFrame is ambiguous`; в `franchise_scout.
     _gtrends_related` используется явный `isinstance`+`.to_dict("records")`
     вместо булевой проверки объекта.
+15. Рисование ПО РЕФЕРЕНСУ (`character_ref.py`) поддержано ТОЛЬКО провайдером
+    `gemini` — `pollinations` его игнорирует (с явным предупреждением), так как
+    формат вызова `gen.pollinations.ai` для модели `nanobanana` не документирован
+    как принимающий image-input в этом заходе.
+16. Кэш референсов (`data/char_refs/<slug>.jpg`) переживает битые файлы — при ошибке
+    чтения (`PIL.UnidentifiedImageError` и т.п.) `character_ref.py` печатает
+    предупреждение и перезапрашивает сеть, не падает.
 
 ## Структура
 
@@ -317,7 +365,8 @@ print-factory-nb/
   daily_prints.py      — дневной оркестратор (план -> смета -> журнал -> генерация)
   setup_daily_task.ps1 — регистрация в Планировщике Windows
   art_director.py      — Claude-арт-директор (промпты прозой под nanobanana)
-  providers.py         — абстракция gemini/pollinations
+  character_ref.py     — каноничный референс-портрет персонажа (Jikan/AniList + кэш)
+  providers.py         — абстракция gemini/pollinations (gemini поддерживает reference)
   chroma_remove.py     — вырезка хромакея (копия из market-content-bot, не менять tol=52)
   bg_removal.py        — rembg-фолбэк (нужен chroma_remove.cutout_green как страховка)
   typography.py        — наложение слогана (копия из comfyui-print-server)
@@ -325,6 +374,7 @@ print-factory-nb/
   themes_test.txt      — приёмочные темы (разовый батч)
   evergreen_themes.txt — вечнозелёный пул тем для добора дневного плана
   data/franchise_cache/ — кэш досье franchise_scout (data/ в .gitignore)
+  data/char_refs/       — кэш референс-портретов character_ref.py (data/ в .gitignore)
   requirements.txt
   .env / .env.example / .gitignore
   docs/PROJECT_STATE.md
@@ -355,6 +405,13 @@ print-factory-nb/
   силуэт с полями, слоган+kana, запрет вторых существ, выбор chroma) взяты из
   `comfyui-print-server/art_director.py::SYSTEM_DIECUT`; сами промпты картинки
   переписаны с нуля кинематографичной прозой под nano-banana (не danbooru-теги).
+  Поля `character_en`/`title_en` — новые (этот заход), нужны только `character_ref.py`.
+- `character_ref.py` — новый файл (не перенесён ниоткуда). Эндпоинты Jikan
+  (`/v4/characters`, `/v4/characters/{id}/anime`) и паттерн graceful degradation
+  (429/Retry-After, try/except на каждый источник) сверены со стилем уже рабочего
+  `franchise_scout.py` (тот же проект, `_jikan_characters`/`_anilist_characters`) —
+  сама GraphQL-схема AniList другая (`Character(search:...) { image { large } }`,
+  не `Media.characters`), т.к. нужен один персонаж по имени, а не ростер тайтла.
 - `generator.py` (market-content-bot) — источник паттерна вызова Pollinations
   (`gen.pollinations.ai`, Bearer-токен, перебор с ретраями) и стиля письма прозой.
 - `theme_scout.py` — источник данных (CSV-формат, парсеры) — `trend-watch/media_watch.py`
