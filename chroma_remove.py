@@ -198,10 +198,33 @@ def cutout_green(img_pil: Image.Image, tol: float = 52.0) -> Image.Image:
     ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
     dist = np.sqrt((ycc[:, :, 1] - keyy[1]) ** 2 + (ycc[:, :, 2] - keyy[2]) ** 2)
 
-    a_rembg = np.array(cut_out(img_pil).convert("RGBA"))[:, :, 3].astype(np.float32) / 255.0
     a_color = np.clip((dist - 12.0) / 36.0, 0.0, 1.0)  # 1=далеко от зелёного (дизайн)
-    a = np.maximum(a_rembg, a_color)                   # союз: держим руки/эффекты
-    a[dist < tol] = 0.0                                # убрать зелёный (фон + карманы)
+    a_rembg = None
+    try:
+        a_rembg = np.array(cut_out(img_pil).convert("RGBA"))[:, :, 3].astype(np.float32) / 255.0
+    except Exception as e:  # noqa: BLE001 — ONNX может упасть по памяти (bad allocation)
+        import gc
+        gc.collect()
+        try:  # повтор на уменьшенной копии: маска мягкая, даунскейл почти не вредит
+            small = img_pil.resize((w * 3 // 5, h * 3 // 5), Image.LANCZOS)
+            m = np.array(cut_out(small).convert("RGBA"))[:, :, 3]
+            a_rembg = np.array(Image.fromarray(m).resize((w, h), Image.BILINEAR),
+                               dtype=np.float32) / 255.0
+            print("  ! rembg: полный кадр не влез в память, маска с даунскейла", flush=True)
+        except Exception as e2:  # noqa: BLE001
+            print(f"  ! rembg недоступен ({str(e2)[:100]}) — вырезка чистым колор-кеем "
+                  f"(тёмные области у края допуска могут пострадать)", flush=True)
+    if a_rembg is not None:
+        a = np.maximum(a_rembg, a_color)               # союз: держим руки/эффекты
+        # Жёсткое обнуление по близости к ключу выедало ТЁМНУЮ одежду со спиллом
+        # (Кенпачи), хотя rembg уверенно держал тело. Поэтому: чистый ключ (карманы
+        # фона, dist<16) — всегда фон; спорная зона (16..tol) — фон только там, где
+        # rembg НЕ уверен, что это объект.
+        a[(dist < tol) & (a_rembg < 0.6)] = 0.0
+        a[dist < 16.0] = 0.0
+    else:
+        a = a_color
+        a[dist < tol] = 0.0                            # убрать зелёный (фон + карманы)
 
     # DESPILL по каналу ФОНА (адаптивно, глобально): green-экран -> гасим избыток G над
     # max(R,B); blue-экран -> избыток B над max(R,G). Канал берём по доминанте цвета рамки.

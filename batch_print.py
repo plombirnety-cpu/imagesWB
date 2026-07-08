@@ -172,6 +172,13 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         slogan = design.get("slogan", "")
         slogan_color = design.get("slogan_color", "orange")
         kana = design.get("kana", "")
+        # Типографика калибрована под портретный кадр ComfyUI (текстовая зона ниже
+        # 0.80H, кегль от ширины) — на квадрате nano-banana двухстрочный слоган
+        # обрезается краем. Квадратный кадр расширяем вниз прозрачной полосой.
+        if slogan and text_style != "none" and cut.height < int(cut.width * 1.15):
+            extended = Image.new("RGBA", (cut.width, int(cut.width * 1.28)), (0, 0, 0, 0))
+            extended.paste(cut, (0, 0))
+            cut = extended
         final = typography.apply_style(cut, text_style, slogan, slogan_color, kana)
         diecut_path = outdir / f"{tag}_diecut.png"
         final.save(diecut_path)
