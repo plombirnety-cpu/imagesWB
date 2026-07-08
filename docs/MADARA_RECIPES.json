@@ -1,0 +1,142 @@
+[
+  {
+    "id": "01_gothic_gold",
+    "name": "Готическое золото-барокко",
+    "moment": "Мадара в полный рост (фигура занимает 75-80% высоты кадра), длинные чёрные растрёпанные волосы до пояса развеваются, красная самурайская пластинчатая броня с традиционными наплечниками, риннеган активен, левая рука раскрытой ладонью выставлена вперёд к зрителю в жесте применения техники — вокруг ладони и по краю кадра орнаментальная барочная рамка из тонких золотых завитков и мелких кленовых листьев, будто гравировка на латунной пластине.",
+    "art_style": "high-detail anime key visual с элементами гравюры-барокко: чёткая обводка фигуры, но фон и рамка проработаны как металлическая гравировка, глубокие тени, глянцевые блики на броне",
+    "text_content": {
+      "main": "WAKE UP TO REALITY",
+      "secondary": "",
+      "vertical_jp": "うちはマダラ"
+    },
+    "typography": "Main phrase set in an ornate blackletter-meets-antiqua display face (character like UnifrakturCook or Cinzel Black with decorative swash caps on the first and last letter), rendered in glossy metallic gold (radial gradient light-yellow to deep amber) with a thin engraved bronze outline (stroke_width approx 0.05x cap-height) and a soft drop shadow in dark maroon offset 2% down-right. Text is arranged in a shallow upward arc that follows the curvature of the ornamental frame's top edge, sitting ABOVE Madara's head in the empty space between his hair peaks and the frame border — never overlapping the figure. Letters are wide-tracked: gap between words is 0.06x cap-height (generous, so the arc reads as a single elegant band, not cramped). Cap-height starts at 0.11x figure width, scales down only if the arc exceeds 0.9x frame width. The vertical kanji column うちはマダラ is placed fully inside the ornamental frame on the right margin, outside the figure's silhouette (not overlapping Madara), rendered in matching glossy gold with the same bronze outline, glyph size 0.09x figure width, one clean unbroken column, gap between glyphs 0.05x glyph height.",
+    "palette": "deep blood red, antique gold, aged bronze, near-black charcoal",
+    "chroma": "green"
+  },
+  {
+    "id": "02_sumie_calligraphy",
+    "name": "Суми-э каллиграфия огромными мазками",
+    "moment": "Мадара показан по грудь и плечи, но фигура всё равно занимает 72% высоты кадра за счёт того, что нижняя часть его силуэта (плащ) растворяется в туши — призывает полное Сусаноо: за спиной проступает лишь верхняя половина рёбер синего призрачного воина, растушёванная как мазок кисти, шаринган на три томоэ смотрит прямо на зрителя.",
+    "art_style": "sumi-e ink wash painting — монохромная тушь с единственным акцентным цветом (алый шаринган и алая печать), рваные высохшие края мазков кисти (kasure), минимум деталей, максимум негативного пространства",
+    "text_content": {
+      "main": "舞",
+      "secondary": "DANCE",
+      "vertical_jp": ""
+    },
+    "typography": "The single giant kanji 舞 (mai, 'dance' — Madara's battle invitation) is not typeset from a font file but rendered as an enormous calligraphic ink-brush stroke, occupying roughly 55% of the canvas width, painted so that its brushstrokes physically merge with the ink-wash strokes forming Madara's cloak and Susanoo's ribs — the character's strokes and the figure's ink strokes share the same dry-brush texture and bleed into one another at 2-3 points (the character IS partly the artwork, not overlaid on top of it). Ink color pure sumi black with visible dry-brush texture (kasure) at stroke ends. Small romanized word 'DANCE' in a thin, minimal sans-serif (light weight, wide tracking 0.08x cap-height between letters) is stamped in small red, bottom-right corner like a hanko seal, cap-height only 0.03x figure width — deliberately tiny counterpoint to the giant kanji. No other text anywhere on the print.",
+    "palette": "sumi ink black, aged rice-paper cream, single seal red, pale grey wash",
+    "chroma": "blue"
+  },
+  {
+    "id": "03_fashion_editorial_interwoven",
+    "name": "Fashion-editorial антиква, вплетённая в фигуру",
+    "moment": "Мадара представлен как фэшн-портрет: голова и плечи развёрнуты в три четверти, длинные волосы уложены волной, тёмный плащ с высоким воротом (не броня — здесь нужен более чистый силуэт под моду), риннеган спокойный, полуприкрытые веки, поза статусная/аристократичная. Фигура крупная — 78% высоты кадра, кадрирована по грудь, с большим воздухом сверху и по бокам как на глянцевой обложке.",
+    "art_style": "fashion editorial anime — высокий контраст линии, плоские заливки без грубого целл-шейдинга, композиция как обложка Vogue, много воздуха вокруг фигуры",
+    "text_content": {
+      "main": "MADARA",
+      "secondary": "ウチハ",
+      "vertical_jp": ""
+    },
+    "typography": "Title MADARA set in Playfair Display Black (extreme thick/thin contrast serif), cap-height starting at 0.30x figure width — the word is wider than usual, baseline sits at 0.30x figure height from the top of the figure so it crosses through the collar/shoulder line. Rendered in two-pass interweave: the left half of the letters sits behind the figure (printed under the shoulder/hair layer), the right half sits printed on top of the figure's cloak collar — letters visually thread through the high collar and loose hair strands, some strokes disappearing behind a lock of hair and re-emerging past it. Fill color deep charcoal-black, no outline (the heavy weight carries contrast alone). Letter-spacing tight, 0.015x cap-height between letters (editorial titles sit close). Subtitle ウチハ (clan name in katakana) sits directly below-right of the title in Noto Sans JP Black, cap-height 0.045x figure width, positioned with its top edge 1.1x line-heights below the title baseline, colored deep crimson red — clearly secondary and distinct from the black title. Word gap between MADARA and nothing else (single word, no internal gap needed). No footer, no other text.",
+    "palette": "charcoal black, deep crimson, warm ivory skin tone, muted plum shadow",
+    "chroma": "blue"
+  },
+  {
+    "id": "04_grunge_stencil_military",
+    "name": "Гранж-стенсил милитари с потёртостями",
+    "moment": "Мадара в полный рост, 80% высоты кадра, широкая боевая стойка, красная самурайская пластинчатая броня с наплечниками потрёпана и в трещинах текстуры, в правой руке высоко поднят gunbai war fan (жёсткий боевой веер с закруглённым краем и цепью-кусари, читается силуэтом), шаринган активен, за спиной низкий шлейф дыма/пыли от метеоритов Tengai Shinsei, бьющих на заднем плане.",
+    "art_style": "military stencil grunge — текстура распылённой краски по трафарету, зернистость, потёртые края, приглушённая палитра хаки/ржавчина поверх обычной anime cel-shading фигуры",
+    "text_content": {
+      "main": "POWER IS NOT WILL",
+      "secondary": "UCHIHA MADARA",
+      "vertical_jp": ""
+    },
+    "typography": "Main phrase stenciled in a heavy military stencil typeface (blocky, with the characteristic stencil-gaps breaking each letterform), spray-paint texture with rough overspray edges and drip marks at the bottom of a few letters, color dull olive-khaki over a hard black underlay creating a doubled offset-print look (misregistration effect, second khaki layer offset 3px down-right from black layer). Text spans horizontally directly across the lower third of the figure's legs/hakama, stenciled AS IF sprayed straight onto the armor and cloth — letters bend slightly to follow the folds of the fabric beneath them. Cap-height 0.09x figure width, word gap 0.045x cap-height (stencil type needs visible gaps to read as stencil). Secondary line 'UCHIHA MADARA' in a thinner worn stencil weight sits below the main phrase as a single small stamp-like line, cap-height 0.03x figure width, centered, gap between the two words 0.05x cap-height, color faded rust-red like an old ammo-crate stamp. No kanji column in this version — the military stencil motif replaces it entirely.",
+    "palette": "olive khaki, rust red, gunmetal grey, worn black",
+    "chroma": "green"
+  },
+  {
+    "id": "05_neon_cyberpunk_katakana",
+    "name": "Неон-киберпанк катакана вывеской",
+    "moment": "Мадара в полный рост, 78% высоты кадра, стоит в дождливом неоновом городском переулке ночью, красная броня с наплечниками отражает цветные неоновые блики, риннеган светится собственным неоновым свечением, за спиной частично проступает силуэт Сусаноо как голографическая проекция из тонких синих контурных линий.",
+    "art_style": "cyberpunk neon-noir anime — глубокие тени, мокрый асфальт с отражениями, яркие неоновые контражуры на контуре фигуры, дождевые полосы, высокая насыщенность акцентных цветов на тёмном фоне",
+    "text_content": {
+      "main": "",
+      "secondary": "SHADOWS FOLLOW LIGHT",
+      "vertical_jp": "ウチハ"
+    },
+    "typography": "No main latin title in this recipe — the dominant text element is the katakana clan-word ウチハ built as a hanging neon sign: each glyph is rendered as a glowing tube-light letterform (bright magenta-to-cyan gradient core with a soft 0.15x-glyph-size outer glow/bloom), mounted as a vertical sign floating beside Madara's shoulder at the edge of the frame, tilted 4 degrees like a real hung sign, cable/wire details connecting glyph to glyph implied by thin dark lines. Glyph size 0.14x figure width, gap between glyphs 0.06x glyph height (neon signs need visible gap so each tube reads separately). Secondary phrase 'SHADOWS FOLLOW LIGHT' set in a thin futuristic condensed sans (letter-spacing wide, 0.09x cap-height between letters, all caps) as a small horizontal reflection-puddle text at the very bottom edge of the canvas, mirrored/reflected style with reduced opacity (55%) as if reading off the wet pavement beneath Madara's feet — cap-height only 0.035x figure width, clearly a background detail, not competing with the neon sign.",
+    "palette": "electric magenta, cyan neon, deep midnight blue, wet-asphalt black",
+    "chroma": "blue"
+  },
+  {
+    "id": "06_retro_manga_panel_onomatopoeia",
+    "name": "Ретро-манга панель со звуковыми онматопеями",
+    "moment": "Мадара в полный рост, 82% высоты кадра, кадр выстроен как классическая панель сёнен-манги: он в резком выпаде выпускает Katon — стену огня, вырывающуюся веером из-за спины, gunbai war fan занесён в замахе, широко раскрытый рот в боевом кличе, вся композиция в жёстком экшн-ракурсе снизу вверх.",
+    "art_style": "retro shonen manga panel — чёрно-белый хардкорный скринтон (dot screentone) на фоне и на пламени, толстые чёрные speed-lines радиально от фигуры, лишь один-два акцентных цветовых пятна (красная броня, шаринган) на иначе монохромном листе",
+    "text_content": {
+      "main": "DANCE, MADARA!",
+      "secondary": "ドドド",
+      "vertical_jp": ""
+    },
+    "typography": "Main battle-cry phrase 'DANCE, MADARA!' set in a bold retro comic-caps font (like Anton) inside a jagged manga speech-burst balloon (spiky star-burst outline, thick black border 0.04x cap-height) positioned in the upper-right empty corner of the panel, tilted -6 degrees, cap-height 0.085x figure width, word gap 0.05x cap-height, fill pure white with heavy black outline for readability over the screentone. The onomatopoeia ドドド (rumbling impact sound) is set as giant jagged manga sound-effect lettering (individually rotated katakana glyphs, each tilted a slightly different angle -10 to +10 degrees for dynamism, drawn with a rough hand-inked brush edge, NOT a straight vertical column) blasting diagonally across the lower-left of the frame behind the gunbai's swing arc, glyph size large and variable 0.10-0.16x figure width per glyph (biggest glyph nearest the fan blade, tapering smaller as it trails away), fill halftone-red with thick black keyline, gap between glyphs tight 0.02x glyph height (impact lettering overlaps slightly, unlike a calm column). Each text element used exactly once, no footer.",
+    "palette": "screentone black and white, blood red accent, halftone grey",
+    "chroma": "green"
+  },
+  {
+    "id": "07_minimalist_negative_space",
+    "name": "Минимализм: крохотный текст, огромная пустота",
+    "moment": "Мадара показан не в полный рост экшн-позой, а стоящим неподвижно спиной вполоборота, длинные волосы стекают вниз, лишь силуэт плеча и края красной брони с наплечником видны крупным планом с одной стороны кадра, риннеган — единственная яркая деталь, смотрящая прямо на зрителя через плечо; фигура всё ещё крупная (72% высоты кадра) но сдвинута к одному краю, оставляя намеренно почти всю остальную площадь кадра абсолютно пустой ровной заливкой.",
+    "art_style": "extreme minimalism — flat single-tone background with zero texture, figure rendered in clean anime cel-shading with sharply reduced palette (near-monochrome except the eye), huge deliberate negative space",
+    "text_content": {
+      "main": "MADARA",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "A single small word 'MADARA' set in a thin-weight modern sans (light/regular tracking, letter-spacing generously wide at 0.12x cap-height between letters, all lowercase 'madara' for quiet understatement instead of caps) placed alone in the vast empty two-thirds of the canvas, far from the figure, roughly at the optical center of the empty space (not touching any edge, not touching the figure's bounding box). Cap-height deliberately tiny, only 0.045x figure width — the single accent element in an otherwise silent composition. Color: a single desaturated dark grey-red (muted, not the bright sharingan red), no outline, no shadow, no stroke of any kind — flat minimal fill only. No kanji, no secondary line, no footer — this recipe's entire concept is one small word answering one huge silence.",
+    "palette": "warm off-white background, muted charcoal, single desaturated dark red accent (sharingan only)",
+    "chroma": "blue"
+  },
+  {
+    "id": "08_y2k_chrome_metallic",
+    "name": "Y2K хром-металлик с бликами",
+    "moment": "Мадара в полный рост, 76% высоты кадра, динамичная поза с резким разворотом, длинные волосы взметнулись, красная броня с наплечниками рендерится с преувеличенно глянцевыми хромированными бликами как ранние 2000е обложки, шаринган ярко-алый, за спиной размытый шлейф скорости.",
+    "art_style": "Y2K chrome aesthetic — hyper-glossy specular highlights, plastic-chrome bevel edges, bubble-shine streaks, saturated candy-color gradients, faint pixel-sparkle particles",
+    "text_content": {
+      "main": "IN THIS WORLD",
+      "secondary": "WHEREVER THERE IS LIGHT THERE ARE ALSO SHADOWS",
+      "vertical_jp": ""
+    },
+    "typography": "Main line 'IN THIS WORLD' set in a bulbous chrome-bubble Y2K display face (thick rounded terminals, inflated balloon-letter look) with a full chrome-metallic gradient fill (bright white hot-spot highlight streak diagonally across the upper third of each letter, fading to steel-grey then to deep blue-black at the letter base, mimicking liquid chrome) and a thin hot-pink outer glow stroke (0.03x cap-height), positioned arcing slightly upward directly above Madara's head with generous clearance, cap-height 0.13x figure width, word gap 0.06x cap-height. Secondary line (the rest of the quote) wraps beneath in a smaller matching chrome style but flat two-line block, centered under the figure at the bottom margin (not overlapping the figure, 4% canvas height below the feet), cap-height 0.045x figure width, line-height gap 1.15x, word gap 0.04x cap-height, same chrome-gradient fill but without the pink glow (visually subordinate to the main line above). Each phrase appears exactly once, split only between main/secondary, no repetition.",
+    "palette": "chrome silver-white, hot pink glow, candy blue-black, sharingan red accent",
+    "chroma": "blue"
+  },
+  {
+    "id": "09_ring_medallion_arc",
+    "name": "Кольцо-медальон: текст по дуге вокруг фигуры",
+    "moment": "Мадара в полный рост, 74% высоты кадра, стоит по центру в статичной фронтальной позе, риннеган (кольца) активен, руки скрещены на груди поверх пластинчатой брони, вокруг всей фигуры на равном радиуальном расстоянии проходит тонкое декоративное кольцо/окружность (как медальон-печать), внутри которого вписана вся композиция — классическая структура герба.",
+    "art_style": "emblem / medallion badge design — фигура в анимеклассической целл-заливке в центре, тонкая декоративная окружность и орнаментальные засечки формируют кольцевую рамку вокруг неё, как монета или цеховой герб",
+    "text_content": {
+      "main": "UCHIHA MADARA",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "The phrase 'UCHIHA MADARA' is set as a full ambigram-style ring running along the inside of the decorative circular medallion border that frames the whole figure — letters curve continuously along the circle's circumference, top-to-bottom on both left and right sides so the words read correctly whether the eye travels clockwise from the top or the design is viewed as a coin. Typeface a clean bold condensed caps (even stroke weight so curved letters stay legible at any rotation), cap-height constant at 0.06x figure width regardless of position on the ring (no perspective-shrinking), letters individually rotated to stay perpendicular to the ring's radius at their position, gap between letters along the arc 0.05x cap-height, gap where the two words meet (top and bottom of the ring) widened to 0.15x cap-height with a small red Uchiha fan (uchiwa) emblem glyph marking the seam at the top of the ring. Fill deep black with a thin gold keyline stroke (0.02x cap-height) matching the medallion border metal tone. No text exists anywhere outside the ring — the circle IS the only typographic element, used exactly once.",
+    "palette": "aged gold ring, matte black letters, deep red accent (uchiwa fan emblem), ivory medallion field",
+    "chroma": "green"
+  },
+  {
+    "id": "10_disintegration_destruktiv",
+    "name": "Деструктив: буквы горят и рассыпаются",
+    "moment": "Мадара в полный рост, 80% высоты кадра, поза апогея силы — он раскинул руки в стороны, за спиной проступает голова и плечи полного Сусаноо (синий призрачный воин) частично материализовавшегося, вокруг фигуры вихрятся фрагменты почерневшего пепла и трещины света — метеориты Tengai Shinsei видны крошечными светящимися точками высоко в углу кадра.",
+    "art_style": "destruction VFX anime — фигура чётким целл-шейдингом в центре, но её крайние контуры (кончики волос, край плаща) физически распадаются на угли/частицы, растворяясь в частицах пепла и синих искрах Сусаноо",
+    "text_content": {
+      "main": "POWER IS NOT WILL",
+      "secondary": "",
+      "vertical_jp": ""
+    },
+    "typography": "The phrase 'POWER IS NOT WILL' is set in a heavy bold condensed display caps, positioned crossing directly through the lower half of the figure's cloak/legs, cap-height 0.12x figure width, word gap 0.05x cap-height. The typography is NOT a static text layer — each letter is individually fractured: the word 'POWER' (first half of the phrase, left side) is rendered intact and solid, filled deep charcoal-black with a thin ember-orange edge glow; the word 'WILL' (last word, right side, following the same disintegration direction as the cloak edge beside it) is progressively deconstructed — its letters shatter into smaller fragments and glowing ember particles that scatter away from the word into the surrounding ash-cloud VFX, matching the same particle scale and color (dull orange-red embers fading to grey ash) as the cloak's disintegration effect, so the last word visually dissolves into the artwork's own destruction VFX rather than sitting on top of it. Words 'IS' and 'NOT' in the middle are rendered at 70% opacity as a transitional stage between solid and fragmented. Outline on intact letters: dark umber, stroke_width 0.035x cap-height; fragmented letters have no outline (embers don't have hard edges). Phrase appears exactly once, no secondary text, no kanji column, no footer — the disintegration effect itself is the only decorative element besides the phrase.",
+    "palette": "charcoal black, ember orange, ash grey, cold Susanoo blue",
+    "chroma": "blue"
+  }
+]
