@@ -4,9 +4,11 @@
 облачный API nano-banana (Google Gemini Image), зеркальный аналог self-hosted
 comfyui-print-server/batch_print.py.
 
-Пайплайн: тема -> Claude-арт-директор (идея + промпт + слоган + kana) -> nano-banana
-рисует дизайн на хромакей-фоне -> вырезка фона кодом -> слоган накладывается кодом
-(typography.py) -> 4 файла на дизайн в out_batch/<run>/:
+Пайплайн: тема -> Claude-арт-директор (идея + промпт + слоган + kana + signature_props
++ text_mode) -> nano-banana рисует дизайн на хромакей-фоне -> вырезка фона кодом ->
+слоган накладывается кодом (typography.compose_text — типографика v2, режим text_mode
+решает арт-директор ПО КОМПОЗИЦИИ каждого дизайна) -> 4 файла на дизайн в
+out_batch/<run>/:
   NN_raw.png, NN_diecut.png (прозрачный), NN_ongreen.png (на ровном зелёном),
   NN_design.json (дамп идеи для воспроизводимости).
 
@@ -14,6 +16,7 @@ comfyui-print-server/batch_print.py.
   python batch_print.py --file themes.txt --format diecut
   python batch_print.py --file themes.txt --format cutout --text-style none
   python batch_print.py --file themes.txt --format diecut --chroma blue --text-style kana
+  python batch_print.py --file themes.txt --format diecut   # text-style=auto по умолчанию
 """
 import argparse
 import json
@@ -43,9 +46,9 @@ import typography              # noqa: E402
 # про личность персонажа (лицо/причёска/костюм), не про композицию.
 _REFERENCE_PREFIX = (
     "Use the reference image as the EXACT character identity: same face, same "
-    "hairstyle, same iconic outfit and accessories. Redraw this character in a NEW "
-    "pose and composition as described below. Do not copy the reference pose or "
-    "background. "
+    "hairstyle, same iconic outfit and accessories, and the character's signature "
+    "weapon exactly as in canon. Redraw this character in a NEW pose and composition "
+    "as described below. Do not copy the reference pose or background. "
 )
 
 
@@ -113,17 +116,25 @@ def drop_small_islands(rgba: Image.Image, min_frac: float = 0.002) -> Image.Imag
 # ── Генерация одного дизайна (переиспользуемое ядро пайплайна) ──────────────────
 
 def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2,
-                   text_style: str = "anton", no_juice: bool = False,
+                   text_style: str = "auto", no_juice: bool = False,
                    log_prefix: str = "") -> dict:
     """Полный цикл ОДНОГО дизайна: генерация (с QC-гейтом границ) -> вырезка ->
     типографика -> 4 файла (tag_raw.png/tag_diecut.png/tag_ongreen.png/tag_design.json)
     в outdir. Переиспользуется и CLI-батчем (run_one ниже), и daily_prints.py.
 
     design: dict из art_director.make_ideas (prompt/chroma/slogan/slogan_color/kana/
-    character_en/title_en). Если character_en непусто — перед генерацией достаётся
-    каноничный референс-портрет персонажа (character_ref.get_reference) и рисование
-    идёт ПО РЕФЕРЕНСУ (см. providers.generate_image(reference=...)), иначе как раньше.
+    character_en/title_en/signature_props/text_mode). Если character_en непусто —
+    перед генерацией достаётся каноничный референс-портрет персонажа
+    (character_ref.get_reference) и рисование идёт ПО РЕФЕРЕНСУ (см.
+    providers.generate_image(reference=...)), иначе как раньше.
     tag: базовое имя файлов без расширения (напр. "01" или "0137_kenpachi").
+
+    text_style: "auto" (дефолт) — типографика v2 (typography.compose_text), режим
+    берётся из design["text_mode"] (Claude решает ПО КОМПОЗИЦИИ конкретного дизайна:
+    none/under/punch/kana_side). Если передан ЯВНЫЙ стиль из typography.STYLES
+    (none/anton/kana/comic/tag, напр. через CLI --text-style) — он ПРИОРИТЕТНЕЕ
+    text_mode (обратная совместимость v1).
+
     Возвращает {"ok": bool, "attempts": int, "coverage": float, "error": str|None,
     "raw": path|None, "diecut": path|None, "ongreen": path|None, "design_json": path}
     — attempts нужен вызывающему коду для точного учёта стоимости (QC-ретраи считаются)."""
@@ -209,14 +220,25 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         slogan = design.get("slogan", "")
         slogan_color = design.get("slogan_color", "orange")
         kana = design.get("kana", "")
-        # Типографика калибрована под портретный кадр ComfyUI (текстовая зона ниже
-        # 0.80H, кегль от ширины) — на квадрате nano-banana двухстрочный слоган
-        # обрезается краем. Квадратный кадр расширяем вниз прозрачной полосой.
-        if slogan and text_style != "none" and cut.height < int(cut.width * 1.15):
-            extended = Image.new("RGBA", (cut.width, int(cut.width * 1.28)), (0, 0, 0, 0))
-            extended.paste(cut, (0, 0))
-            cut = extended
-        final = typography.apply_style(cut, text_style, slogan, slogan_color, kana)
+
+        if text_style == "auto":
+            # Типографика v2: режим решает Claude (design["text_mode"]) ПО КОМПОЗИЦИИ
+            # конкретного дизайна — compose_text сам расширяет холст по необходимости
+            # и кропит итог до контента (текст+фигура) с полями 4-6%, без мёртвой
+            # пустой полосы, которую оставлял старый блок расширения 1.28.
+            text_mode = design.get("text_mode", "none")
+            final = typography.compose_text(cut, text_mode, slogan, slogan_color, kana)
+        else:
+            # Явный --text-style из typography.STYLES (v1, обратная совместимость):
+            # приоритетнее text_mode. Старая калибровка v1 расчитана на портретный
+            # кадр ComfyUI (текстовая зона ниже 0.80H) — на квадрате nano-banana
+            # двухстрочный слоган обрезается краем, поэтому квадратный кадр расширяем
+            # вниз прозрачной полосой, как раньше.
+            if slogan and text_style != "none" and cut.height < int(cut.width * 1.15):
+                extended = Image.new("RGBA", (cut.width, int(cut.width * 1.28)), (0, 0, 0, 0))
+                extended.paste(cut, (0, 0))
+                cut = extended
+            final = typography.apply_style(cut, text_style, slogan, slogan_color, kana)
         diecut_path = outdir / f"{tag}_diecut.png"
         final.save(diecut_path)
         result["diecut"] = str(diecut_path)
@@ -265,10 +287,15 @@ def main() -> None:
     ap.add_argument("--format", choices=["cutout", "diecut"], default="diecut",
                      help="cutout = просто персонаж на хромакее; diecut = персонаж в "
                           "обрамлении пламени/энергии, образующем силуэт, + слоган снизу")
-    ap.add_argument("--text-style", choices=list(typography.STYLES), default="anton",
-                     help="типографика слогана (typography.py): none/anton/kana/comic/tag. "
-                          "Игнорируется по сути в cutout (слоган всё равно не рисуется "
-                          "художественно, но накладывается тем же способом)")
+    ap.add_argument("--text-style", choices=["auto"] + list(typography.STYLES),
+                     default="auto",
+                     help="типографика слогана: 'auto' (дефолт) — типографика v2 "
+                          "(typography.compose_text), режим (none/under/punch/kana_side) "
+                          "решает арт-директор ПО КОМПОЗИЦИИ каждого дизайна. Явный стиль "
+                          "из v1 (none/anton/kana/comic/tag, typography.py) ПРИОРИТЕТНЕЕ "
+                          "text_mode, если передан явно. Игнорируется по сути в cutout "
+                          "(слоган всё равно не рисуется художественно, но накладывается "
+                          "тем же способом)")
     ap.add_argument("--chroma", choices=["green", "blue"], default=None,
                      help="ручной override цвета хромакея для ВСЕХ дизайнов батча — "
                           "обходит выбор арт-директора и код-предохранитель")

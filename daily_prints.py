@@ -117,8 +117,11 @@ def _process_one(task: dict, idx: int, outdir: Path, dry_run: bool) -> dict:
         print(f"[{tag}] !! арт-директор упал: {e}", flush=True)
         return record
 
+    # text_style="auto" — типографика v2 (typography.compose_text), режим (none/under/
+    # punch/kana_side) решает арт-директор ПО КОМПОЗИЦИИ design["text_mode"] каждого
+    # конкретного задания (см. batch_print.render_design/typography.py, седьмой заход).
     res = batch_print.render_design(design, tag, outdir, timeout_retries=2,
-                                    text_style="anton", no_juice=False,
+                                    text_style="auto", no_juice=False,
                                     log_prefix=f"[{tag}]")
     record["attempts"] = res["attempts"]
     record["coverage"] = res["coverage"]
