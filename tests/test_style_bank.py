@@ -360,3 +360,67 @@ def test_missing_style_bank_build_prompt_unaffected(monkeypatch):
     prompt = ad.build_prompt(design)
     assert "VISUAL STYLE" not in prompt
     assert prompt.startswith("A young man stands in a heroic pose.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5. style_pref (mega_plan_800/build_mega_plan.py) — форсированный стиль
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_pick_style_candidates_style_pref_returns_only_that_style():
+    candidates = ad._pick_style_candidates("любая тема, не совпадает по mood_tags",
+                                            recent_styles=["19_tarot"],  # даже в recent
+                                            style_pref="19_tarot")
+    assert len(candidates) == 1
+    assert candidates[0]["id"] == "19_tarot"
+
+
+def test_pick_style_candidates_invalid_style_pref_falls_back_to_normal():
+    candidates = ad._pick_style_candidates("тема", style_pref="not_a_real_style_id")
+    assert len(candidates) > 1 or (candidates and candidates[0]["id"] != "not_a_real_style_id")
+
+
+def test_style_bank_block_style_pref_forces_wording_and_id():
+    block = ad._style_bank_block("любая тема", style_pref="19_tarot")
+    assert 'style_id ДОЛЖЕН быть ровно "19_tarot"' in block
+    assert 'id="19_tarot"' in block
+    assert "БАНК УТВЕРЖДЁННЫХ СТИЛЕЙ ВЛАДЕЛЬЦА — ОБЯЗАН выбрать" not in block
+
+
+def test_system_diecut_threads_style_pref_through():
+    sys_prompt = ad.system_diecut("тема", [], style_pref="09_ring_medallion")
+    assert 'id="09_ring_medallion"' in sys_prompt
+    assert 'style_id ДОЛЖЕН быть ровно "09_ring_medallion"' in sys_prompt
+
+
+def test_make_ideas_style_pref_forces_style_id_even_if_claude_ignores(monkeypatch):
+    """Claude (мокнутый) возвращает ДРУГОЙ style_id (симулирует несоблюдение
+    инструкции) — make_ideas обязан переписать его на style_pref (двойная
+    гарантия, см. make_ideas docstring)."""
+    bank = ad._load_style_bank()
+    other_id = next(s["id"] for s in bank["styles"] if s["id"] != "19_tarot")
+    response = json.dumps([{
+        "prompt": "a mystic figure stands", "chroma": "green",
+        "slogan": "FATE", "slogan_color": "purple",
+        "style_id": other_id, "style_mix": "",
+    }])
+    fake_client_cls, _ = _fake_anthropic_client(response)
+    monkeypatch.setattr(ad.anthropic, "Anthropic", fake_client_cls)
+
+    designs = ad.make_ideas("Лев — знак зодиака", 1, "diecut", style_pref="19_tarot")
+    assert designs[0]["style_id"] == "19_tarot"
+
+
+def test_make_ideas_no_style_pref_keeps_old_behavior(monkeypatch):
+    """style_pref=None (дефолт) — style_id остаётся тем, что вернул Claude (старое
+    поведение, обратная совместимость)."""
+    bank = ad._load_style_bank()
+    valid_id = bank["styles"][0]["id"]
+    response = json.dumps([{
+        "prompt": "a warrior stands", "chroma": "green",
+        "style_id": valid_id, "style_mix": "",
+    }])
+    fake_client_cls, _ = _fake_anthropic_client(response)
+    monkeypatch.setattr(ad.anthropic, "Anthropic", fake_client_cls)
+
+    designs = ad.make_ideas("тема", 1, "diecut")
+    assert designs[0]["style_id"] == valid_id

@@ -30,6 +30,23 @@ import typography_v3 as t3  # noqa: E402
 import upscale  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_real_replicate_token(monkeypatch):
+    """Шестнадцатый заход (бэкпорт Replicate-апскейла, см. upscale.py) — этот файл
+    тестирует ТОЛЬКО локальный realesrgan-ncnn-vulkan/Lanczos-путь upscale.py (мокан
+    на resize/subprocess, без сети). Если в реальном .env этой машины лежит боевой
+    REPLICATE_API_TOKEN (см. .env — он есть, ключ выдан владельцем), upscale.
+    replicate_available() вернёт True на модульной константе upscale.REPLICATE_
+    API_TOKEN (читается один раз при импорте upscale.py) — upscale_to_print_min()
+    тогда попробует РЕАЛЬНЫЙ сетевой вызов Replicate ПЕРВЫМ путём, ломая офлайн-
+    предположения тестов ниже (test_upscale_to_print_min_missing_exe_falls_back_to_
+    lanczos_from_source и др. ожидают, что упавший/отсутствующий realesrgan сразу
+    даёт Lanczos-фолбэк). Живой Replicate-путь отдельно покрыт tests/test_upscale_
+    replicate.py (мокан) + одноразовой ручной живой проверкой (см. передаточную
+    записку) — здесь принудительно "нет токена" для ВСЕХ тестов файла (autouse)."""
+    monkeypatch.setattr(upscale, "REPLICATE_API_TOKEN", "")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # upscale.py — мокан на resize (без реального exe/subprocess)
 # ═══════════════════════════════════════════════════════════════════════════════

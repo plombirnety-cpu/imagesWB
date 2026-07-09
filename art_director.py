@@ -122,7 +122,8 @@ def _style_by_id(style_id: str) -> dict | None:
 
 
 def _pick_style_candidates(theme: str, recent_styles: list = None,
-                            k: int = _STYLE_CANDIDATES_N) -> list:
+                            k: int = _STYLE_CANDIDATES_N,
+                            style_pref: str = None) -> list:
     """Кандидаты стилей для передачи Claude на выбор: сортировка по релевантности
     mood_tags/name_ru к теме (простой substring-скор, финальное решение всё равно
     принимает Claude — это только сужение списка) + ИСКЛЮЧЕНИЕ recent_styles
@@ -130,7 +131,19 @@ def _pick_style_candidates(theme: str, recent_styles: list = None,
     исключения recent осталось МЕНЬШЕ k стилей — донабирает из исключённых (лучше
     показать Claude немного стилей из недавних, чем урезать выбор до 1-2), явно
     помечая их как "недавние" в промпте (см. _style_bank_block), чтобы Claude их
-    избегал, но не был жёстко заблокирован при малом банке."""
+    избегал, но не был жёстко заблокирован при малом банке.
+
+    style_pref (mega_plan_800, build_mega_plan.py) — ФОРСИРОВАННЫЙ style_id для
+    ЭТОГО конкретного дизайна (напр. taro_zodiac -> "19_tarot"): если задан И
+    реально существует в банке (_style_by_id) — ротация/скоринг/recent_styles
+    ПОЛНОСТЬЮ ИГНОРИРУЮТСЯ, кандидатом становится ТОЛЬКО этот один стиль (Claude
+    не выбирает — обязан использовать именно его, см. _style_bank_block).
+    Невалидный/пустой style_pref — обычное поведение ниже, как будто параметра
+    не было (обратная совместимость)."""
+    if style_pref:
+        forced = _style_by_id(style_pref)
+        if forced:
+            return [forced]
     bank = _load_style_bank()
     if not bank:
         return []
@@ -165,21 +178,35 @@ def _pick_style_candidates(theme: str, recent_styles: list = None,
     return candidates[:k]
 
 
-def _style_bank_block(theme: str, recent_styles: list = None) -> str:
+def _style_bank_block(theme: str, recent_styles: list = None,
+                       style_pref: str = None) -> str:
     """Текстовый блок STYLE_BANK для системного промпта — список стилей-кандидатов
     (essence/text_treatment/mood_tags/constraints) + инструкция выбрать style_id
     (и опционально style_mix, до 2 стилей, если тема реально просит совмещения).
     Пустая строка, если банка нет (make_ideas тогда не добавляет поля style_id/
-    style_mix в JSON-запрос вовсе — старое поведение)."""
-    candidates = _pick_style_candidates(theme, recent_styles)
+    style_mix в JSON-запрос вовсе — старое поведение).
+
+    style_pref — см. _pick_style_candidates. Если форсирован (валидный id, банк
+    вернул ровно один кандидат) — блок меняет формулировку с "выбери лучший" на
+    "ОБЯЗАН использовать именно этот" (mega_plan_800, style_pref-приоритет)."""
+    candidates = _pick_style_candidates(theme, recent_styles, style_pref=style_pref)
     if not candidates:
         return ""
-    lines = [
-        "\n\nБАНК УТВЕРЖДЁННЫХ СТИЛЕЙ ВЛАДЕЛЬЦА — ОБЯЗАН выбрать style_id СТРОГО из "
-        "списка ниже для каждого дизайна (не изобретай свой стиль, не оставляй "
-        "пустым). Стили можно миксовать (style_mix) до 2 штук, ТОЛЬКО если тема "
-        "реально просит совмещения (иначе style_mix — пустая строка):",
-    ]
+    forced = bool(style_pref and len(candidates) == 1
+                  and candidates[0].get("id") == style_pref)
+    if forced:
+        lines = [
+            "\n\nСТИЛЬ ДЛЯ ЭТОГО ДИЗАЙНА ЗАДАН ЗАРАНЕЕ (владелец форсирует конкретный "
+            "стиль под эту категорию/тему) — ОБЯЗАН вернуть style_id ровно как ниже, "
+            "не выбирай другой и не оставляй пустым:",
+        ]
+    else:
+        lines = [
+            "\n\nБАНК УТВЕРЖДЁННЫХ СТИЛЕЙ ВЛАДЕЛЬЦА — ОБЯЗАН выбрать style_id СТРОГО из "
+            "списка ниже для каждого дизайна (не изобретай свой стиль, не оставляй "
+            "пустым). Стили можно миксовать (style_mix) до 2 штук, ТОЛЬКО если тема "
+            "реально просит совмещения (иначе style_mix — пустая строка):",
+        ]
     for s in candidates:
         ring_note = (" [ГИБРИД: кольцо текста рисует КОД — в художественном промпте "
                       "опиши кольцо-рамку ПУСТЫМ, без единой буквы на нём]"
@@ -190,13 +217,21 @@ def _style_bank_block(theme: str, recent_styles: list = None) -> str:
             f"ПОДХОДИТ ДЛЯ: {', '.join(s.get('mood_tags', []))}. "
             f"ОГРАНИЧЕНИЯ: {'; '.join(s.get('constraints', []))}."
         )
-    lines.append(
-        "Выбери style_id САМОГО подходящего стиля по теме/mood_tags из списка выше "
-        "(это уже суженный список с учётом ротации — не проси других стилей, кроме "
-        "перечисленных). Впиши essence/text_treatment выбранного стиля (и второго, "
-        "если style_mix) В САМ художественный промпт (prompt) — опиши сцену/рамку/"
-        "типографику этого стиля явно, как часть композиции, а не отдельным полем."
-    )
+    if forced:
+        lines.append(
+            f"style_id ДОЛЖЕН быть ровно \"{style_pref}\" в твоём JSON-ответе. Впиши "
+            "essence/text_treatment этого стиля В САМ художественный промпт (prompt) — "
+            "опиши сцену/рамку/типографику стиля явно, как часть композиции. style_mix "
+            "оставь пустым, если тема явно не просит совмещения ещё с одним стилем."
+        )
+    else:
+        lines.append(
+            "Выбери style_id САМОГО подходящего стиля по теме/mood_tags из списка выше "
+            "(это уже суженный список с учётом ротации — не проси других стилей, кроме "
+            "перечисленных). Впиши essence/text_treatment выбранного стиля (и второго, "
+            "если style_mix) В САМ художественный промпт (prompt) — опиши сцену/рамку/"
+            "типографику этого стиля явно, как часть композиции, а не отдельным полем."
+        )
     return "\n".join(lines)
 
 # ── Общие требования к идее (для обоих форматов) ───────────────────────────────
@@ -456,18 +491,23 @@ _DIECUT_BODY = (
 )
 
 
-def system_cutout(theme: str = "", recent_styles: list = None) -> str:
+def system_cutout(theme: str = "", recent_styles: list = None,
+                   style_pref: str = None) -> str:
     """SYSTEM_CUTOUT как функция — _common_rules() читает config.TEXT_RENDER на
     момент КАЖДОГО вызова (важно для тестов, monkeypatch'ящих config.TEXT_RENDER).
     theme/recent_styles (опционально) — добавляют блок БАНКА СТИЛЕЙ (см.
     _style_bank_block); без темы (дефолт "") блок стилей не добавляется — сохраняет
-    обратную совместимость константы SYSTEM_CUTOUT ниже (снимок без стилей)."""
-    return _build_system(_CUTOUT_BODY, _style_bank_block(theme, recent_styles))
+    обратную совместимость константы SYSTEM_CUTOUT ниже (снимок без стилей).
+    style_pref — форсированный style_id (mega_plan_800), см. _style_bank_block."""
+    return _build_system(_CUTOUT_BODY,
+                          _style_bank_block(theme, recent_styles, style_pref))
 
 
-def system_diecut(theme: str = "", recent_styles: list = None) -> str:
+def system_diecut(theme: str = "", recent_styles: list = None,
+                   style_pref: str = None) -> str:
     """SYSTEM_DIECUT как функция — см. system_cutout()."""
-    return _build_system(_DIECUT_BODY, _style_bank_block(theme, recent_styles))
+    return _build_system(_DIECUT_BODY,
+                          _style_bank_block(theme, recent_styles, style_pref))
 
 
 # SYSTEM_CUTOUT/SYSTEM_DIECUT — обратная совместимость (модули/тесты, читающие эти
@@ -480,7 +520,8 @@ SYSTEM_DIECUT = system_diecut()
 _SYSTEMS_FN = {"cutout": system_cutout, "diecut": system_diecut}
 
 
-def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None) -> str:
+def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
+                 style_pref: str = None) -> str:
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     user = (f"Запрос: {theme}. Дай ровно {n} разных дизайн(ов). JSON-массив из {n} "
             f"объектов {{\"prompt\":..., \"chroma\":..., \"slogan\":..., "
@@ -492,13 +533,14 @@ def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None) -> str
     resp = client.messages.create(
         model=MODEL,
         max_tokens=1500,
-        system=system_fn(theme, recent_styles),
+        system=system_fn(theme, recent_styles, style_pref),
         messages=[{"role": "user", "content": user}],
     )
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
 
 
-def make_ideas(theme: str, n: int, fmt: str = "cutout", recent_styles: list = None) -> list:
+def make_ideas(theme: str, n: int, fmt: str = "cutout", recent_styles: list = None,
+               style_pref: str = None) -> list:
     """N дизайнов: список dict {prompt, chroma, slogan, slogan_color, kana, character_en,
     title_en, signature_props, text_mode, text_modes_v3, quote, name_jp, mood, type_spec,
     style_id, style_mix}.
@@ -509,20 +551,35 @@ def make_ideas(theme: str, n: int, fmt: str = "cutout", recent_styles: list = No
     признак игнорируется, style_id/style_mix возвращаются пустыми строками (старое
     поведение без банка стилей).
 
+    style_pref (mega_plan_800/build_mega_plan.py, опционально) — ФОРСИРОВАННЫЙ
+    style_id для ВСЕХ n дизайнов этого вызова (напр. "19_tarot" для taro_zodiac).
+    Если валиден (существует в docs/STYLE_BANK.json) — recent_styles/скоринг для
+    выбора стиля полностью игнорируются (см. _pick_style_candidates), системный
+    промпт требует у Claude вернуть ИМЕННО этот style_id, И ДОПОЛНИТЕЛЬНО код
+    форсирует design["style_id"] = style_pref на каждом возвращённом дизайне ПОСЛЕ
+    парсинга — двойная гарантия (промпт может не сработать, но код никогда не
+    отдаст style_pref-заказ с другим/пустым style_id). None (дефолт) — старое
+    поведение, авторотация банка как раньше.
+
     НЕ откатываемся тихо на сырую тему при сбое парсинга JSON: 1 ретрай запроса,
     затем ЯВНАЯ ошибка (вызывающий код пропускает этот дизайн с сообщением).
     """
-    text = _ask_claude(theme, n, fmt, recent_styles)
+    text = _ask_claude(theme, n, fmt, recent_styles, style_pref)
     designs = _parse(text)
     if not designs:
-        text = _ask_claude(theme, n, fmt, recent_styles)  # 1 ретрай — вдруг разовый сбой формата
+        # 1 ретрай — вдруг разовый сбой формата.
+        text = _ask_claude(theme, n, fmt, recent_styles, style_pref)
         designs = _parse(text)
     if not designs:
         raise RuntimeError(f"арт-директор не смог собрать дизайн для {theme!r} "
                            f"(невалидный JSON от Claude дважды подряд)")
     if len(designs) < n:
         designs = (designs * n)[:n]
-    return designs[:n]
+    designs = designs[:n]
+    if style_pref and _style_by_id(style_pref):
+        for d in designs:
+            d["style_id"] = style_pref
+    return designs
 
 
 # Катакана (゠-ヿ) + знак долготы ー + разделитель имён ・ + пробел — допустимые символы
@@ -712,7 +769,24 @@ def _chroma_bg(color: str) -> str:
     (интерпретируется как рамка/подложка КАДРА целиком) — не называла явно запрет
     именно обводки ВОКРУГ силуэта персонажа/эффектов внутри самой композиции. Третье
     усиление ниже называет этот конкретный паттерн прямо (die-cut sticker outline
-    hugging the silhouette of the character or the flame/energy effects)."""
+    hugging the silhouette of the character or the flame/energy effects).
+
+    Живой РЕГРЕСС #3 (2026-07-09, прод-job 9295bf9c, item 1, style 28_metal_cover) —
+    рамка кадра НЕ была белой (та запрещена выше), но essence/text_treatment стиля
+    из STYLE_BANK.json явно просят "jagged lightning-bolt streaks... toward the frame
+    corners", "thorned-spike ornament... frame the lower edge" и "thin engraved
+    metallic border frames the whole canvas" — ЛЮБОГО цвета декор, физически
+    дотянувшийся до истинного края холста. chroma_remove._border_key() сэмплирует
+    медиану внешней полосы кадра как эталон хромакея; на живом raw этой полосы ~65-70%
+    оказалось decor-пикселями (метал/чёрные шипы), а не чистым хромакеем — эталон
+    съехал с чистого blue (0,71,255) в грязный (19,82,152). От этого смещённого
+    эталона gunmetal-silver текст (колонка катаканы того же стиля) оказался
+    ХРОМАТИЧЕСКИ близко к "ключу" (dist<52) и был вырезан в прозрачность до контуров
+    (border coverage=0.70 < 0.90 — QC-гейт поймал брак, но батч всё равно принял
+    "лучшую попытку" с предупреждением вместо провала). Старый запрет ниже называл
+    только WHITE border/mount/sticker-outline — четвёртое усиление обобщает запрет на
+    декор ЛЮБОГО цвета (не только белый) у истинного края/углов кадра и требует явный
+    чистый хромакей-отступ по периметру ПЕРЕД началом любой декоративной графики."""
     color = color if color in ("green", "blue") else "green"
     hexv = {"green": "0 177 64", "blue": "0 71 255"}[color]
     return (f"The entire background behind the subject is a solid, perfectly uniform "
@@ -730,7 +804,17 @@ def _chroma_bg(color: str) -> str:
             f"or the flame/energy/aura effects around them — the edge where the "
             f"character and effects meet the {color} background must be a direct clean "
             f"line straight into the chroma-key color, with no white or light-colored "
-            f"ring, halo outline, or contour stroke of any kind separating them.")
+            f"ring, halo outline, or contour stroke of any kind separating them. "
+            f"IMPORTANT — clean chroma margin: even if the requested art style calls "
+            f"for a decorative border, frame, engraved line, lightning-bolt streaks, "
+            f"thorned spikes, rays, or any other ornament reaching toward the edges or "
+            f"corners of the canvas, that decoration (of ANY colour — metallic, silver, "
+            f"gold, black, or otherwise, not just white) must stop and stay clearly "
+            f"INSET from the true outer edge of the image, leaving an untouched, "
+            f"perfectly flat {color} chroma-key margin at least 3% of the shorter side "
+            f"wide running all the way around the full perimeter of the canvas, with "
+            f"nothing but the flat chroma colour touching the literal edges and corners "
+            f"of the frame.")
 
 
 # Явный запрет любых букв в артворк — используется build_prompt, когда дизайну

@@ -37,13 +37,38 @@ x4plus-anime, scale=4) — 54.8с / 60.2с / 64.4с, среднее ~60с/шт, 
    config.UPSCALE_TIMEOUT (дефолт 300с) вместо старого хардкода 180. При таймауте/сбое
    realesrgan — Lanczos-апскейл diecut НАПРЯМУЮ до min_side (хуже качеством, чем ESRGAN,
    но печатный размер гарантирован) + result["print_fallback"]=True (вызывающий код,
-   batch_print.render_design, логирует предупреждение)."""
+   batch_print.render_design, логирует предупреждение).
+
+Шестнадцатый заход (задача лида, план на 800: мега-батч на этой машине) — БЭКПОРТ
+Replicate-апскейла из content-factory-saas/engine/print_factory/upscale.py (там он был
+написан как облачная замена ЛОКАЛЬНОГО realesrgan для Linux-прода БЕЗ GPU). На ЭТОЙ
+машине GPU (Vulkan) ЕСТЬ, но upscale_to_print_min() держит ГЛОБАЛЬНЫЙ _UPSCALE_LOCK на
+время всего subprocess-вызова realesrgan (см. пункт 2 выше) — при WORKERS=4 воркеры
+мега-батча реально сериализуются на апскейле (~60с/шт * N вместо параллели), это
+самое узкое место всего конвейера на объёме 800 принтов. Задача лида: сделать Replicate
+(nightmareai/real-esrgan, HTTP API без SDK — requests, тот же приём, что providers.py)
+ПЕРВЫМ путём в upscale_to_print_min ПРИ НАЛИЧИИ REPLICATE_API_TOKEN — облачный вызов НЕ
+делит одну GPU между воркерами (сеть, не локальный Vulkan-девайс), поэтому реальный
+параллелизм WORKERS=4 не душит сам себя. Порядок ОБРАТНЫЙ по сравнению с content-
+factory-saas (там Replicate был fallback ПОСЛЕ локального realesrgan, потому что на
+проде локального exe вообще нет): здесь Replicate — ПЕРВЫЙ путь (есть токен -> сеть,
+параллельно), локальный realesrgan-ncnn-vulkan.exe — ВТОРОЙ путь (Replicate не задан
+токеном/сбой сети/таймаут -> локальный GPU-путь как раньше, серийно через
+_UPSCALE_LOCK), Lanczos — финальный фолбэк (оба апскейлера недоступны/упали).
+Сериализация _UPSCALE_LOCK НЕ трогается (единственная GPU на машине по-прежнему одна) —
+для Replicate вместо полного Lock используется _REPLICATE_SEMAPHORE (см. ниже),
+ограничивающий параллельность облачных вызовов потолком (дефолт 4, = WORKERS), а не
+полностью серийно (сеть — не общий физический ресурс, как GPU, реальная параллельность
+допустима и нужна, задача лида: "параллельность 4 ок")."""
+import os
 import shutil
 import subprocess
 import threading
 import time
+from base64 import b64encode
 from pathlib import Path
 
+import requests
 from PIL import Image
 
 import config
@@ -68,6 +93,39 @@ _KNOWN_MODELS = ("realesrgan-x4plus-anime", "realesrgan-x4plus",
 # машине, все воркеры одного Python-процесса (daily_prints.py ThreadPoolExecutor)
 # обязаны реально выстроиться в очередь, а не запускать exe параллельно.
 _UPSCALE_LOCK = threading.Lock()
+
+# ── Replicate-апскейл (шестнадцатый заход, бэкпорт из content-factory-saas) ─────
+
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
+
+# Версия модели nightmareai/real-esrgan закреплена явно (Replicate требует конкретный
+# version-хэш, "latest" API не отдаёт) — переопределяема через env.
+# ГРАБЛЯ (живая проверка 2026-07-09): хэш "f121d640..." из content-factory-saas
+# ("тот же хэш, что уже был подтверждён рабочим") на деле УСТАРЕЛ на момент бэкпорта —
+# живой вызов упал HTTP 422 "Invalid version or not permitted" (Replicate периодически
+# депрекейтит старые version-снимки модели). Актуальный хэш добыт запросом
+# GET /v1/models/nightmareai/real-esrgan -> latest_version.id и подтверждён живым
+# вызовом (см. передаточную записку разработчика) — если Replicate снова депрекейтит
+# эту версию, тот же запрос покажет новую latest_version.id, обновить константу или
+# задать REPLICATE_REAL_ESRGAN_VERSION в .env.
+REPLICATE_REAL_ESRGAN_VERSION = os.getenv(
+    "REPLICATE_REAL_ESRGAN_VERSION",
+    "b3ef194191d13140337468c916c2c5b96dd0cb06dffc032a022a31807f6a5ea8",
+)
+
+_REPLICATE_API_BASE = "https://api.replicate.com/v1"
+_REPLICATE_POLL_INTERVAL_SEC = 3
+_REPLICATE_MAX_POLL_SEC = 180
+
+# Ослабленная "сериализация" для Replicate (задача лида: "сеть, не GPU — параллельность
+# 4 ок") — В ОТЛИЧИЕ от _UPSCALE_LOCK (полный Lock, ОДИН локальный GPU-вызов за раз),
+# здесь Semaphore с потолком REPLICATE_MAX_CONCURRENT (дефолт 4, = config.WORKERS) —
+# несколько облачных апскейлов реально идут ОДНОВРЕМЕННО (сеть — не общий физический
+# ресурс машины), но не безгранично (не заваливаем API/не плодим случайный всплеск
+# затрат при большом WORKERS). Оборачивает ТОЛЬКО сетевую часть upscale_via_replicate
+# (создание предсказания + поллинг + скачивание), не проверки токена/чтение файла.
+REPLICATE_MAX_CONCURRENT = int(os.getenv("REPLICATE_MAX_CONCURRENT", "4"))
+_REPLICATE_SEMAPHORE = threading.Semaphore(max(1, REPLICATE_MAX_CONCURRENT))
 
 
 class UpscaleUnavailable(Exception):
@@ -170,44 +228,91 @@ def upscale(png_in, png_out, scale: int = DEFAULT_SCALE,
     return result
 
 
+def _lanczos_boost_in_place(png_out: Path, min_side: int, result: dict) -> None:
+    """Если result["out_size"] (уже сохранённый png_out) меньше min_side по большей
+    стороне — досчитывает PIL Lanczos ПРЯМО ПОВЕРХ файла (не второй проход платного
+    апскейлера — см. упоминания в докстрингах upscale_to_print_min). Мутирует result
+    ("out_size" на новый размер, либо "error" при сбое досчёта — сбой НЕ отменяет уже
+    готовый апскейл-результат, файл остаётся как есть). result["print_fallback"]
+    ВЫЗЫВАЮЩИЙ КОД не трогает (досчёт поверх успешного апскейла — не фолбэк-путь)."""
+    out_w, out_h = result["out_size"]
+    if max(out_w, out_h) >= min_side:
+        return
+    try:
+        with Image.open(png_out) as im:
+            im = im.convert("RGBA")
+            cur_max = max(im.size)
+            factor = max(1.0, min_side / cur_max)
+            new_size = (max(1, round(im.width * factor)), max(1, round(im.height * factor)))
+            resized = im.resize(new_size, Image.LANCZOS)
+            resized.save(png_out)
+        result["out_size"] = resized.size
+    except Exception as e:  # noqa: BLE001 — досчёт не должен уничтожать уже готовый результат
+        result["error"] = f"адаптивный Lanczos-досчёт до {min_side}px упал: {e} " \
+                          f"(апскейл-результат сохранён как есть)"
+
+
 def upscale_to_print_min(png_in, png_out, min_side: int = None,
                           scale: int = DEFAULT_SCALE, model: str = DEFAULT_MODEL,
                           timeout: int = None) -> dict:
-    """Адаптивный апскейл до печатного минимума (пятнадцатый заход, задача лида) —
-    гарантирует, что БОЛЬШАЯ сторона png_out >= min_side (дефолт config.PRINT_MIN_SIDE,
-    3800px), независимо от исходного размера png_in (nano-banana отдаёт 768..1408px на
-    разных дизайнах — x4 realesrgan один в один не даёт единого печатного минимума).
+    """Адаптивный апскейл до печатного минимума — гарантирует, что БОЛЬШАЯ сторона
+    png_out >= min_side (дефолт config.PRINT_MIN_SIDE, 3800px), независимо от исходного
+    размера png_in (nano-banana отдаёт 768..1408px на разных дизайнах — x4 один в один
+    не даёт единого печатного минимума).
 
-    Алгоритм:
-      1. upscale() как раньше (x4 realesrgan-ncnn-vulkan, GPU через Vulkan).
-      2. Если exe отсутствует/сбой/ТАЙМАУТ — ЛАНCZOS-ФОЛБЭК: PIL Lanczos НАПРЯМУЮ с
-         png_in до min_side по большей стороне (хуже качеством, чем ESRGAN, но печатный
-         размер гарантирован) — result["print_fallback"]=True.
-      3. Если realesrgan отработал ok, но большая сторона результата ВСЁ РАВНО < min_side
-         (raw был совсем мелкий, например 768px * 4 = 3072 < 3800) — ДОСЧИТЫВАЕТ PIL
-         Lanczos ПРЯМО ПОВЕРХ результата x4 (не второй проход realesrgan — второй x4
-         запрещён по времени, аниме-графика с плоскими заливками после ESRGAN тянется
-         чисто дополнительным Lanczos-пассом) — result["print_fallback"] остаётся False
-         (это НЕ фолбэк-путь, x4 realesrgan успешно отработал, просто добавлен адаптивный
-         досчёт до минимума).
+    Алгоритм (шестнадцатый заход, задача лида — план на 800, см. докстринг модуля):
+      1. Replicate (upscale_via_replicate, nightmareai/real-esrgan) — ПЕРВЫЙ путь, ЕСЛИ
+         REPLICATE_API_TOKEN задан (replicate_available()). Облачный вызов — сеть, не
+         делит единственную локальную GPU между воркерами мега-батча (см. модульный
+         докстринг про _REPLICATE_SEMAPHORE vs _UPSCALE_LOCK). Токен не задан — путь
+         пропускается БЕЗ сетевого вызова, сразу пункт 2 (как будто Replicate вообще
+         не существует — обратная совместимость с пятнадцатым заходом).
+      2. Локальный realesrgan-ncnn-vulkan.exe (upscale(), как в пятнадцатом заходе) —
+         ВТОРОЙ путь, если Replicate не задан токеном ИЛИ сетевой вызов Replicate упал
+         (таймаут/ошибка API/нет сети).
+      3. Если ОБА апскейлера недоступны/упали — ЛАНCZOS-ФОЛБЭК: PIL Lanczos НАПРЯМУЮ с
+         png_in до min_side по большей стороне (хуже качеством, но печатный размер
+         гарантирован) — result["print_fallback"]=True.
+      4. Если сработавший апскейлер (Replicate ИЛИ локальный) дал результат МЕНЬШЕ
+         min_side (raw был совсем мелкий) — ДОСЧИТЫВАЕТ PIL Lanczos ПРЯМО ПОВЕРХ его
+         результата (_lanczos_boost_in_place) — result["print_fallback"] остаётся False
+         (это НЕ фолбэк-путь, платный апскейлер успешно отработал, просто добавлен
+         адаптивный досчёт до минимума).
 
-    Возвращает тот же формат, что upscale(), плюс result["print_fallback"]: bool (True
-    только когда realesrgan НЕ отработал вовсе и картинка получена целиком через
-    Lanczos с исходника, см. пункт 2) — вызывающий код (batch_print.render_design)
-    обязан честно предупредить в лог при print_fallback=True (хуже качество), но НЕ
-    ронять дизайн (тот же принцип, что и полный пропуск апскейла раньше)."""
+    Возвращает тот же формат, что upscale()/upscale_via_replicate(), плюс
+    result["print_fallback"]: bool (True только когда НИ ОДИН апскейлер не отработал
+    и картинка получена целиком через Lanczos с исходника, см. пункт 3) — вызывающий
+    код (batch_print.render_design) обязан честно предупредить в лог при
+    print_fallback=True (хуже качество), но НЕ ронять дизайн (тот же принцип, что и
+    полный пропуск апскейла раньше)."""
     if min_side is None:
         min_side = config.PRINT_MIN_SIDE
     png_in = Path(png_in)
     png_out = Path(png_out)
 
+    replicate_error = None
+    if replicate_available():
+        # ПУТЬ 1 (первый): облачный Replicate — токен задан, реально пробуем сеть
+        # ДО локального GPU-пути (см. докстринг функции/модуля).
+        rep_result = upscale_via_replicate(png_in, png_out, scale=scale, timeout=timeout)
+        rep_result["print_fallback"] = False
+        if rep_result["ok"]:
+            _lanczos_boost_in_place(png_out, min_side, rep_result)
+            return rep_result
+        replicate_error = rep_result["error"]
+
+    # ПУТЬ 2 (второй): локальный realesrgan-ncnn-vulkan (пятнадцатый заход, как раньше)
+    # — Replicate не задан токеном ИЛИ сетевой вызов упал.
     result = upscale(png_in, png_out, scale=scale, model=model, timeout=timeout)
     result["print_fallback"] = False
 
     if not result["ok"]:
-        # exe отсутствует / модель не найдена / сбой subprocess / ТАЙМАУТ — Lanczos
-        # напрямую с исходника до min_side, печатный размер гарантирован даже без ESRGAN.
+        # exe отсутствует / модель не найдена / сбой subprocess / ТАЙМАУТ / Replicate
+        # тоже не отработал (если пробовали) — Lanczos напрямую с исходника до
+        # min_side, печатный размер гарантирован даже без обоих апскейлеров.
         esrgan_error = result["error"]
+        combined_error = (f"Replicate: {replicate_error}; realesrgan: {esrgan_error}"
+                          if replicate_error else esrgan_error)
         try:
             with Image.open(png_in) as src:
                 src = src.convert("RGBA")
@@ -221,36 +326,178 @@ def upscale_to_print_min(png_in, png_out, min_side: int = None,
                 png_out.parent.mkdir(parents=True, exist_ok=True)
                 resized.save(png_out)
         except Exception as e:  # noqa: BLE001 — Lanczos-фолбэк тоже не должен ронять пайплайн
-            result["error"] = f"realesrgan упал ({esrgan_error}); Lanczos-фолбэк тоже упал: {e}"
+            result["error"] = f"апскейл упал ({combined_error}); Lanczos-фолбэк тоже упал: {e}"
             return result
 
         result["ok"] = True
         result["out_size"] = resized.size
-        result["error"] = f"realesrgan недоступен/упал ({esrgan_error}) — Lanczos-фолбэк до {min_side}px"
+        result["error"] = f"апскейл недоступен/упал ({combined_error}) — Lanczos-фолбэк до {min_side}px"
         result["print_fallback"] = True
         return result
 
-    # realesrgan отработал успешно — проверяем, дотягивает ли x4 до печатного минимума.
-    out_w, out_h = result["out_size"]
-    if max(out_w, out_h) >= min_side:
-        return result  # x4 realesrgan уже достаточен, адаптивный досчёт не нужен
-
-    try:
-        with Image.open(png_out) as im:
-            im = im.convert("RGBA")
-            cur_max = max(im.size)
-            factor = max(1.0, min_side / cur_max)
-            new_size = (max(1, round(im.width * factor)), max(1, round(im.height * factor)))
-            resized = im.resize(new_size, Image.LANCZOS)
-            resized.save(png_out)
-        result["out_size"] = resized.size
-    except Exception as e:  # noqa: BLE001 — досчёт не должен уничтожать уже готовый x4-результат
-        result["error"] = f"адаптивный Lanczos-досчёт до {min_side}px упал: {e} " \
-                          f"(x4-результат realesrgan сохранён как есть)"
-
+    # локальный realesrgan отработал успешно — проверяем, дотягивает ли x4 до минимума.
+    _lanczos_boost_in_place(png_out, min_side, result)
     return result
 
 
 def tools_dir_exists() -> bool:
     """Есть ли вообще папка tools/realesrgan/ на диске (для диагностических сообщений)."""
     return REALESRGAN_DIR.exists()
+
+
+# ---------------------------------------------------------------------------
+# REPLICATE-АПСКЕЙЛ (шестнадцатый заход, бэкпорт из content-factory-saas)
+# ---------------------------------------------------------------------------
+#
+# upscale_via_replicate() — облачная замена x4-прохода realesrgan через модель
+# nightmareai/real-esrgan на Replicate (HTTP API, БЕЗ replicate-SDK — тот же принцип
+# "requests, без лишних зависимостей", что providers.py). На ЭТОЙ машине (в отличие от
+# content-factory-saas прода) локальный GPU-путь реально доступен и остаётся рабочим
+# как раньше — Replicate здесь не "замена отсутствующему GPU", а способ ИЗБЕЖАТЬ
+# сериализации на единственной локальной GPU при WORKERS>1 (см. upscale_to_print_min).
+# REPLICATE_API_TOKEN не задан -> replicate_available() возвращает False, функция ниже
+# вообще не вызывается из upscale_to_print_min (см. её код выше) — без сетевого вызова.
+
+
+def replicate_available() -> bool:
+    """REPLICATE_API_TOKEN задан в окружении — облачный апскейл в принципе доступен
+    (сетевой вызов ещё может упасть отдельно, это только наличие ключа)."""
+    return bool(REPLICATE_API_TOKEN)
+
+
+def _image_to_data_uri(png_path: Path) -> str:
+    """PNG-файл -> data URI (base64) — Replicate принимает как inline-вход, так и
+    обычный URL; для приватных исходников (принт до публикации) inline data URI
+    безопаснее — файл не должен светиться на публичном URL."""
+    data = Path(png_path).read_bytes()
+    b64 = b64encode(data).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+
+def upscale_via_replicate(png_in, png_out, scale: int = 4, timeout: int = None) -> dict:
+    """Апскейл PNG через Replicate (nightmareai/real-esrgan) — облачный путь,
+    параллелизуется между воркерами через _REPLICATE_SEMAPHORE (см. модульный
+    докстринг), в отличие от _UPSCALE_LOCK у локального realesrgan.
+
+    png_in/png_out — путь (str|Path) к входному/выходному PNG (RGBA, альфа сохраняется
+    — модель поддерживает прозрачность на входе/выходе). scale: кратность апскейла
+    (модель принимает 2/4, дефолт 4 — как локальный путь). timeout — секунд НА ВЕСЬ
+    цикл создания+поллинга предсказания; None (дефолт) читает config.UPSCALE_TIMEOUT
+    (тот же порог, что у локального upscale(), унифицированный конфиг для обеих веток).
+
+    Возвращает {"ok": bool, "elapsed_sec": float, "out_size": (w,h)|None,
+    "error": str|None} — ТОТ ЖЕ контракт, что upscale(), чтобы upscale_to_print_min
+    могла звать любую из двух веток взаимозаменяемо.
+
+    НЕ бросает исключение при отсутствии токена/сбое сети/таймауте API — вызывающий
+    код (upscale_to_print_min) обязан откатиться на локальный realesrgan, как и при
+    сбое любого другого апскейлера (тот же принцип деградации)."""
+    if timeout is None:
+        timeout = config.UPSCALE_TIMEOUT
+    t0 = time.time()
+    result = {"ok": False, "elapsed_sec": 0.0, "out_size": None, "error": None}
+
+    if not REPLICATE_API_TOKEN:
+        result["error"] = "REPLICATE_API_TOKEN не задан — облачный апскейл (Replicate) пропущен"
+        return result
+
+    png_in = Path(png_in)
+    png_out = Path(png_out)
+    headers = {
+        "Authorization": f"Bearer {REPLICATE_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        data_uri = _image_to_data_uri(png_in)
+    except Exception as e:  # noqa: BLE001 — файл не читается/не найден
+        result["error"] = f"Replicate: не смог прочитать входной PNG: {e}"
+        result["elapsed_sec"] = round(time.time() - t0, 1)
+        return result
+
+    body = {
+        "version": REPLICATE_REAL_ESRGAN_VERSION,
+        "input": {"image": data_uri, "scale": scale, "face_enhance": False},
+    }
+
+    # _REPLICATE_SEMAPHORE: только сетевую часть (создание + поллинг + скачивание)
+    # ограничиваем потолком REPLICATE_MAX_CONCURRENT (дефолт 4) — НЕ полный Lock, как
+    # у локального GPU (_UPSCALE_LOCK), несколько воркеров реально идут параллельно
+    # (см. докстринг модуля, задача лида "параллельность 4 ок").
+    with _REPLICATE_SEMAPHORE:
+        try:
+            r = requests.post(f"{_REPLICATE_API_BASE}/predictions", headers=headers,
+                              json=body, timeout=60)
+        except Exception as e:  # noqa: BLE001 — сеть недоступна
+            result["error"] = f"Replicate: создание предсказания упало (сеть): {e}"
+            result["elapsed_sec"] = round(time.time() - t0, 1)
+            return result
+
+        if r.status_code not in (200, 201):
+            result["error"] = f"Replicate: HTTP {r.status_code} при создании предсказания: {r.text[:300]}"
+            result["elapsed_sec"] = round(time.time() - t0, 1)
+            return result
+
+        prediction = r.json()
+        get_url = (prediction.get("urls") or {}).get("get")
+        if not get_url:
+            result["error"] = f"Replicate: ответ без urls.get: {str(prediction)[:300]}"
+            result["elapsed_sec"] = round(time.time() - t0, 1)
+            return result
+
+        # Поллинг статуса предсказания — Replicate асинхронный API, апскейл занимает
+        # обычно 5-20с на 4x, но модель может быть "холодной" (cold start до ~60с).
+        poll_deadline = min(timeout, _REPLICATE_MAX_POLL_SEC)
+        poll_start = time.time()
+        output_url = None
+        while time.time() - poll_start < poll_deadline:
+            try:
+                pr = requests.get(get_url, headers=headers, timeout=30)
+            except Exception as e:  # noqa: BLE001
+                result["error"] = f"Replicate: опрос статуса упал (сеть): {e}"
+                result["elapsed_sec"] = round(time.time() - t0, 1)
+                return result
+            if pr.status_code != 200:
+                result["error"] = f"Replicate: HTTP {pr.status_code} при опросе статуса: {pr.text[:300]}"
+                result["elapsed_sec"] = round(time.time() - t0, 1)
+                return result
+            data = pr.json()
+            status = data.get("status")
+            if status == "succeeded":
+                out = data.get("output")
+                # Модель обычно отдаёт один URL строкой; на некоторых версиях — список.
+                output_url = out[0] if isinstance(out, list) and out else out
+                break
+            if status in ("failed", "canceled"):
+                err_detail = data.get("error") or "нет деталей"
+                result["error"] = f"Replicate: предсказание завершилось status={status}: {err_detail}"
+                result["elapsed_sec"] = round(time.time() - t0, 1)
+                return result
+            time.sleep(_REPLICATE_POLL_INTERVAL_SEC)
+
+        if not output_url:
+            result["error"] = f"Replicate: не дождались результата за {poll_deadline}с (таймаут поллинга)"
+            result["elapsed_sec"] = round(time.time() - t0, 1)
+            return result
+
+        try:
+            img_resp = requests.get(output_url, timeout=60)
+            img_resp.raise_for_status()
+            png_out.parent.mkdir(parents=True, exist_ok=True)
+            png_out.write_bytes(img_resp.content)
+        except Exception as e:  # noqa: BLE001
+            result["error"] = f"Replicate: не смог скачать результат: {e}"
+            result["elapsed_sec"] = round(time.time() - t0, 1)
+            return result
+
+    try:
+        with Image.open(png_out) as im:
+            result["out_size"] = im.size
+    except Exception as e:  # noqa: BLE001 — файл скачан, но битый/не читается PIL
+        result["error"] = f"Replicate: результат скачан, но не читается PIL: {e}"
+        result["elapsed_sec"] = round(time.time() - t0, 1)
+        return result
+
+    result["ok"] = True
+    result["elapsed_sec"] = round(time.time() - t0, 1)
+    return result
