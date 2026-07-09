@@ -1,0 +1,127 @@
+{
+  "_readme": "Банк УТВЕРЖДЁННЫХ визуальных стилей владельца — каталог для art_director.py (см. docs/ARCHITECTURE или комментарий в art_director.py про STYLE_BANK). Каждый стиль — выжимка ЛУЧШЕГО рецепта этого стиля из docs/*_RECIPES.json/*_STYLES*.json/JJK_TEN.json. essence/text_treatment — на английском (вшиваются в промпт художника), остальные поля — служебные (ротация/подбор по теме). Стили можно миксовать (style_mix) по правилу владельца, см. mixing.allowed ниже. Стиль id='09_ring_medallion' — ГИБРИД: кольцевой текст рисует КОД (typography/typography_v3), в САМ художественный промпт кольцо ВСТАВЛЯЕТСЯ ПУСТЫМ (без слов) — см. hybrid_ring_text=true и art_director._style_bank_prompt_block().",
+  "mixing": {
+    "allowed": true,
+    "rule": "Владелец разрешает миксовать до 2 стилей на один дизайн (style_mix), когда тема реально просит совмещения (например geometry ар-деко + японская гравюра). Claude сам решает через поле style_mix в JSON-ответе — см. art_director.py."
+  },
+  "styles": [
+    {
+      "id": "01_baroque_frame",
+      "name_ru": "Готическое золото-барокко",
+      "essence": "The figure is fully framed by an ornamental baroque border of thin gilded scrollwork and flame/floral motifs running along the edge of the frame, engraved like a metal plate — rich blackletter-meets-antiqua display lettering in glossy metallic gold sits above the figure's head, following the curvature of the frame's top edge, never overlapping the figure. Deep saturated jewel-tone palette (blood red, antique gold, aged bronze, near-black charcoal) with heavy engraved shading.",
+      "text_treatment": "Main phrase in ornate blackletter/antiqua display face, glossy metallic gold gradient fill with thin engraved bronze outline and soft dark drop shadow, arced along the top frame edge above the head. Vertical kanji/katakana column (if character has a name) placed fully inside the frame margin, outside the figure's silhouette, matching gold treatment.",
+      "palette_rule": "Deep jewel tones: blood red / antique gold / aged bronze / near-black charcoal — text always gold, never a flat basic color.",
+      "mood_tags": ["эпика", "мифология", "власть", "тёмное фэнтези", "аниме-персонаж-сильный"],
+      "constraints": ["рамка-вставка ДЕКОРАТИВНАЯ, не должна упираться в край кадра — оставляй широкие хромакей-поля СНАРУЖИ орнамента", "мин. кегль 0.075", "SINGLE FIGURE", "ANATOMY: точное число конечностей"]
+    },
+    {
+      "id": "09_ring_medallion",
+      "name_ru": "Кольцо-медальон",
+      "essence": "The figure stands centered in a static frontal or three-quarter pose, fully enclosed by a thin decorative circular medallion ring/border (like a coin or guild crest) running at an even radial distance around the whole figure — classic emblem/badge composition, clean anime cel-shading figure inside, ornamental notches or small emblem glyphs marking the ring's seam at the top.",
+      "text_treatment": "hybrid_ring_text: the decorative ring itself is drawn EMPTY in the image generation — no letters anywhere on the ring in the art prompt. The ring TEXT (character name / phrase running along the circumference) is added AFTERWARD by CODE (typography.py / typography_v3.py ring-text renderer), never by the image model. The art prompt must explicitly describe the ring as a plain metal/enamel band with only ornamental notches, NOT request any lettering on it.",
+      "palette_rule": "Aged gold ring + matte black or deep color figure fill + one accent color for a small emblem glyph at the ring seam.",
+      "mood_tags": ["эпика", "герб", "статус", "командный дух", "спорт", "мифология"],
+      "hybrid_ring_text": true,
+      "constraints": ["в художественном промпте кольцо ЯВНО описывается как ПУСТОЕ (без текста) — иначе модель дублирует текст, который потом накладывает код", "фигура полностью внутри кольца с равными полями", "SINGLE FIGURE", "мин. кегль кода-типографики по кольцу 0.058 (см. typography_v3)"]
+    },
+    {
+      "id": "11_propaganda_A",
+      "name_ru": "Агитплакат восходящего солнца (вариант A — прямой)",
+      "essence": "Heroic socialist-realism poster pose: figure stands wide-legged on a pedestal/rubble, one arm raised overhead in a clenched fist, the other doing a signature gesture, behind them a large graphic disc of a rising sun with sharp straight sunburst rays and a bold flat silhouette motif (animal/summon/symbol of the character) inside the disc. Flat saturated poster inks, no gradients, light print-grain texture and slight colour-plate misregistration like old lithography, dramatic low-angle shot.",
+      "text_treatment": "Main slogan in a heavy geometric propaganda-poster slab face, flat fill with a thin contrasting keyline, set in a straight horizontal band across the upper third in front of the sun rays. Secondary line in a smaller matching slab weight stacked below. Vertical kanji/katakana name column in the lower margin beside the leg, stamp-style.",
+      "palette_rule": "Warm poster duotone (burnt orange/crimson/cream) OR cold inverted variant (black/crimson) depending on character tone — always flat, no gradients except rain/mist hatching if thematically justified.",
+      "mood_tags": ["эпика", "командный дух", "спорт", "патетика", "герой"],
+      "constraints": ["текст ВСЕГДА на топслое поверх лучей, лучи видны только вокруг букв", "ровно один силуэт-мотив внутри диска солнца", "SINGLE FIGURE", "мин. кегль главной строки 0.10-0.135"]
+    },
+    {
+      "id": "11_propaganda_B",
+      "name_ru": "Агитплакат — диагональный конструктивизм",
+      "essence": "The static wide-legged pedestal pose is replaced by a hard diagonal dynamic composition (15-20 degree tilt): figure frozen mid-lunge/mid-punch along the diagonal axis, aura/hair/effects swept along the same diagonal, the sun-disc pushed off-center into a corner, partially cropped, rays radiating at the same diagonal tilt. Constructivist Rodchenko/Klutsis energy crossed with the propaganda-poster base.",
+      "text_treatment": "Main phrase built as stepped/cascading diagonal text-plates (one word per plate) tilted at the same angle as the figure's dash, OR a single bold diagonal wordmark running parallel to the main colour band. Vertical name column kept perfectly UPRIGHT (not tilted) as a stable anchor.",
+      "palette_rule": "Same propaganda duotone base, with the diagonal bands themselves as a strong flat colour block (e.g. cobalt blue / golden-yellow).",
+      "mood_tags": ["эпика", "экшн", "спорт", "динамика", "борьба"],
+      "constraints": ["весь текст и фон наклонены на ЕДИНЫЙ угол 15-20 градусов, кроме вертикальной колонки имени", "SINGLE FIGURE", "чёткая диагональ читается по всей композиции"]
+    },
+    {
+      "id": "11_propaganda_D",
+      "name_ru": "Агитплакат — рассвет на марше",
+      "essence": "Figure marches straight toward the viewer along the exact center axis, striding hard so a boot appears to break the bottom frame edge. Instead of a full sun-disc, only the upper HALF of a large sun sits low at a horizon line, bisected by silhouetted rooftops/rubble; sunburst rays fan out filling the whole upper background, converging low behind the striding legs — a 'marching crowd toward camera' feeling.",
+      "text_treatment": "Main phrase set in a wide gentle ARC following the curved upper edge of the canvas (arched banner, each letter tangent to the arc), peaking above the figure's head. Secondary line sits as a straight horizontal band along the horizon/bisecting edge, separated from the main line. Vertical name column mirrored to balance the arc.",
+      "palette_rule": "Warm advancing tones (blood-orange, golden-yellow, cream, charcoal) — horizon line always reads as a hard edge between rays above and dark silhouette below.",
+      "mood_tags": ["эпика", "борьба", "решимость", "командный дух"],
+      "constraints": ["ровно ОДНА арка текста сверху + ОДНА горизонтальная строка на линии горизонта — не дублировать фразу", "SINGLE FIGURE", "мин. кегль главной арки 0.10"]
+    },
+    {
+      "id": "14_ukiyoe",
+      "name_ru": "Укиё-э гравюра",
+      "essence": "Classic Japanese woodblock print (mokuhanga, Hokusai/Kuniyoshi school): flat poster-ink layers with visible wood-grain texture running through every large colour field, thick carved black contour line, stylised claw-like wave/cloud curls, slight colour-plate offset misregistration mimicking hand-printing. A monumental Hokusai-style wave often curls above the figure without ever overlapping the face. Small round vermilion hanko seal cartouches sit in the upper corners.",
+      "text_treatment": "Main phrase inside a long horizontal woodblock-printed title cartouche (ruled panel, aged-parchment cream fill, thick carved black double-rule border), phrase in a bold hand-carved brush-caps face, sumi-ink black fill. Name column as a traditional red hanko-stamp vertical cartouche beside the trailing leg/hem.",
+      "palette_rule": "Indigo blue, sumi-ink black, vermilion red, aged parchment cream + one character-specific accent (steel-grey blades, sage-green bamboo etc.) — check chroma_note for green-heavy characters (use blue chroma).",
+      "mood_tags": ["мифология", "боевые искусства", "природа", "эпика", "спокойствие"],
+      "constraints": ["SINGLE FIGURE, one clear three-quarter view only", "волна НЕ перекрывает лицо персонажа", "мин. кегль основной строки 0.075-0.09", "проверить хромакей: если у персонажа зелёные волосы/акценты — chroma=blue"]
+    },
+    {
+      "id": "15_stained_glass",
+      "name_ru": "Витраж",
+      "essence": "Gothic church stained-glass window fills the entire canvas: thick black lead-came outline traces every colour segment exactly like real leaded glass, flat saturated semi-transparent segment fills as if lit from behind, no soft shading. Figure stands centered beneath a pointed gothic arch with a small tracery rose-medallion above the head; often a light/dark duality splits the background down the vertical centerline (cool half vs warm half).",
+      "text_treatment": "Main phrase set inside a narrow horizontal leaded-glass banner-segment spanning the arch width, same thick black lead-came border, phrase in a tall gothic blackletter display face, luminous glass-colour fill with black lead outline around every letter. Name column as a small leaded glass panel in the lower margin, same lead-outline treatment.",
+      "palette_rule": "Deep saturated glass jewel-tones (cobalt/emerald/crimson/amber/gold) split light/dark across the centerline — WATCH for emerald-green glass segments, usually forces chroma=blue.",
+      "mood_tags": ["мифология", "драма", "духовность", "тёмное фэнтези", "дуальность"],
+      "constraints": ["SINGLE FIGURE, one clear frontal view only", "lead-came контур обязателен на КАЖДОМ цветовом сегменте, включая текст", "мин. кегль баннера 0.06-0.075", "почти всегда chroma=blue из-за зелёного стекла — проверять индивидуально"]
+    },
+    {
+      "id": "18_art_deco",
+      "name_ru": "Ар-деко золото",
+      "essence": "Strictly mirror-symmetrical Gatsby/Chrysler-Building composition: tall geometric golden sunburst fan-rays radiate from directly behind the figure's head/shoulders filling the whole upper background (stepped rays alternating bright gold and deep bronze), a thin elegant rectangular deco frame-line with stepped corner ornaments borders the canvas edge. Figure poised, elegant, centered.",
+      "text_treatment": "Main phrase inside a slim horizontal rectangular gold plaque beneath the figure, flat deep-bronze fill with a thin bright-gold stepped deco border and matching stepped corner motifs, phrase in an elegant thin geometric deco capitals face with wide letter-tracking, solid bright metallic gold fill. Name column as a gold stamp-style vertical column beside the deco frame-line.",
+      "palette_rule": "Bright metallic gold + deep bronze + one dark base colour (matte black/deep colour garment) + cream ivory field — no additional loud accents, luxury restraint.",
+      "mood_tags": ["роскошь", "статус", "мода", "аристократия", "элегантность"],
+      "constraints": ["строгая зеркальная симметрия по вертикальной оси — обязательна", "SINGLE FIGURE, one clear frontal view only", "мин. кегль плашки 0.08"]
+    },
+    {
+      "id": "19_tarot",
+      "name_ru": "Карта Таро",
+      "essence": "Tall rectangular tarot-arcana card frame fills the canvas: a thick ornate engraved border of interlocking vine-and-star (or baroque acanthus-gold, if mixed) filigree runs around all four edges, small mystical star/crescent-moon/infinity glyphs mark the four corners outside the silhouette, a star-dusted deep-indigo sky with a single large pale moon glows behind the figure without overlapping the face. Calm, composed, mystical but NOT dark/gothic — restrained occult elegance.",
+      "text_treatment": "Main arcana-name phrase set inside a narrow horizontal engraved title plaque directly below the frame's top border (traditional arcana-name position), aged parchment-cream plaque with a thin double-rule engraved border, phrase in an elegant engraved serif display face with small terminal flourishes, deep indigo-black fill. A small roman-numeral arcana-number plaque sits below the card's bottom border, pale gold fill. Name column as a fine engraved gold vertical column in the lower margin.",
+      "palette_rule": "Deep indigo night-blue, ivory white, pale gold filigree, soft lavender-grey shading, parchment cream plaque — calm mystic, never blood/gore tones.",
+      "mood_tags": ["мифология", "мистика", "спокойствие", "судьба", "элегантность"],
+      "constraints": ["SINGLE FIGURE, one clear frontal view only", "мин. кегль заголовочной плашки 0.08-0.09", "роман-номер аркана — отдельный маленький блок, не путать с главной фразой"]
+    },
+    {
+      "id": "22_heraldry",
+      "name_ru": "Герб академии",
+      "essence": "Formal heraldic shield fills the canvas: the shield is divided into four quarters by a thin engraved cross-line, two opposing quarters in one flat colour field, the other two in a contrasting flat field (classic heraldic quartering). A pair of symmetrical ornaments (laurel branches, OR crossed ceremonial polearms/weapons for a more martial variant) curve along the outer edges meeting near the bottom point, a five-pointed star sits centered above the shield's top edge, a ribbon-scroll banner sweeps beneath the shield's bottom point.",
+      "text_treatment": "Main motto phrase set on the ribbon-scroll banner beneath the shield's point, flat colour fill with a thin metallic (gold or silver) double-rule border, phrase in a bold engraved heraldic serif face with subtle small-caps flourish, solid metallic fill. Name column as a metallic engraved vertical column beside the trailing leg, outside the shield.",
+      "palette_rule": "Two contrasting heraldic quarter-colours (e.g. deep crimson + cream, or crimson + charcoal-navy) + one metallic trim (pale gold or silver) — restrained, no more than 3 flat colours plus metallic.",
+      "mood_tags": ["командный дух", "статус", "герой", "спорт", "школа/академия"],
+      "constraints": ["ровно 4 геральдические четверти щита с чёткой границей", "SINGLE FIGURE, one clear frontal three-quarter view only", "мин. кегль девиза-ленты 0.075-0.09"]
+    },
+    {
+      "id": "23_pixel_16bit",
+      "name_ru": "16-бит ретро-игра",
+      "essence": "Chunky 16-bit pixel-art sprite occupying only ~55% of frame height (reduced scale to leave room for UI chrome), rendered entirely in large visible square pixel blocks with a limited retro colour count and hard stair-step edges on every diagonal, simple idle/taunt pose. Above the sprite a thin pixel-bordered HP-bar (or two, for a versus-screen variant) spans the top edge; below the sprite a rectangular pixel-bordered dialogue box with a small triangular pointer anchors the bottom edge.",
+      "text_treatment": "Main phrase set INSIDE the bottom-anchored pixel dialogue box, flat white fill with a hard black double-pixel outline, phrase in a blocky monospace pixel-font face, solid black fill. Optional score/HP readout in the upper corner in the same pixel-font style. Name column as a pixel-font vertical column beside the HP-bar, outside the sprite.",
+      "palette_rule": "Limited retro palette matching the character's canon colours in flat blocks — avoid gradients entirely, hard pixel edges only. Watch for a canonically green HP-bar/UI element forcing chroma=blue.",
+      "mood_tags": ["юмор", "игры", "ностальгия", "экшн"],
+      "constraints": ["фигура-спрайт ~55% высоты кадра (НЕ обычные 75-80%) — место под UI обязательно", "SINGLE FIGURE, one clear frontal view only", "мин. кегль диалогового текста 0.07"]
+    },
+    {
+      "id": "26_warning_sign",
+      "name_ru": "Дорожный знак/стикербомбинг",
+      "essence": "A large flat-colour diamond road-warning sign (safety-yellow enamel) fills most of the canvas, a bold black stencil-cut icon graphic (matching the character's signature weapon/power) sits printed flat behind the silhouette within the diamond, the enamel surface carries visible scratched/chipped metal texture and bolt-holes at the four corners. A handful of small flat sticker-bomb graphics (simple shapes, no extra readable words) are scattered loosely around the outside edge of the diamond.",
+      "text_treatment": "Main phrase on a bold horizontal stencil-cut warning banner beneath the figure, matte-black stencil plate fill with scratched-metal texture, phrase in a heavy industrial stencil face, solid safety-yellow fill matching the enamel. Optional secondary phrase on a small separate sticker-bomb tag outside the diamond. Name column as a matte-black stencil vertical column beside the figure, outside the silhouette.",
+      "palette_rule": "Safety-yellow enamel + matte black stencil + one small safety-orange sticker accent — bold industrial contrast, no soft tones.",
+      "mood_tags": ["юмор", "экшн", "агрессия", "стрит", "предупреждение"],
+      "constraints": ["SINGLE FIGURE, one clear frontal three-quarter view only", "мин. кегль главного баннера 0.085-0.09", "иконка внутри ромба ровно одна, без лишних деталей"]
+    },
+    {
+      "id": "28_metal_cover",
+      "name_ru": "Обложка метал-альбома",
+      "essence": "Aggressive metal-album cover composition filling the canvas: jagged lightning-bolt graphic streaks radiate outward from behind the figure's shoulders/weapon toward the frame corners, sharp thorned-spike ornament shapes frame the lower edge beneath the feet, flat stormy charcoal-black background with faint distant lightning-flash streaks, a thin engraved metallic border frames the whole album-cover canvas.",
+      "text_treatment": "Main phrase (band/title-style) as a huge aggressive metal-band display lettering block spanning the canvas width beneath the figure, letterforms built from sharp angular strokes with small thorn-spike/lightning-crack details on the stroke edges while staying fully legible, solid gunmetal-silver fill with a thin coloured bevel edge. Optional smaller subtitle line beneath. Name column as a gunmetal-silver vertical column beside the shoulder/weapon.",
+      "palette_rule": "Matte black + gunmetal silver + ONE accent colour (crimson or steel-blue) — no glowing runes/occult symbols unless the theme explicitly calls for it (safety: keep it heroic, not demonic).",
+      "mood_tags": ["эпика", "агрессия", "борьба", "сила", "музыка"],
+      "constraints": ["SINGLE FIGURE, one clear frontal three-quarter view only", "мин. кегль главного слова 0.1-0.13", "формулировки нейтрально-героические, без demon/curse/blood в тексте если тема не хоррор"]
+    }
+  ]
+}

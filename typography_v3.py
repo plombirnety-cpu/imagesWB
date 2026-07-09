@@ -16,6 +16,9 @@ _draw_spaced, _hard_shadow_text, _alpha_bbox, _crop_to_content, _fit_lines_min_s
 3. Структурный подвал-этикетка (collection_footer) и цитата в кавычках (quote_bottom)
    как отдельные графические блоки.
 """
+import math
+
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 import palette
@@ -609,4 +612,249 @@ def preview_all_v3(rgba: Image.Image, design: dict,
         if name == "kanji_on_ghost+collection_footer":
             d["mood"] = "pop_trash"
         out[name] = compose_text_v3(rgba, modes, d, brand_label)
+    return out
+
+
+# ── ring_text — медальон-гибрид: кольцевой текст КОДОМ вокруг фигуры ────────────
+#
+# nano-banana просят рисовать ПУСТОЕ декоративное кольцо (без букв) вокруг фигуры
+# (docs/STYLE_BANK.json "09_ring_medallion", hybrid_ring_text=true — промпт-часть
+# строит art_director.build_prompt/_style_bank_prompt_block, см. batch_print.
+# render_design/_is_hybrid_ring_style) — после вырезки ring_text кладёт САМ ТЕКСТ
+# поверх готового кольца посимвольным поворотом по дуге (PIL), кегль/радиус от bbox
+# фигуры, цвета из палитры иллюстрации (palette.extract_palette, тот же источник
+# цвета, что остальная типографика v3 — раздел 0 стайлгайда). Гибрид, потому что
+# декоративное кольцо-рамка рисуется генерацией (nanobanana хорошо держит орнамент/
+# металлик), а ТОЧНЫЙ СПЕЛЛИНГ текста — код (то, что генерация путает на кривой дуге).
+
+_RING_FONT_ROLE = "gothic"  # Cinzel — конденсированные условные капсы, ровный штрих
+# Минимальный кегль как доля ширины фигуры — 0.058, докс/STYLE_BANK.json
+# "09_ring_medallion".constraints ("мин. кегль кода-типографики по кольцу 0.058").
+_RING_MIN_FONT_FRAC = 0.058
+
+
+def _detect_ring_radius(rgba: Image.Image, cx_local: float, cy_local: float,
+                        fallback_radius: float) -> float:
+    """Находит фактический радиус НАРИСОВАННОГО декоративного кольца по радиальному
+    угловому профилю альфа-канала (регресс-фикс — см. tests/test_ring_text_regression_
+    qa.py). cx_local/cy_local — центр в координатах САМОЙ rgba (без canvas_pad).
+
+    Идея: декоративное кольцо (STYLE_BANK.json "09_ring_medallion") — тонкая ПОЧТИ
+    ЗАМКНУТАЯ окружность, покрывающая большую часть из 360 угловых градусов на своём
+    радиусе. Аура/молнии/спецэффекты, торчащие ЗА пределы кольца ("crackling neon aura
+    energy pulses... streaking upward" — штатная часть essence этого стиля), — узкие
+    лучи в НЕСКОЛЬКИХ направлениях, на любом отдельном радиусе они покрывают лишь малую
+    долю из 360°. Поэтому для каждого радиального бина считаем долю занятых угловых
+    градусов (не площадь/долю пикселей) — у кольца эта доля резко выше, чем у ауры на
+    любом её радиусе, что даёт чёткий пик ровно на радиусе кольца, даже если аура
+    физически покрывает больше суммарной площади/тянется дальше от центра.
+
+    Возвращает fallback_radius (старая формула — половина диагонали bbox * 1.08), если
+    ни один радиальный бин не даёт заметно кольцеобразного покрытия (например обычная
+    фигура без нарисованного кольца) — не ломает дизайны без style_id=09_ring_medallion."""
+    alpha = np.array(rgba.getchannel("A"))
+    h, w = alpha.shape
+    ys, xs = np.nonzero(alpha > 40)
+    if xs.size == 0:
+        return fallback_radius
+
+    max_r = int(min(fallback_radius * 1.6, (max(w, h)) * 0.75))
+    if max_r < 4:
+        return fallback_radius
+
+    dx = xs.astype(np.float64) - cx_local
+    dy = ys.astype(np.float64) - cy_local
+    r = np.sqrt(dx * dx + dy * dy)
+    theta_deg = (np.degrees(np.arctan2(dy, dx)) + 360.0) % 360.0
+
+    bin_w = 2.0  # px на радиальный бин
+    n_bins = max(1, int(max_r / bin_w))
+    # Порог 0.55 (кольцо занимает БОЛЬШУЮ часть окружности, даже с зазубринами/швом на
+    # верхней точке) — заметно выше того, что могут дать несколько лучей ауры, даже
+    # раздув их ширину; см. синтетику в регресс-тесте (8 лучей по 45° друг от друга
+    # покрывают лишь малую долю угла на своём радиусе, далеко ниже 0.55).
+    _COVERAGE_THRESHOLD = 0.55
+    n_angle_bins = 180  # 2-градусные секторы — устойчивее к дырам от анти-алиасинга
+    ring_bins = []
+    for b in range(n_bins):
+        r_lo, r_hi = b * bin_w, (b + 1) * bin_w
+        sel = (r >= r_lo) & (r < r_hi)
+        cnt = int(sel.sum())
+        if cnt < 8:
+            continue
+        angle_bins = np.unique((theta_deg[sel] / (360.0 / n_angle_bins)).astype(int))
+        coverage = angle_bins.size / n_angle_bins
+        if coverage >= _COVERAGE_THRESHOLD:
+            ring_bins.append(b)
+
+    if not ring_bins:
+        return fallback_radius
+
+    # Кольцо — САМАЯ ВНЕШНЯЯ сплошная структура композиции (декоративная рамка вокруг
+    # фигуры), отделённая от основной массы фигуры ВИДИМЫМ РАЗРЫВОМ (хромакей-полем)
+    # — так реально рисует nano-banana для style_id=09_ring_medallion (кольцо на
+    # "равном радиальном расстоянии вокруг всей фигуры", essence STYLE_BANK.json).
+    # Находим последнюю непрерывную группу "кольцевых" бинов и смотрим, отделена ли
+    # она разрывом от центра/предыдущей структуры.
+    last_group_start = ring_bins[-1]
+    i = len(ring_bins) - 1
+    while i > 0 and ring_bins[i - 1] == ring_bins[i] - 1:
+        last_group_start = ring_bins[i - 1]
+        i -= 1
+    last_group_end = ring_bins[-1]
+    thickness = (last_group_end - last_group_start + 1) * bin_w
+    detected_edge = (last_group_end + 1.0) * bin_w
+
+    gap_before = ring_bins[i - 1] if i > 0 else -1  # последний "кольцевой" бин ДО группы
+    gap_bins = last_group_start - gap_before - 1 if gap_before >= 0 else last_group_start
+    has_visible_gap = gap_bins * bin_w >= max(20.0, thickness)
+
+    if not has_visible_gap:
+        # Нет разрыва перед последней группой (типично: обычная сплошная фигура/силуэт
+        # БЕЗ отдельно нарисованного декоративного кольца, группа тянется почти от
+        # центра фигуры до её края) — используем ту же формулу, что раньше давала
+        # корректный результат для этого случая (половина диагонали bbox * 1.08).
+        return fallback_radius
+
+    # Реальное отдельное кольцо, отделённое разрывом от фигуры — небольшой запас за
+    # фактический внешний край кольца (буквы ложатся чуть снаружи, не впритык на
+    # самый крайний пиксель контура).
+    return detected_edge * 1.10
+
+
+def _ring_radius_and_center(rgba: Image.Image, fx0: int, fy0: int, fx1: int, fy1: int,
+                            canvas_pad: int) -> tuple:
+    """Центр и радиус кольца. Центр = центр bbox альфы фигуры (устойчив — фигура всегда
+    в середине композиции). Радиус — сначала пытаемся определить ПО ФАКТИЧЕСКИ
+    нарисованному кольцу (_detect_ring_radius, радиальный угловой профиль — не путает
+    кольцо с аурой/молниями, торчащими за его пределы). Если кольцо не обнаружено
+    (design без style_id=09_ring_medallion, обычная фигура) — старая формула: половина
+    диагонали bbox * 1.08 (небольшой запас за пределы силуэта)."""
+    fig_w, fig_h = fx1 - fx0, fy1 - fy0
+    cx = canvas_pad + fx0 + fig_w / 2.0
+    cy = canvas_pad + fy0 + fig_h / 2.0
+    fallback_radius = 0.5 * (fig_w ** 2 + fig_h ** 2) ** 0.5 * 1.08
+    radius = _detect_ring_radius(rgba, cx - canvas_pad, cy - canvas_pad, fallback_radius)
+    return cx, cy, radius
+
+
+def ring_text(rgba: Image.Image, phrase: str, roles: "palette.PaletteRoles" = None,
+              font_role: str = _RING_FONT_ROLE, start_angle_deg: float = -90.0,
+              clockwise: bool = True) -> Image.Image:
+    """Кольцевой текст ВОКРУГ фигуры, кодом (PIL, посимвольный поворот по дуге) —
+    точка входа медальон-гибрида (см. блок-комментарий выше).
+
+    rgba: PIL.Image RGBA — прозрачная вырезка (фигура + ПУСТОЕ декоративное кольцо,
+    нарисованное генерацией, без букв). phrase: строка без пробелов на концах — КАЖДЫЙ
+    символ (включая пробелы между словами) кладётся РОВНО ОДИН РАЗ по окружности,
+    равномерным угловым шагом 360°/len(phrase) (полный проход по кольцу, не дуга).
+    roles: palette.PaletteRoles — если не передан, извлекается из rgba автоматически
+    (palette.extract_palette). font_role: роль шрифта typography_v3 (дефолт "gothic" —
+    Cinzel, конденсированные капсы с ровным штрихом, стабильно читаемые под поворотом).
+    start_angle_deg: угол первого символа (дефолт -90° = "12 часов", верх кольца).
+    clockwise: направление обхода (дефолт True — по часовой стрелке, как на монете).
+
+    Кегль и радиус — ОТ BBOX ФИГУРЫ (не от размера холста): радиус = половина
+    диагонали bbox * 1.08 (кольцо чуть шире силуэта), кегль = fig_w * доля, уменьшается
+    при необходимости, чтобы суммарная угловая ширина всех символов (с зазором) не
+    превышала 360° (иначе буквы налезали бы друг на друга на плотной фразе).
+
+    Возвращает RGBA того же размера, что rgba (без доп. кропа — вызывающий код
+    batch_print уже работает с готовым diecut-холстом, на котором есть место под
+    кольцо, раз кольцо туда попросили нарисовать)."""
+    rgba = rgba.convert("RGBA")
+    phrase = str(phrase or "").strip()
+    if not phrase:
+        return rgba.copy()
+
+    if roles is None:
+        figure_palette = palette.extract_palette(rgba, n=4)
+        roles = palette.PaletteRoles(figure_palette)
+
+    fx0, fy0, fx1, fy1 = _typo._alpha_bbox(rgba)
+    fig_w, fig_h = fx1 - fx0, fy1 - fy0
+
+    canvas_pad = int(max(fig_w, fig_h) * 0.15)
+    W, H = rgba.width + 2 * canvas_pad, rgba.height + 2 * canvas_pad
+    cx, cy, radius = _ring_radius_and_center(rgba, fx0, fy0, fx1, fy1, canvas_pad)
+
+    n = len(phrase)
+    min_size = max(1, int(fig_w * _RING_MIN_FONT_FRAC))
+    size = max(min_size, int(fig_w * 0.06))
+
+    def _max_angular_width(sz: int) -> float:
+        """Суммарный угол (градусы), который займут все n символов на радиусе radius
+        при кегле sz — используется чтобы ужать кегль, если фраза слишком длинная для
+        одного полного прохода по кольцу."""
+        probe = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+        pdraw = ImageDraw.Draw(probe)
+        font = _font_v3(font_role, sz)
+        total_deg = 0.0
+        for ch in phrase:
+            bbox = pdraw.textbbox((0, 0), ch, font=font)
+            ch_w = max(1, bbox[2] - bbox[0])
+            # Длина дуги ch_w (с небольшим зазором) -> угол в радианах -> градусы.
+            arc_len = ch_w * 1.35
+            total_deg += math.degrees(arc_len / max(1.0, radius))
+        return total_deg
+
+    # Ужимаем кегль, пока полный проход по кольцу (360°, с запасом 5% на визуальный
+    # зазор в точке начала/конца) не влезает — иначе символы налезали бы друг на друга.
+    while size > min_size and _max_angular_width(size) > 342.0:
+        size -= 1
+    font = _font_v3(font_role, size)
+
+    ring_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    probe = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+    pdraw = ImageDraw.Draw(probe)
+
+    # Угловой шаг РАВНОМЕРНЫЙ — ровно 360°/n, гарантирует РОВНО ОДИН проход по кольцу
+    # независимо от фактической ширины отдельных символов (в отличие от жадной
+    # раскладки "ширина символа -> угол", которая могла бы не дойти/перекрыть полный
+    # круг на неравномерных по ширине глифах).
+    step_deg = 360.0 / n
+    direction = 1.0 if clockwise else -1.0
+
+    word_colors_cycle = [roles.accent, roles.dominant]
+    color_idx = 0
+    prev_was_space = True  # первый "видимый" символ после начала/пробела красится accent
+    for i, ch in enumerate(phrase):
+        angle_deg = start_angle_deg + direction * step_deg * i
+        angle_rad = math.radians(angle_deg)
+
+        if ch == " ":
+            prev_was_space = True
+            continue
+        if prev_was_space:
+            color_idx = 0
+        color = word_colors_cycle[color_idx % 2]
+        prev_was_space = False
+        color_idx += 1
+
+        bbox = pdraw.textbbox((0, 0), ch, font=font)
+        ch_w = bbox[2] - bbox[0]
+        ch_h = bbox[3] - bbox[1]
+
+        # Символ рисуется на маленьком прозрачном тайле, поворачивается вокруг
+        # СВОЕГО ЦЕНТРА на угол (90 + angle_deg) — так глиф остаётся "ногами к центру
+        # кольца" (перпендикулярен радиусу) на любой позиции окружности.
+        tile_pad = max(ch_w, ch_h) + 4
+        tile = Image.new("RGBA", (tile_pad * 2, tile_pad * 2), (0, 0, 0, 0))
+        tdraw = ImageDraw.Draw(tile)
+        stroke_w = max(1, int(size * 0.06))
+        tdraw.text((tile_pad - bbox[0] - ch_w / 2, tile_pad - bbox[1] - ch_h / 2), ch,
+                   font=font, fill=color, stroke_width=stroke_w, stroke_fill=roles.dark)
+
+        rot_angle = -(angle_deg + 90.0)
+        rotated = tile.rotate(rot_angle, resample=Image.BICUBIC, expand=False)
+
+        px = cx + radius * math.cos(angle_rad)
+        py = cy + radius * math.sin(angle_rad)
+        paste_x = int(px - tile_pad)
+        paste_y = int(py - tile_pad)
+        ring_layer.alpha_composite(rotated, (paste_x, paste_y))
+
+    out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    out.alpha_composite(ring_layer)
+    out.alpha_composite(rgba, (canvas_pad, canvas_pad))
     return out

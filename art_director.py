@@ -26,13 +26,178 @@ A/B оркестратора (out_batch/ab_models/). TEXT_RENDER=image (дефо
 batch_print._verify_text).
 """
 import json
+import random
 import re
+import threading
+from collections import deque
+from pathlib import Path
 
 import anthropic
 
 import config
 
 MODEL = config.MODEL
+
+# ── Банк утверждённых визуальных стилей (docs/STYLE_BANK.json) ─────────────────
+# Каталог стилей владельца (баррокко/медальон/пропаганда/укиё-э/витраж/ар-деко/таро/
+# герб/пиксель/дорожный знак/метал-обложка и т.п.) — арт-директор ВЫБИРАЕТ стиль из
+# банка по mood_tags темы + ротации (см. _pick_style_candidates/_style_bank_block
+# ниже), essence/text_treatment вшиваются в художественный промпт (build_prompt).
+# Отсутствие файла — ОБРАТНАЯ СОВМЕСТИМОСТЬ: старое поведение без банка стилей,
+# design["style_id"] будет пустой строкой, предупреждение печатается один раз.
+_STYLE_BANK_PATH = Path(__file__).resolve().parent / "docs" / "STYLE_BANK.json"
+_style_bank_cache = {"loaded": False, "data": None}
+
+# Сколько последних стилей помнить для ротации (не давать один стиль дважды подряд
+# в скользящем окне) — прокидывается извне (theme_scout/daily_prints) как recent_styles.
+STYLE_ROTATION_WINDOW = 5
+
+# Сколько стилей-кандидатов передавать Claude на выбор за один вызов make_ideas —
+# не весь банк целиком (промпт не должен раздуваться на полсотни стилей), но
+# достаточно широкий выбор с учётом ротации.
+_STYLE_CANDIDATES_N = 6
+
+
+class RecentStyles:
+    """Потокобезопасное скользящее окно последних STYLE_ROTATION_WINDOW style_id —
+    для ротации в параллельных конвейерах (daily_prints.py — ThreadPoolExecutor с
+    несколькими воркерами, batch_print.py — последовательный батч тем). Каждый поток
+    вызывает snapshot() ПЕРЕД make_ideas (список для recent_styles=), затем record()
+    ПОСЛЕ получения design — гонки условий возможны (два потока могут одновременно
+    получить один и тот же style_id в кандидатах), но это не критично: ротация —
+    качественное пожелание владельца ("не давать один стиль два раза подряд"), не
+    жёсткая гарантия, и при WORKERS>1 полностью строгая последовательность недостижима
+    в принципе. deque(maxlen=N) сам отбрасывает старые записи."""
+
+    def __init__(self, window: int = STYLE_ROTATION_WINDOW):
+        self._window = deque(maxlen=window)
+        self._lock = threading.Lock()
+
+    def snapshot(self) -> list:
+        with self._lock:
+            return list(self._window)
+
+    def record(self, style_id: str) -> None:
+        if not style_id:
+            return
+        with self._lock:
+            self._window.append(style_id)
+
+
+def _load_style_bank() -> dict | None:
+    """Читает docs/STYLE_BANK.json один раз за процесс (кэш в модульной переменной).
+    Возвращает None при отсутствии файла/невалидном JSON — вызывающий код (make_ideas/
+    build_prompt) в этом случае работает СТАРЫМ путём без банка стилей (обратная
+    совместимость), печатает предупреждение ОДИН раз за процесс."""
+    if _style_bank_cache["loaded"]:
+        return _style_bank_cache["data"]
+    _style_bank_cache["loaded"] = True
+    if not _STYLE_BANK_PATH.exists():
+        print(f"!! art_director: {_STYLE_BANK_PATH.name} не найден — "
+              f"работаю БЕЗ банка стилей (старое поведение)", flush=True)
+        return None
+    try:
+        data = json.loads(_STYLE_BANK_PATH.read_text(encoding="utf-8"))
+        styles = data.get("styles") or []
+        if not styles:
+            print(f"!! art_director: {_STYLE_BANK_PATH.name} пуст (нет styles) — "
+                  f"работаю БЕЗ банка стилей", flush=True)
+            return None
+        _style_bank_cache["data"] = data
+        return data
+    except Exception as e:  # noqa: BLE001 — битый JSON не должен ронять генерацию
+        print(f"!! art_director: не смог прочитать {_STYLE_BANK_PATH.name}: {e} — "
+              f"работаю БЕЗ банка стилей", flush=True)
+        return None
+
+
+def _style_by_id(style_id: str) -> dict | None:
+    bank = _load_style_bank()
+    if not bank:
+        return None
+    for s in bank["styles"]:
+        if s.get("id") == style_id:
+            return s
+    return None
+
+
+def _pick_style_candidates(theme: str, recent_styles: list = None,
+                            k: int = _STYLE_CANDIDATES_N) -> list:
+    """Кандидаты стилей для передачи Claude на выбор: сортировка по релевантности
+    mood_tags/name_ru к теме (простой substring-скор, финальное решение всё равно
+    принимает Claude — это только сужение списка) + ИСКЛЮЧЕНИЕ recent_styles
+    (ротация — не давать тот же стиль в последнем скользящем окне). Если после
+    исключения recent осталось МЕНЬШЕ k стилей — донабирает из исключённых (лучше
+    показать Claude немного стилей из недавних, чем урезать выбор до 1-2), явно
+    помечая их как "недавние" в промпте (см. _style_bank_block), чтобы Claude их
+    избегал, но не был жёстко заблокирован при малом банке."""
+    bank = _load_style_bank()
+    if not bank:
+        return []
+    styles = bank["styles"]
+    recent = set(recent_styles or [])
+    theme_low = theme.lower()
+
+    def _score(s: dict) -> int:
+        score = 0
+        for tag in s.get("mood_tags", []):
+            if tag.lower() in theme_low:
+                score += 2
+        if s.get("name_ru", "").lower() in theme_low:
+            score += 1
+        return score
+
+    fresh = [s for s in styles if s.get("id") not in recent]
+    stale = [s for s in styles if s.get("id") in recent]
+    fresh_sorted = sorted(fresh, key=_score, reverse=True)
+
+    # Перемешиваем верхушку с одинаковым скором (не всегда один и тот же топ-стиль
+    # для похожих тем) — детерминированность тестам не нужна, make_ideas сам по себе
+    # недетерминированный (вызов Claude).
+    top_score = _score(fresh_sorted[0]) if fresh_sorted else 0
+    top_bucket = [s for s in fresh_sorted if _score(s) == top_score]
+    rest_bucket = [s for s in fresh_sorted if _score(s) != top_score]
+    random.shuffle(top_bucket)
+    candidates = top_bucket + rest_bucket
+
+    if len(candidates) < k and stale:
+        candidates = candidates + stale
+    return candidates[:k]
+
+
+def _style_bank_block(theme: str, recent_styles: list = None) -> str:
+    """Текстовый блок STYLE_BANK для системного промпта — список стилей-кандидатов
+    (essence/text_treatment/mood_tags/constraints) + инструкция выбрать style_id
+    (и опционально style_mix, до 2 стилей, если тема реально просит совмещения).
+    Пустая строка, если банка нет (make_ideas тогда не добавляет поля style_id/
+    style_mix в JSON-запрос вовсе — старое поведение)."""
+    candidates = _pick_style_candidates(theme, recent_styles)
+    if not candidates:
+        return ""
+    lines = [
+        "\n\nБАНК УТВЕРЖДЁННЫХ СТИЛЕЙ ВЛАДЕЛЬЦА — ОБЯЗАН выбрать style_id СТРОГО из "
+        "списка ниже для каждого дизайна (не изобретай свой стиль, не оставляй "
+        "пустым). Стили можно миксовать (style_mix) до 2 штук, ТОЛЬКО если тема "
+        "реально просит совмещения (иначе style_mix — пустая строка):",
+    ]
+    for s in candidates:
+        ring_note = (" [ГИБРИД: кольцо текста рисует КОД — в художественном промпте "
+                      "опиши кольцо-рамку ПУСТЫМ, без единой буквы на нём]"
+                      if s.get("hybrid_ring_text") else "")
+        lines.append(
+            f"- id=\"{s['id']}\" ({s['name_ru']}){ring_note}: {s['essence']} "
+            f"ТИПОГРАФИКА СТИЛЯ: {s['text_treatment']} ПАЛИТРА: {s['palette_rule']} "
+            f"ПОДХОДИТ ДЛЯ: {', '.join(s.get('mood_tags', []))}. "
+            f"ОГРАНИЧЕНИЯ: {'; '.join(s.get('constraints', []))}."
+        )
+    lines.append(
+        "Выбери style_id САМОГО подходящего стиля по теме/mood_tags из списка выше "
+        "(это уже суженный список с учётом ротации — не проси других стилей, кроме "
+        "перечисленных). Впиши essence/text_treatment выбранного стиля (и второго, "
+        "если style_mix) В САМ художественный промпт (prompt) — опиши сцену/рамку/"
+        "типографику этого стиля явно, как часть композиции, а не отдельным полем."
+    )
+    return "\n".join(lines)
 
 # ── Общие требования к идее (для обоих форматов) ───────────────────────────────
 
@@ -205,9 +370,26 @@ _TYPE_SPEC_SCHEMA = (
 )
 
 
-def _build_system(fmt_body: str) -> str:
-    """_common_rules() (динамически по TEXT_RENDER) + тело формата (cutout/diecut)."""
-    return _common_rules() + fmt_body
+# Схема полей style_id/style_mix (банк стилей) — общая для cutout/diecut, вставляется
+# ПЕРЕД закрывающей скобкой JSON-объекта в обоих _BODY. Пустая строка по умолчанию
+# для обоих полей (обратная совместимость: если банк недоступен, _style_bank_block
+# пустая и Claude эти поля не увидит в system-промпте, но JSON-схема сама по себе
+# безвредна — _parse просто санирует их отдельно).
+_STYLE_ID_SCHEMA = (
+    "\"style_id\":\"<id стиля из БАНКА СТИЛЕЙ ниже (если блок присутствует в этом "
+    "системном промпте) — ОБЯЗАН быть ровно одним из перечисленных id; пустая строка "
+    "\\\"\\\", если блок банка стилей в этом промпте отсутствует>\","
+    "\"style_mix\":\"<id ВТОРОГО стиля из банка, ТОЛЬКО если реально миксуешь два "
+    "стиля для этого дизайна (тема явно просит совмещения); пустая строка \\\"\\\" в "
+    "подавляющем большинстве случаев (один стиль — норма, микс — редкое исключение)>\","
+)
+
+
+def _build_system(fmt_body: str, style_block: str = "") -> str:
+    """_common_rules() (динамически по TEXT_RENDER) + тело формата (cutout/diecut) +
+    опциональный блок банка стилей (style_block, см. _style_bank_block) в конце —
+    после JSON-схемы, чтобы не разрывать описание полей."""
+    return _common_rules() + fmt_body + style_block
 
 
 _CUTOUT_BODY = (
@@ -234,7 +416,8 @@ _CUTOUT_BODY = (
     + _signature_props_schema() +
     _TEXT_MODE_SCHEMA +
     _TEXT_MODE_V3_SCHEMA +
-    _TYPE_SPEC_SCHEMA.rstrip(",") +
+    _TYPE_SPEC_SCHEMA +
+    _STYLE_ID_SCHEMA.rstrip(",") +
     "}. "
     "Отвечай СТРОГО JSON-массивом таких объектов, без markdown и пояснений."
 )
@@ -266,60 +449,73 @@ _DIECUT_BODY = (
     + _signature_props_schema() +
     _TEXT_MODE_SCHEMA +
     _TEXT_MODE_V3_SCHEMA +
-    _TYPE_SPEC_SCHEMA.rstrip(",") +
+    _TYPE_SPEC_SCHEMA +
+    _STYLE_ID_SCHEMA.rstrip(",") +
     "}. "
     "Отвечай СТРОГО JSON-массивом таких объектов, без markdown и пояснений."
 )
 
 
-def system_cutout() -> str:
+def system_cutout(theme: str = "", recent_styles: list = None) -> str:
     """SYSTEM_CUTOUT как функция — _common_rules() читает config.TEXT_RENDER на
-    момент КАЖДОГО вызова (важно для тестов, monkeypatch'ящих config.TEXT_RENDER)."""
-    return _build_system(_CUTOUT_BODY)
+    момент КАЖДОГО вызова (важно для тестов, monkeypatch'ящих config.TEXT_RENDER).
+    theme/recent_styles (опционально) — добавляют блок БАНКА СТИЛЕЙ (см.
+    _style_bank_block); без темы (дефолт "") блок стилей не добавляется — сохраняет
+    обратную совместимость константы SYSTEM_CUTOUT ниже (снимок без стилей)."""
+    return _build_system(_CUTOUT_BODY, _style_bank_block(theme, recent_styles))
 
 
-def system_diecut() -> str:
+def system_diecut(theme: str = "", recent_styles: list = None) -> str:
     """SYSTEM_DIECUT как функция — см. system_cutout()."""
-    return _build_system(_DIECUT_BODY)
+    return _build_system(_DIECUT_BODY, _style_bank_block(theme, recent_styles))
 
 
 # SYSTEM_CUTOUT/SYSTEM_DIECUT — обратная совместимость (модули/тесты, читающие эти
 # константы напрямую): снимок на момент ИМПОРТА модуля (TEXT_RENDER из .env на старте
-# процесса). Живой путь (_ask_claude ниже) использует функции выше, не эти константы.
+# процесса, БЕЗ блока банка стилей — theme="" отключает _style_bank_block). Живой путь
+# (_ask_claude ниже) использует функции выше С темой/recent_styles, не эти константы.
 SYSTEM_CUTOUT = system_cutout()
 SYSTEM_DIECUT = system_diecut()
 
 _SYSTEMS_FN = {"cutout": system_cutout, "diecut": system_diecut}
 
 
-def _ask_claude(theme: str, n: int, fmt: str) -> str:
+def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None) -> str:
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     user = (f"Запрос: {theme}. Дай ровно {n} разных дизайн(ов). JSON-массив из {n} "
             f"объектов {{\"prompt\":..., \"chroma\":..., \"slogan\":..., "
             f"\"slogan_color\":..., \"kana\":..., \"character_en\":..., \"title_en\":..., "
             f"\"signature_props\":..., \"text_mode\":..., \"text_modes_v3\":..., "
-            f"\"quote\":..., \"name_jp\":..., \"mood\":..., \"type_spec\":...}}.")
+            f"\"quote\":..., \"name_jp\":..., \"mood\":..., \"type_spec\":..., "
+            f"\"style_id\":..., \"style_mix\":...}}.")
     system_fn = _SYSTEMS_FN.get(fmt, system_cutout)
     resp = client.messages.create(
         model=MODEL,
         max_tokens=1500,
-        system=system_fn(),
+        system=system_fn(theme, recent_styles),
         messages=[{"role": "user", "content": user}],
     )
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
 
 
-def make_ideas(theme: str, n: int, fmt: str = "cutout") -> list:
+def make_ideas(theme: str, n: int, fmt: str = "cutout", recent_styles: list = None) -> list:
     """N дизайнов: список dict {prompt, chroma, slogan, slogan_color, kana, character_en,
-    title_en, signature_props, text_mode, text_modes_v3, quote, name_jp, mood, type_spec}.
+    title_en, signature_props, text_mode, text_modes_v3, quote, name_jp, mood, type_spec,
+    style_id, style_mix}.
+
+    recent_styles (опционально) — скользящее окно последних использованных style_id
+    (см. STYLE_ROTATION_WINDOW) — прокидывается в системный промпт как "не давай эти
+    id снова" (см. _pick_style_candidates). Если docs/STYLE_BANK.json отсутствует —
+    признак игнорируется, style_id/style_mix возвращаются пустыми строками (старое
+    поведение без банка стилей).
 
     НЕ откатываемся тихо на сырую тему при сбое парсинга JSON: 1 ретрай запроса,
     затем ЯВНАЯ ошибка (вызывающий код пропускает этот дизайн с сообщением).
     """
-    text = _ask_claude(theme, n, fmt)
+    text = _ask_claude(theme, n, fmt, recent_styles)
     designs = _parse(text)
     if not designs:
-        text = _ask_claude(theme, n, fmt)  # 1 ретрай — вдруг разовый сбой формата
+        text = _ask_claude(theme, n, fmt, recent_styles)  # 1 ретрай — вдруг разовый сбой формата
         designs = _parse(text)
     if not designs:
         raise RuntimeError(f"арт-директор не смог собрать дизайн для {theme!r} "
@@ -426,11 +622,24 @@ def _parse(text: str) -> list:
             if "editorial" in text_modes_v3:
                 text_modes_v3 = ["editorial"]
 
-        # quote: короткая цитата в кавычках для quote_bottom/pop_trash-подвала (раздел
-        # 3.1/4.3). Санация той же схемой, что slogan, но длиннее (до 70 символов —
-        # антиправило 4 стайлгайда: не ужимать кегль ниже порога ради длинной строки,
-        # вместо этого код переносит на 2-ю строку/использует другой размер).
-        quote = re.sub(r"[^A-Za-z0-9 !?'\-]", "", str(x.get("quote") or "")).strip()[:70]
+        # quote: короткая каноничная реплика персонажа для quote_bottom/pop_trash-
+        # подвала (раздел 3.1/4.3) — системный промпт ЯВНО разрешает quote на языке
+        # персонажа (не только английском), санация НЕ должна быть ASCII-only как у
+        # slogan/character_en (те — служебные латинские поля для поиска референса,
+        # quote — реальный видимый текст на принте). РЕГРЕСС (нашёл тестировщик, живая
+        # партия 2026-07-09, out_batch/daily_2026-07-09/0005_by_индия___портрет_певиц):
+        # старый regex `[^A-Za-z0-9 !?'\-]` пропускал только голый ASCII и молча вырезал
+        # акцентированную латиницу (например испанское 'género' -> 'gnero'), портя
+        # exact-spelling инструкцию генерации и эталон OCR-сравнения. Санация теперь
+        # убирает только управляющие символы (\x00-\x1f, \x7f) и опасные для промпта
+        # символы разметки/кавычек (двойные кавычки, обратные слэши, переводы строк
+        # уже покрыты диапазоном control), сохраняя ЛЮБЫЕ печатные буквы Unicode
+        # (акцентированная латиница, кириллица, кандзи и т.п. — язык персонажа решает
+        # Claude, код не сужает алфавит). Длина не изменена — до 70 символов (антиправило
+        # 4 стайлгайда: не ужимать кегль ниже порога ради длинной строки, вместо этого
+        # код переносит на 2-ю строку/использует другой размер).
+        quote = re.sub(r"[\x00-\x1f\x7f\"\\]", "",
+                       str(x.get("quote") or "")).strip()[:70]
 
         # name_jp: кандзи ИЛИ катакана имени персонажа (раздел 4.1) — санация допускает
         # ОБА диапазона (в отличие от kana выше, только катакана). Дефолт "" при
@@ -455,12 +664,26 @@ def _parse(text: str) -> list:
         # добавляет текст-блок вообще, как раньше).
         type_spec = re.sub(r"[\r\n\t]+", " ", str(x.get("type_spec") or "")).strip()[:400]
 
+        # style_id/style_mix: банк утверждённых стилей (docs/STYLE_BANK.json). Дефолт
+        # "" при отсутствии/невалидном id — обратная совместимость (банк не загружен
+        # ИЛИ Claude вернул id, которого нет в банке — не доверяем LLM вслепую, тот же
+        # принцип, что у chroma-предохранителя выше). style_mix санируется тем же
+        # способом, но ДОПОЛНИТЕЛЬНО не может совпадать со style_id (миксовать стиль
+        # сам с собой бессмысленно — если совпали, style_mix сбрасывается в "").
+        style_id = str(x.get("style_id") or "").strip()
+        if not _style_by_id(style_id):
+            style_id = ""
+        style_mix = str(x.get("style_mix") or "").strip()
+        if not _style_by_id(style_mix) or style_mix == style_id:
+            style_mix = ""
+
         out.append({"prompt": prompt, "chroma": chroma,
                     "slogan": slogan, "slogan_color": scolor, "kana": kana,
                     "character_en": character_en, "title_en": title_en,
                     "signature_props": signature_props, "text_mode": text_mode,
                     "text_modes_v3": text_modes_v3, "quote": quote,
-                    "name_jp": name_jp, "mood": mood, "type_spec": type_spec})
+                    "name_jp": name_jp, "mood": mood, "type_spec": type_spec,
+                    "style_id": style_id, "style_mix": style_mix})
     return out
 
 
@@ -586,6 +809,49 @@ def _text_render_block(design: dict) -> str:
     return " ".join(parts)
 
 
+def _style_bank_prompt_block(design: dict) -> str:
+    """Код-предохранитель: essence/text_treatment выбранного style_id (и style_mix,
+    если есть) ЯВНО дописываются в финальный промпт — не полагаемся только на то, что
+    Claude сам вписал стиль в design['prompt'] по инструкции _style_bank_block (LLM
+    иногда забывает деталь стайлгайда). hybrid_ring_text=true (09_ring_medallion) —
+    ДОПОЛНИТЕЛЬНО явно требует ПУСТОЕ кольцо без единой буквы (текст на кольце рисует
+    typography/typography_v3 кодом ПОСЛЕ генерации, не сама модель картинки — см.
+    docs/STYLE_BANK.json). Пустая строка, если style_id пуст/неизвестен (банк
+    недоступен ИЛИ Claude не выбрал стиль) — обратная совместимость."""
+    style_id = str(design.get("style_id") or "").strip()
+    if not style_id:
+        return ""
+    style = _style_by_id(style_id)
+    if not style:
+        return ""
+    parts = [f"VISUAL STYLE ({style['name_ru']}): {style['essence']} "
+             f"TYPOGRAPHY STYLE: {style['text_treatment']}"]
+    if style.get("hybrid_ring_text"):
+        parts.append(
+            "IMPORTANT: the decorative ring/medallion border must be drawn "
+            "COMPLETELY PLAIN — a plain metal/enamel band with only small "
+            "ornamental notches or a single emblem glyph at the seam, with "
+            "ABSOLUTELY NO LETTERS, NO WORDS, NO TEXT of any kind on the ring "
+            "itself. Any name/phrase for the ring is added separately afterward "
+            "by a different process, not by you."
+        )
+    mix_id = str(design.get("style_mix") or "").strip()
+    mix_style = _style_by_id(mix_id) if mix_id else None
+    if mix_style:
+        parts.append(
+            f"MIXED WITH A SECOND STYLE ({mix_style['name_ru']}): "
+            f"{mix_style['essence']} Blend the two styles into one coherent "
+            f"composition, do not just place them side by side."
+        )
+        if mix_style.get("hybrid_ring_text"):
+            parts.append(
+                "IMPORTANT: if this second style's ring/medallion border is part "
+                "of the mixed composition, it must also be drawn COMPLETELY "
+                "PLAIN with no letters on it, same rule as above."
+            )
+    return " ".join(parts)
+
+
 def build_prompt(design: dict) -> str:
     """Идея (dict из make_ideas) -> финальный промпт для generate_image.
 
@@ -593,6 +859,13 @@ def build_prompt(design: dict) -> str:
     фирменное оружие/атрибут персонажа должно совпадать с каноном ТОЧНО (форма/цвет/
     отделка), а не обобщаться до "a sword" — вставляется ПЕРЕД хромакей-хвостом, сразу
     после художественного промпта, где Claude уже описал сцену.
+
+    Если design['style_id'] непусто (банк стилей, docs/STYLE_BANK.json) — essence/
+    text_treatment выбранного стиля (и style_mix, если задан) дописываются кодом
+    ПОСЛЕ художественного промпта Claude (см. _style_bank_prompt_block) — код-
+    предохранитель поверх инструкции в системном промпте, не полагаемся только на
+    добросовестность LLM. hybrid_ring_text-стили (кольцо-медальон) получают явный
+    запрет рисовать буквы на самом кольце — эту типографику накладывает код позже.
 
     TEXT_RENDER=image (десятый заход, дефолт): если у дизайна есть type_spec и фраза
     для exact-spelling (quote ИЛИ slogan) — вставляется блок ВСТРОЕННОЙ типографики
@@ -607,6 +880,10 @@ def build_prompt(design: dict) -> str:
             f"The character's signature weapon/prop must match canon exactly: "
             f"{signature_props}."
         )
+
+    style_block = _style_bank_prompt_block(design)
+    if style_block:
+        parts.append(style_block)
 
     if config.TEXT_RENDER == "image":
         text_block = _text_render_block(design)

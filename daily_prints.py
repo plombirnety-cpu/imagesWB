@@ -95,9 +95,17 @@ def apply_budget_cap(plan: list, max_cost_usd: float) -> list:
     return plan[:allowed_n]
 
 
-def _process_one(task: dict, idx: int, outdir: Path, dry_run: bool) -> dict:
+def _process_one(task: dict, idx: int, outdir: Path, dry_run: bool,
+                  recent_styles: "art_director.RecentStyles" = None) -> dict:
     """Обрабатывает одно задание плана: арт-директор -> render_design (или заглушка
-    в dry-run). Возвращает запись для журнала queue.jsonl."""
+    в dry-run). Возвращает запись для журнала queue.jsonl.
+
+    recent_styles (art_director.RecentStyles, опционально) — скользящее окно
+    последних style_id для ротации банка стилей (docs/STYLE_BANK.json): снимок
+    ПЕРЕД make_ideas, запись выбранного style_id ПОСЛЕ (см. RecentStyles docstring
+    про потокобезопасность при WORKERS>1). None — ротация отключена (старое
+    поведение, style_id не передаётся вовсе — art_director сам решит по banку
+    без учёта истории)."""
     theme, fmt = task["theme"], task.get("format", "diecut")
     tag = _task_tag(idx, theme)
     record = {"tag": tag, "theme": theme, "format": fmt,
@@ -111,11 +119,16 @@ def _process_one(task: dict, idx: int, outdir: Path, dry_run: bool) -> dict:
         return record
 
     try:
-        design = art_director.make_ideas(theme, 1, fmt)[0]
+        recent = recent_styles.snapshot() if recent_styles else None
+        design = art_director.make_ideas(theme, 1, fmt, recent_styles=recent)[0]
+        if recent_styles:
+            recent_styles.record(design.get("style_id", ""))
     except Exception as e:  # noqa: BLE001
         record["error"] = f"арт-директор: {e}"
         print(f"[{tag}] !! арт-директор упал: {e}", flush=True)
         return record
+
+    record["style_id"] = design.get("style_id", "")
 
     # text_style="auto" — типографика v2 (typography.compose_text), режим (none/under/
     # punch/kana_side) решает арт-директор ПО КОМПОЗИЦИИ design["text_mode"] каждого
@@ -183,6 +196,11 @@ def run_daily(target_n: int, workers: int, max_cost_usd: float, dry_run: bool,
         todo.append((i, task))
     print(f"к обработке: {len(todo)} из {len(plan)}", flush=True)
 
+    # Ротация банка стилей (docs/STYLE_BANK.json, docs/PRINT_STYLE_GUIDE.md) — общее
+    # скользящее окно последних STYLE_ROTATION_WINDOW style_id на ВЕСЬ дневной прогон
+    # (не давать один стиль два раза подряд в батче), потокобезопасно для WORKERS>1.
+    recent_styles = art_director.RecentStyles()
+
     if dry_run:
         print("\n=== 4. dry-run: полный цикл БЕЗ платных вызовов картинок ===",
               flush=True)
@@ -196,7 +214,7 @@ def run_daily(target_n: int, workers: int, max_cost_usd: float, dry_run: bool,
     print(f"\n=== 4. генерация ({workers} потоков) ===", flush=True)
     ok, failed = 0, 0
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futs = {pool.submit(_process_one, task, i, outdir, False): (i, task)
+        futs = {pool.submit(_process_one, task, i, outdir, False, recent_styles): (i, task)
                for i, task in todo}
         for fut in as_completed(futs):
             i, task = futs[fut]

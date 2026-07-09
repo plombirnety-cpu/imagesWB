@@ -233,14 +233,19 @@ def test_verify_text_no_expected_phrases_returns_true_without_ocr_call(monkeypat
 
 
 def test_verify_text_all_phrases_present_returns_true(monkeypatch):
+    # Фраза 更木剣八 содержит кандзи -> _verify_text (тринадцатый заход, строгая кана)
+    # делает ВТОРОЙ OCR-вызов с prompt=_JP_COLUMN_PROMPT для поглифной сверки — мок
+    # должен отвечать на ОБА вызова (общий транскрипт БЕЗ prompt и узкий кана-вызов С
+    # prompt), иначе TypeError на лишнем keyword-аргументе.
     monkeypatch.setattr(providers, "verify_text_in_image",
-                        lambda img: "COME ON LET'S PARTY\n更木剣八")
+                        lambda img, prompt=providers._OCR_PROMPT: "COME ON LET'S PARTY\n更木剣八")
     ok = batch_print._verify_text(_tiny_rgba(), ["LETS PARTY", "更木剣八"])
     assert ok is True
 
 
 def test_verify_text_missing_phrase_returns_false(monkeypatch):
-    monkeypatch.setattr(providers, "verify_text_in_image", lambda img: "SOME OTHER TEXT")
+    monkeypatch.setattr(providers, "verify_text_in_image",
+                        lambda img, prompt=providers._OCR_PROMPT: "SOME OTHER TEXT")
     ok = batch_print._verify_text(_tiny_rgba(), ["LETS PARTY"])
     assert ok is False
 
@@ -248,7 +253,7 @@ def test_verify_text_missing_phrase_returns_false(monkeypatch):
 def test_verify_text_ocr_call_failure_returns_false_not_raises(monkeypatch):
     """Сбой самого OCR-вызова (сеть/HTTP) -> False, НЕ пробрасывает исключение —
     вызывающий код (render_design) должен уметь ретраить/откатиться, не падать."""
-    def _boom(img):
+    def _boom(img, prompt=providers._OCR_PROMPT):
         raise RuntimeError("HTTP 500")
     monkeypatch.setattr(providers, "verify_text_in_image", _boom)
     ok = batch_print._verify_text(_tiny_rgba(), ["LETS PARTY"])
@@ -325,12 +330,20 @@ def test_render_design_text_render_image_ocr_passes_first_try(tmp_path, monkeypa
 
 def test_render_design_text_render_image_ocr_fails_triggers_fallback(tmp_path, monkeypatch):
     """OCR НЕ проходит ни на одной попытке (включая ретраи) -> честный откат:
-    ДОПОЛНИТЕЛЬНАЯ генерация без текста + text_fallback=True в результате."""
+    ДОПОЛНИТЕЛЬНАЯ генерация без текста + text_fallback=True в результате.
+
+    Пятнадцатый заход (регресс-фикс двойного текста): fallback-картинка ТЕПЕРЬ
+    дополнительно проверяется _verify_no_text (реально ли она без текста) — здесь
+    _green_frame_img() физически не содержит никакого встроенного текста (просто
+    фигура на хромакее), поэтому мокаем _verify_no_text=True (реалистичный
+    сценарий "fallback пришла без текста, как и просили") — без мока тест зависел
+    бы от реального сетевого OCR-вызова providers.verify_text_in_image."""
     monkeypatch.setattr(config, "TEXT_RENDER", "image")
     img = _green_frame_img()
     fake_gen = _fake_gen_image_factory([img, img, img])  # 2 попытки + 1 фолбэк
     monkeypatch.setattr(batch_print.providers, "generate_image", fake_gen)
     monkeypatch.setattr(batch_print, "_verify_text", lambda image, phrases: False)
+    monkeypatch.setattr(batch_print, "_verify_no_text", lambda image: True)
     monkeypatch.setattr(batch_print.character_ref, "get_reference",
                         lambda *a, **k: None)
 
@@ -339,18 +352,23 @@ def test_render_design_text_render_image_ocr_fails_triggers_fallback(tmp_path, m
 
     assert res["ok"] is True
     assert res["text_fallback"] is True
-    # 1+timeout_retries (2) попытки с текстом + 1 доп. фолбэк-генерация = 3 вызова.
+    # 1+timeout_retries (2) попытки с текстом + 1 доп. фолбэк-генерация = 3 вызова
+    # (fb_no_text_ok=True и fb_cov=1.00>=0.90 с ПЕРВОЙ фолбэк-попытки -> цикл
+    # _FALLBACK_NO_TEXT_MAX_ATTEMPTS прерывается сразу, вторая попытка не тратится).
     assert fake_gen.calls["n"] == 3
 
 
 def test_render_design_text_fallback_applies_code_typography(tmp_path, monkeypatch):
     """При сработавшем text_fallback итоговый diecut ДОЛЖЕН содержать текст,
-    нанесённый КОДОМ (typography_v3/typography), а не быть голой вырезкой."""
+    нанесённый КОДОМ (typography_v3/typography), а не быть голой вырезкой — при
+    условии, что fallback-картинка ПОДТВЕРЖДЕНА OCR-ом как реально без текста (см.
+    _verify_no_text, пятнадцатый заход)."""
     monkeypatch.setattr(config, "TEXT_RENDER", "image")
     img = _green_frame_img()
     fake_gen = _fake_gen_image_factory([img, img])
     monkeypatch.setattr(batch_print.providers, "generate_image", fake_gen)
     monkeypatch.setattr(batch_print, "_verify_text", lambda image, phrases: False)
+    monkeypatch.setattr(batch_print, "_verify_no_text", lambda image: True)
     monkeypatch.setattr(batch_print.character_ref, "get_reference",
                         lambda *a, **k: None)
 

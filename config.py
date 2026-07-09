@@ -53,6 +53,48 @@ TEXT_RENDER = os.getenv("TEXT_RENDER", "image").strip().lower()
 
 IMG_SIZE = int(os.getenv("IMG_SIZE", "1536"))
 
+# ── Апскейл до печатных 300 DPI (upscale.py, portable realesrgan-ncnn-vulkan) ───
+
+# on (ДЕФОЛТ) — после вырезки render_design дополнительно сохраняет <tag>_print.png =
+# апскейл x4 (realesrgan-x4plus-anime) поверх diecut для печати | off — апскейл
+# пропускается (например если tools/realesrgan/ не установлен на этой машине — сам
+# upscale.py тоже не падает при отсутствии exe, это ДВОЙНАЯ защита). Замер на этой
+# машине (встроенная AMD GPU через Vulkan, без CUDA): ~55-65с/шт на кадрах ~1300px
+# стороной, в пределах порога 90с/шт — см. docs/PROJECT_STATE.md.
+UPSCALE = os.getenv("UPSCALE", "on").strip().lower() == "on"
+
+# Модель realesrgan-ncnn-vulkan для апскейла (см. tools/realesrgan/models/) —
+# x4plus-anime специализирована под аниме-арт (чище держит контуры/плоскую заливку),
+# чем общая x4plus.
+UPSCALE_MODEL = os.getenv("UPSCALE_MODEL", "realesrgan-x4plus-anime")
+
+# Кратность апскейла (2/3/4, см. realesrgan-ncnn-vulkan -h) — x4 даёт печатное
+# разрешение на типичных диекатах nano-banana (IMG_SIZE=1536 исходник).
+UPSCALE_SCALE = int(os.getenv("UPSCALE_SCALE", "4"))
+
+# Минимальный размер БОЛЬШЕЙ стороны <tag>_print.png в пикселях (пятнадцатый заход,
+# адаптивный апскейл) — nano-banana отдаёт РАЗНЫЕ исходные размеры (768..1408px
+# наблюдалось на живых raw), x4 realesrgan НЕ гарантирует единый печатный минимум
+# на всех дизайнах. upscale.upscale_to_print_min (upscale.py) досчитывает PIL
+# Lanczos-апскейлом ПОВЕРХ результата x4, если после него большая сторона всё ещё
+# < PRINT_MIN_SIDE. Дефолт 3800 — задача лида, ~12.7см при 300 DPI (типичная зона
+# принта на груди футболки с запасом).
+PRINT_MIN_SIDE = int(os.getenv("PRINT_MIN_SIDE", "3800"))
+
+# Таймаут ОДНОГО вызова realesrgan-ncnn-vulkan.exe (секунд) — пятнадцатый заход,
+# см. upscale.py. Встроенная GPU (Vulkan) на этой машине даёт ~55-115с/шт в
+# зависимости от параллельной нагрузки (WORKERS) — 300 с запасом даже при
+# нескольких воркерах, ждущих своей очереди на GPU-семафоре (см. UPSCALE_LOCK ниже).
+UPSCALE_TIMEOUT = int(os.getenv("UPSCALE_TIMEOUT", "300"))
+
+# ── QC-гейт масштаба фигуры (batch_print._figure_fills_frame) ───────────────────
+
+# Минимальная доля высоты кадра, которую обязан занимать bbox альфы вырезанной фигуры
+# — если высота силуэта меньше этой доли высоты кадра, попытка считается браком
+# ("фигура слишком мелкая", в общий QC-ретрай-цикл render_design). Калибровка из
+# задачи лида — урок на мелких Маки/этикетке/Люси (персонаж терялся в углу кадра).
+FIGURE_MIN_FRAC = float(os.getenv("FIGURE_MIN_FRAC", "0.55"))
+
 # ── Ежедневный контур (theme_scout.py / daily_prints.py) ────────────────────────
 
 # Путь к соседнему проекту trend-watch/ (источник CSV-трендов + subprocess-парсеры).

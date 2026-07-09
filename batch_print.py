@@ -44,6 +44,7 @@ import config                  # noqa: E402
 import providers               # noqa: E402
 import typography              # noqa: E402
 import typography_v3           # noqa: E402
+import upscale                 # noqa: E402
 
 
 # Блок промпта, форсирующий рисование ПО РЕФЕРЕНСУ (см. character_ref.get_reference) —
@@ -56,6 +57,76 @@ _REFERENCE_PREFIX = (
     "weapon exactly as in canon. Redraw this character in a NEW pose and composition "
     "as described below. Do not copy the reference pose or background. "
 )
+
+# Медальон-гибрид (typography_v3.ring_text, четвёртая задача) — ДВА независимых
+# источника, которые оба включают режим:
+#
+# 1) БАНК СТИЛЕЙ (docs/STYLE_BANK.json, обычный путь через art_director.make_ideas):
+#    design["style_id"]/["style_mix"] указывает на стиль с hybrid_ring_text=true
+#    (сейчас единственный такой — "09_ring_medallion") — эту часть ПРОМПТА
+#    (декоративное ПУСТОЕ кольцо без единой буквы) УЖЕ полностью строит
+#    art_director.build_prompt/_style_bank_prompt_block (см. art_director.py, НЕ
+#    дублируется здесь) — batch_print.render_design только детектирует режим (через
+#    art_director._style_by_id) и накладывает КОЛЬЦЕВОЙ ТЕКСТ КОДОМ после вырезки.
+#
+# 2) ПРЯМЫЕ ПОЛЯ design (альтернативный источник ЗА ПРЕДЕЛАМИ банка стилей — напр.
+#    style_madara.py-подобные скрипты, которые строят design-dict напрямую, минуя
+#    art_director.make_ideas): design["style_id"]=="ring_medallion" (БЕЗ цифрового
+#    префикса банка) ИЛИ непустое design["hybrid_ring_text"] — ЭТИ design НЕ проходят
+#    через _style_bank_prompt_block (тот знает только банковские id вида "09_..."),
+#    поэтому _RING_MEDALLION_PROMPT_SUFFIX добавляется здесь ЯВНО (см. ниже), чтобы
+#    промпт всё равно попросил пустое кольцо — иначе для этих design фича была бы
+#    наполовину рабочей (код рисует кольцевой текст, но генерация не была бы
+#    предупреждена оставить кольцо пустым).
+_RING_MEDALLION_PROMPT_SUFFIX = (
+    " Around the entire figure, at an even radial distance, runs a thin decorative "
+    "circular ring or medallion border (like a coin rim or emblem seal) framing the "
+    "whole composition — ornamental, with fine engraved or embossed detail (beading, "
+    "filigree, small studs or notches), matching the artwork's color palette. The ring "
+    "is PURELY DECORATIVE AND CONTAINS NO LETTERING, NO WORDS, NO TEXT OF ANY KIND — "
+    "leave the inside band of the ring visually clean (pattern/ornament only), any text "
+    "for this design is added separately afterward. Do not write any words anywhere on "
+    "the ring or the composition."
+)
+
+# Максимум ДОПОЛНИТЕЛЬНЫХ (fallback, БЕЗ текст-блока) генераций в text-fallback ветке
+# render_design (пятнадцатый заход, регресс-фикс двойного текста) — каждая попытка
+# проверяется _verify_no_text (OCR-контроль ОТСУТСТВИЯ значимого текста), не только
+# цветовым QC-гейтом рамки. 2 — по прямому требованию задачи ("ещё одна фолбэк-
+# попытка (максимум 2)"): первая fallback-генерация уже была неявной частью старого
+# поведения, здесь этот бюджет посчитан явно как отдельный цикл.
+_FALLBACK_NO_TEXT_MAX_ATTEMPTS = 2
+
+
+def _hybrid_ring_via_style_bank(design: dict) -> bool:
+    """design["style_id"]/["style_mix"] указывает на банковский стиль (docs/
+    STYLE_BANK.json) с hybrid_ring_text=true — art_director.build_prompt УЖЕ сам
+    добавляет инструкцию про пустое кольцо для этого пути, здесь только детекция."""
+    for sid in (str(design.get("style_id") or "").strip(),
+                str(design.get("style_mix") or "").strip()):
+        if not sid:
+            continue
+        try:
+            style = art_director._style_by_id(sid)
+        except Exception:  # noqa: BLE001 — банк недоступен/битый, не должен ронять генерацию
+            style = None
+        if style and style.get("hybrid_ring_text"):
+            return True
+    return False
+
+
+def _hybrid_ring_via_direct_fields(design: dict) -> bool:
+    """design["style_id"]=="ring_medallion" (без банковского префикса) ИЛИ непустое
+    design["hybrid_ring_text"] — альтернативный источник ВНЕ банка стилей (см. блок-
+    комментарий выше), для которого промпт-суффикс добавляется явно в render_design."""
+    return (design.get("style_id") == "ring_medallion"
+            or bool(str(design.get("hybrid_ring_text") or "").strip()))
+
+
+def _is_hybrid_ring_style(design: dict) -> bool:
+    """design реально просит медальон-гибрид — банковский путь ИЛИ прямые поля
+    (см. _hybrid_ring_via_style_bank/_hybrid_ring_via_direct_fields)."""
+    return _hybrid_ring_via_style_bank(design) or _hybrid_ring_via_direct_fields(design)
 
 
 # ── QC-гейт границ кадра (перенесено дословно из comfyui-print-server/batch_print.py) ──
@@ -136,6 +207,48 @@ def _border_chroma_coverage(img_rgb: Image.Image, tol: float = 52.0,
     return close / total
 
 
+# ── QC-гейт масштаба фигуры (урок на мелких Маки/этикетке/Люси — персонаж терялся в
+# углу/центре кадра, занимая малую долю высоты, диекат выглядел "мелким принтом на
+# футболке") ──────────────────────────────────────────────────────────────────────
+
+def _figure_bbox_height_frac(img_rgb: Image.Image, tol: float = 52.0,
+                              chroma: str = "green") -> float:
+    """Доля ВЫСОТЫ КАДРА, которую занимает bbox «не-фон» маски (то же расстояние в
+    CrCb до цвета хромакея рамки, tol=52 — калибровка, общая с cutout_green/
+    _border_chroma_coverage, НЕ дублирует тяжёлую rembg-вырезку — быстрая цветовая
+    оценка ДОСТАТОЧНА для QC-гейта размера, точная альфа с rembg считается один раз
+    позже в самой вырезке). Работает на СЫРОМ raw (RGB, до фактического
+    chroma_remove.cutout_green) — вызывается внутри QC-цикла генерации на каждой
+    попытке, поэтому должна быть дешёвой (без ML-вызова).
+
+    Возвращает 0.0, если «не-фон» маска пуста (весь кадр — фон, разрешать не
+    должны — но не делить на ноль)."""
+    rgb = np.array(img_rgb.convert("RGB"))
+    h, w = rgb.shape[:2]
+    key = chroma_remove._border_key(rgb).astype(np.uint8)
+    keyy = cv2.cvtColor(key.reshape(1, 1, 3), cv2.COLOR_RGB2YCrCb)[0, 0].astype(np.float32)
+    ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
+    dist = np.sqrt((ycc[:, :, 1] - keyy[1]) ** 2 + (ycc[:, :, 2] - keyy[2]) ** 2)
+
+    fg = dist >= tol
+    rows = np.where(fg.any(axis=1))[0]
+    if rows.size == 0:
+        return 0.0
+    bbox_h = int(rows[-1] - rows[0] + 1)
+    return bbox_h / float(h)
+
+
+def _figure_fills_frame(img_rgb: Image.Image, min_frac: float = None,
+                         chroma: str = "green") -> tuple:
+    """QC-гейт: (ok: bool, frac: float) — ok=False, если высота bbox фигуры МЕНЬШЕ
+    config.FIGURE_MIN_FRAC (дефолт 0.55) доли высоты кадра — "фигура слишком мелкая",
+    та же попытка бракуется и уходит в общий ретрай-цикл render_design, наравне с
+    провалом border coverage / OCR."""
+    frac_thr = config.FIGURE_MIN_FRAC if min_frac is None else min_frac
+    frac = _figure_bbox_height_frac(img_rgb, chroma=chroma)
+    return frac >= frac_thr, frac
+
+
 def juice(rgba: Image.Image) -> Image.Image:
     """Сочность цвета: Color x1.15 + Contrast x1.05 ТОЛЬКО по RGB-каналам, альфа-канал
     сохраняется как есть (не участвует в enhance). Перенесено дословно из
@@ -201,8 +314,18 @@ def _normalize_for_compare(text: str) -> str:
     """Нормализация для сравнения OCR-транскрипта с ожидаемой фразой: верхний регистр,
     убрать пунктуацию/апострофы/переводы строк, схлопнуть повторные пробелы. Кандзи/
     катакана сравниваются КАК ЕСТЬ (regex ниже не трогает диапазон CJK/катакана —
-    только убирает ASCII-пунктуацию и whitespace, не буквы любого алфавита)."""
+    только убирает ASCII-пунктуацию и whitespace, не буквы любого алфавита).
+
+    Юникод-нормализация NFC ПЕРВЫМ шагом (тринадцатый заход, строгая кана): OCR-модель
+    иногда отдаёт дакутэн/хандакутэн КАК ОТДЕЛЬНЫЙ комбинирующий кодпоинт (U+3099/
+    U+309A) вместо предкомпозированного глифа (например 'ハ'+U+3099 вместо готовой
+    'バ') — оба визуально и семантически ОДНА И ТА ЖЕ кана, но как raw-строки они НЕ
+    равны без NFC. Без нормализации это ложно проваливало бы сверку на графемах,
+    которые реально совпадают. NFC НЕ схлопывает РАЗНЫЕ базовые каны (ハ и バ остаются
+    разными символами после NFC — не тот же кейс, что "визуальная похожесть")."""
     import re as _re
+    import unicodedata as _ud
+    text = _ud.normalize("NFC", text)
     text = text.upper()
     text = _re.sub(r"[\r\n\t]+", " ", text)
     # Убираем пунктуацию/апострофы (ASCII), но НЕ буквы/цифры/CJK/катакану/пробелы.
@@ -212,6 +335,35 @@ def _normalize_for_compare(text: str) -> str:
     return text
 
 
+# Диапазоны юникода японских глифов (кандзи CJK Unified + катакана + хирагана) —
+# используется, чтобы отличить "фраза содержит японские глифы" (нужна поглифная
+# строгая сверка дакутэн/хандакутэн) от обычной латиницы (substring-сверки достаточно).
+_JP_GLYPH_RE_STR = r"[一-鿿぀-ゟ゠-ヿ]"
+
+
+def _is_japanese_phrase(phrase: str) -> bool:
+    """Фраза содержит хотя бы один японский глиф (кандзи/катакана/хирагана)."""
+    import re as _re
+    return bool(_re.search(_JP_GLYPH_RE_STR, phrase or ""))
+
+
+def _glyph_by_glyph_match(expected: str, transcript: str) -> bool:
+    """Строгая ПОГЛИФНАЯ сверка японской фразы: expected должна встречаться в
+    transcript КАК ТОЧНАЯ ПОДПОСЛЕДОВАТЕЛЬНОСТЬ символов (после NFC-нормализации
+    обеих строк) — дакутэн/хандакутэн различаются автоматически, потому что 'ハ' и
+    'バ' остаются РАЗНЫМИ кодпоинтами после NFC (см. _normalize_for_compare докстринг).
+    Пробелы из expected убираются перед сравнением (вертикальная колонка кандзи не
+    содержит пробелов по построению art_director/style_madara, но защитный код на
+    случай пробела в OCR-транскрипте не помешает). Пустая expected -> True (нечего
+    сверять)."""
+    import unicodedata as _ud
+    exp = _ud.normalize("NFC", expected or "").replace(" ", "").replace("\n", "")
+    tr = _ud.normalize("NFC", transcript or "").replace(" ", "").replace("\n", "")
+    if not exp:
+        return True
+    return exp in tr
+
+
 def _count_nonoverlapping(haystack: str, needle: str) -> int:
     """Число НЕПЕРЕСЕКАЮЩИХСЯ вхождений needle в haystack (str.count делает ровно
     это — считает от найденной позиции + len(needle), не пересекающиеся вхождения не
@@ -219,6 +371,20 @@ def _count_nonoverlapping(haystack: str, needle: str) -> int:
     if not needle:
         return 0
     return haystack.count(needle)
+
+
+# Второй, узко сфокусированный OCR-вопрос ТОЛЬКО для японских фраз (тринадцатый
+# заход, строгая кана) — общий _OCR_PROMPT ("transcribe ALL text") даёт модели
+# слишком широкую задачу, дакутэн/хандакутэн на мелких глифах вертикальной колонки
+# отдельно от общего транскрипта распознаются НЕНАДЁЖНО (модель сама не отдаёт их
+# стабильно на общем проходе). Явно просим ТОЛЬКО вертикальную колонку, посимвольно.
+_JP_COLUMN_PROMPT = (
+    "Transcribe ONLY the vertical Japanese column of text visible in this image, "
+    "glyph by glyph, top to bottom. Pay close attention to dakuten (゛) and "
+    "handakuten (゜) diacritical marks — transcribe them accurately (for example "
+    "distinguish ハ from バ from パ). Reply with the Japanese characters only, no "
+    "romanization, no translation, no other text."
+)
 
 
 def _verify_text(image: Image.Image, expected_phrases: list) -> bool:
@@ -239,7 +405,17 @@ def _verify_text(image: Image.Image, expected_phrases: list) -> bool:
     на финальной картинке. Теперь считаем непересекающиеся вхождения нормализованной
     фразы в транскрипте — больше одного вхождения -> провал (тот же ретрай/фолбэк
     механизм, что и при отсутствии фразы вовсе, ничего дополнительно чинить не
-    нужно)."""
+    нужно).
+
+    Тринадцатый заход, строгая кана: КАЖДАЯ японская фраза (кандзи/катакана/хирагана,
+    см. _is_japanese_phrase) дополнительно проверяется ВТОРЫМ, узко сфокусированным
+    OCR-вызовом (_JP_COLUMN_PROMPT — "transcribe ONLY the vertical column, glyph by
+    glyph"), поглифно сверенным (_glyph_by_glyph_match — дакутэн/хандакутэн различают
+    ハ от バ автоматически после NFC). Общий транскрипт (первый вызов, substring-сверка
+    выше) остаётся ПЕРВОЙ линией защиты для всех фраз (включая японские — если
+    несовпадение уже видно в общем транскрипте, второй вызов всё равно потом уточнит);
+    второй вызов — ДОПОЛНИТЕЛЬНАЯ, более надёжная сверка именно для японской графики,
+    несовпадение по нему тоже проваливает всю проверку (уходит в тот же ретрай-цикл)."""
     phrases = [p for p in (expected_phrases or []) if str(p or "").strip()]
     if not phrases:
         return True
@@ -252,16 +428,106 @@ def _verify_text(image: Image.Image, expected_phrases: list) -> bool:
     missing = [p for p in phrases if _normalize_for_compare(p) not in norm_transcript]
     duplicated = [p for p in phrases
                   if _count_nonoverlapping(norm_transcript, _normalize_for_compare(p)) > 1]
-    ok = not missing and not duplicated
+
+    # Строгая кана: японские фразы (кандзи/катакана/хирагана) проходят ДОПОЛНИТЕЛЬНУЮ
+    # поглифную сверку через отдельный сфокусированный OCR-вызов — общий транскрипт
+    # выше (single-pass "transcribe ALL text") не даёт достаточной надёжности на
+    # дакутэн/хандакутэн мелких вертикальных глифов.
+    jp_mismatched = []
+    jp_phrases = [p for p in phrases if _is_japanese_phrase(p)]
+    if jp_phrases:
+        try:
+            jp_transcript = providers.verify_text_in_image(image, prompt=_JP_COLUMN_PROMPT)
+        except Exception as e:  # noqa: BLE001
+            print(f"  !! OCR-контроль каны (второй вызов) упал: {e}", flush=True)
+            jp_mismatched = list(jp_phrases)  # сбой вызова -> не подтверждено, провал
+        else:
+            jp_mismatched = [p for p in jp_phrases
+                             if not _glyph_by_glyph_match(p, jp_transcript)]
+            if jp_mismatched:
+                print(f"  OCR-контроль каны: колонка-транскрипт={jp_transcript!r} — "
+                      f"не сошлось поглифно (дакутэн/хандакутэн?) {jp_mismatched!r}",
+                      flush=True)
+
+    ok = not missing and not duplicated and not jp_mismatched
     if not ok:
         reasons = []
         if missing:
             reasons.append(f"отсутствуют фразы {missing!r}")
         if duplicated:
             reasons.append(f"фразы повторены ДВАЖДЫ+ (дубль на картинке) {duplicated!r}")
+        if jp_mismatched:
+            reasons.append(f"кана не сошлась поглифно {jp_mismatched!r}")
         print(f"  OCR-контроль: транскрипт={transcript!r} — {'; '.join(reasons)}",
               flush=True)
     return ok
+
+
+def _transcript_has_no_significant_text(transcript: str) -> bool:
+    """Эвристика "OCR-транскрипт говорит, что на картинке текста нет" — используется
+    _verify_no_text для text-fallback ветки (пятнадцатый заход поймал регресс: фолбэк-
+    генерация без текст-блока в промпте может ВСЁ РАВНО прийти С художественным текстом,
+    если design["prompt"] уже описывает встроенную типографику как часть сцены, см.
+    tests/test_ux_fallback_double_text_regression_qa.py). providers.verify_text_in_image
+    с ДЕФОЛТНЫМ _OCR_PROMPT ("transcribe ALL text ... exactly as written") на картинке
+    БЕЗ текста типично отвечает короткой служебной фразой ("No text", "No text visible
+    in this image", "There is no text", пустая строка и т.п.) — не пытаемся угадать
+    ВСЕ формулировки модели, вместо этого: (а) явные отрицающие ключевые слова ловятся
+    по подстроке (englishский "no text"/"no visible text"/"none"/"no readable text"), а
+    (б) как более надёжный универсальный сигнал — короткий ответ (после нормализации
+    пробелов/пунктуации, <= _NO_TEXT_MAX_CHARS символов) без единой буквы/цифры/CJK-
+    глифа трактуется как "текста нет" (реальный текст на принте — минимум одно слово
+    из нескольких букв, служебный ответ модели без текста обычно короче и/или не
+    содержит алфавитных символов вовсе, если она просто пишет "-" или пустую строку)."""
+    import re as _re
+    t = (transcript or "").strip()
+    if not t:
+        return True
+    low = t.lower()
+    _NEGATIVE_PHRASES = (
+        "no text", "no visible text", "no readable text", "none visible",
+        "there is no text", "i don't see any text", "i do not see any text",
+        "no words", "no lettering",
+    )
+    if any(neg in low for neg in _NEGATIVE_PHRASES):
+        return True
+    # Убираем пунктуацию/пробелы, оставляем только буквы/цифры/CJK — если после этого
+    # пусто ИЛИ строка сама по себе "none"/"n/a"-подобный служебный ответ без единой
+    # содержательной буквы естественного алфавита, считаем что текста нет.
+    letters_only = _re.sub(r"[^\w]", "", t, flags=_re.UNICODE)
+    if not letters_only:
+        return True
+    return False
+
+
+_NO_TEXT_MAX_CHARS = 40  # см. _transcript_has_no_significant_text — не используется
+                          # напрямую (эвристика отрицания/пустоты выше самодостаточна),
+                          # оставлено как документированный порог на случай будущего
+                          # ужесточения (например ограничить длину "почти пустого" ответа).
+
+
+def _verify_no_text(image: Image.Image) -> bool:
+    """Проверка ОБРАТНАЯ _verify_text — используется ТОЛЬКО в text-fallback ветке
+    render_design (design["type_spec"]="" запросил картинку БЕЗ текста): подтверждает,
+    что на fallback-картинке ДЕЙСТВИТЕЛЬНО нет значимого встроенного текста — модель
+    (nano-banana) может проигнорировать безусловный запрет _NO_TEXT_TAIL, особенно
+    когда design["prompt"] (основное художественное описание сцены, ДО text-fallback
+    веток — не трогается) уже подробно описывает типографику как часть композиции
+    (см. docs/PROJECT_STATE.md, пятнадцатый заход, живой баг daily_2026-07-09/
+    0007_payback). Любой сбой самого OCR-вызова -> False (трактуем как "не
+    подтверждено, что текста нет" — тот же консервативный принцип, что и _verify_text:
+    лучше лишняя fallback-попытка, чем молча пропустить брак)."""
+    try:
+        transcript = providers.verify_text_in_image(image)
+    except Exception as e:  # noqa: BLE001
+        print(f"  !! OCR-контроль отсутствия текста (fallback) упал: {e}", flush=True)
+        return False
+    no_text = _transcript_has_no_significant_text(transcript)
+    if not no_text:
+        print(f"  OCR-контроль отсутствия текста (fallback): транскрипт={transcript!r} "
+              f"— НА FALLBACK-КАРТИНКЕ ЕСТЬ ТЕКСТ (модель проигнорировала запрет)",
+              flush=True)
+    return no_text
 
 
 def _expected_text_phrases(design: dict) -> list:
@@ -287,40 +553,79 @@ def _expected_text_phrases(design: dict) -> list:
 def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2,
                    text_style: str = "auto", no_juice: bool = False,
                    log_prefix: str = "") -> dict:
-    """Полный цикл ОДНОГО дизайна: генерация (с QC-гейтом границ) -> вырезка ->
-    типографика -> 4 файла (tag_raw.png/tag_diecut.png/tag_ongreen.png/tag_design.json)
-    в outdir. Переиспользуется и CLI-батчем (run_one ниже), и daily_prints.py.
+    """Полный цикл ОДНОГО дизайна: генерация (с QC-гейтом границ + масштаба фигуры) ->
+    вырезка -> типографика -> апскейл -> 4-5 файлов (tag_raw.png/tag_diecut.png/
+    tag_ongreen.png/tag_print.png/tag_design.json) в outdir. Переиспользуется и CLI-
+    батчем (run_one ниже), и daily_prints.py.
 
     design: dict из art_director.make_ideas (prompt/chroma/slogan/slogan_color/kana/
     character_en/title_en/signature_props/text_mode). Если character_en непусто —
     перед генерацией достаётся каноничный референс-портрет персонажа
     (character_ref.get_reference) и рисование идёт ПО РЕФЕРЕНСУ (см.
-    providers.generate_image(reference=...)), иначе как раньше.
+    providers.generate_image(reference=...)), иначе как раньше. Если design реально
+    просит стиль с hybrid_ring_text=true (docs/STYLE_BANK.json "09_ring_medallion",
+    через design["style_id"]/["style_mix"], см. _is_hybrid_ring_style) — медальон-
+    гибрид: art_director.build_prompt сам просит ПУСТОЕ декоративное кольцо (без
+    текста), кольцевой текст (quote/slogan) накладывается КОДОМ после вырезки
+    (typography_v3.ring_text), OCR-контроль спеллинга для этого дизайна не участвует.
     tag: базовое имя файлов без расширения (напр. "01" или "0137_kenpachi").
 
     text_style: "auto" (дефолт) — типографика v2 (typography.compose_text), режим
     берётся из design["text_mode"] (Claude решает ПО КОМПОЗИЦИИ конкретного дизайна:
     none/under/punch/kana_side). Если передан ЯВНЫЙ стиль из typography.STYLES
     (none/anton/kana/comic/tag, напр. через CLI --text-style) — он ПРИОРИТЕТНЕЕ
-    text_mode (обратная совместимость v1).
+    text_mode (обратная совместимость v1). Игнорируется для ring_medallion (свой
+    единственный текстовый путь, ring_text).
 
     Возвращает {"ok": bool, "attempts": int, "coverage": float, "error": str|None,
-    "raw": path|None, "diecut": path|None, "ongreen": path|None, "design_json": path,
-    "text_fallback": bool} — attempts нужен вызывающему коду для точного учёта
+    "raw": path|None, "diecut": path|None, "ongreen": path|None, "print_png":
+    path|None, "design_json": path, "text_fallback": bool, "single_text_no_overlay":
+    bool, "print_fallback": bool} — attempts нужен вызывающему коду для точного учёта
     стоимости (QC-ретраи И OCR-ретраи спеллинга считаются в один общий счётчик).
     text_fallback=True — TEXT_RENDER=image не сошёлся по OCR-контролю спеллинга за
-    все попытки, финальная картинка сгенерирована БЕЗ встроенного текста и текст
-    наложен кодовой типографикой (см. раздел «Текст в генерации» в README)."""
+    все попытки основного цикла, откат на fallback-генерацию БЕЗ текст-блока (см.
+    раздел «Текст в генерации» в README). single_text_no_overlay=True (пятнадцатый
+    заход, регресс-фикс двойного текста) — ВСЕ fallback-попытки (до
+    _FALLBACK_NO_TEXT_MAX_ATTEMPTS) ВСЁ РАВНО пришли с художественным текстом
+    (модель проигнорировала запрет) — принт выпущен С ОДНИМ уже нарисованным
+    текстовым слоем, кодовая typography_v3/typography НЕ накладывается поверх (иначе
+    двойной текст); в этом случае text_fallback=True, но typography НЕ применена.
+    print_png — адаптивный апскейл (x4 realesrgan + Lanczos-досчёт до
+    config.PRINT_MIN_SIDE, см. upscale.upscale_to_print_min) поверх diecut
+    (config.UPSCALE=on, дефолт), None если апскейл отключён вовсе — НЕ считается
+    ошибкой дизайна, result["ok"] может быть True с print_png=None. print_fallback=
+    True — realesrgan был недоступен/упал/таймаутировал, print_png получен ЦЕЛИКОМ
+    через Lanczos с исходника (хуже качеством, но печатный размер гарантирован)."""
     p = log_prefix or f"[{tag}]"
     design_json_path = outdir / f"{tag}_design.json"
     design_json_path.write_text(
         json.dumps(design, ensure_ascii=False, indent=2), encoding="utf-8")
 
     result = {"ok": False, "attempts": 0, "coverage": 0.0, "error": None,
-              "raw": None, "diecut": None, "ongreen": None,
-              "design_json": str(design_json_path), "text_fallback": False}
+              "raw": None, "diecut": None, "ongreen": None, "print_png": None,
+              "design_json": str(design_json_path), "text_fallback": False,
+              "single_text_no_overlay": False, "print_fallback": False}
+
+    # Медальон-гибрид (typography_v3.ring_text): design реально просит стиль с
+    # hybrid_ring_text=true — ЛИБО банковский путь (docs/STYLE_BANK.json, "09_ring_
+    # medallion" через style_id/style_mix — ПРОМПТ-часть, пустое кольцо, ПОЛНОСТЬЮ
+    # строит art_director.build_prompt/_style_bank_prompt_block САМ, не дублируется
+    # здесь), ЛИБО прямые поля design ВНЕ банка (_hybrid_ring_via_direct_fields) — для
+    # НИХ суффикс промпта добавляется явно ниже (art_director про них не знает).
+    # В обоих случаях batch_print только кладёт САМ ТЕКСТ кольца КОДОМ (ring_text)
+    # после вырезки — фраза кольца та же логика выбора, что _expected_text_phrases
+    # (quote приоритетнее slogan).
+    ring_via_bank = _hybrid_ring_via_style_bank(design)
+    ring_via_direct = _hybrid_ring_via_direct_fields(design)
+    ring_medallion = ring_via_bank or ring_via_direct
+    ring_phrase = str(design.get("quote") or design.get("slogan") or "").strip() \
+        if ring_medallion else ""
 
     prompt = art_director.build_prompt(design)
+    if ring_via_direct and not ring_via_bank:
+        # Прямой путь (design НЕ прошёл через банк стилей) — art_director не знает про
+        # этот design, значит промпт-инструкцию про пустое кольцо добавляем сами.
+        prompt = prompt + _RING_MEDALLION_PROMPT_SUFFIX
     seed = random.randint(0, 2**31 - 1)
 
     # Рисование ПО РЕФЕРЕНСУ: если арт-директор распознал конкретного вымышленного
@@ -348,17 +653,27 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     # фразы на картинке — OCR-контроль спеллинга (_verify_text) проверяет каждую
     # попытку в ТОМ ЖЕ цикле, что QC-гейт границ. Если design не просит текст
     # (type_spec пуст) — expected_phrases пуст, OCR всегда True (нечего проверять).
+    # ring_medallion: OCR НЕ ждёт текст на raw (кольцо по инструкции стиля рисуется
+    # ПУСТЫМ — см. art_director._style_bank_prompt_block), кольцевая фраза проверяется
+    # только офлайн-геометрией самого ring_text (typography_v3), не OCR-вызовом.
     text_render_image = config.TEXT_RENDER == "image"
-    expected_phrases = _expected_text_phrases(design) if text_render_image else []
+    expected_phrases = ([] if ring_medallion else
+                        (_expected_text_phrases(design) if text_render_image else []))
 
-    # QC-гейт границ кадра + OCR-контроль спеллинга: до timeout_retries доп. попыток
-    # генерации (итого максимум 1+timeout_retries попыток), берём попытку с
-    # максимальным coverage рамки хромакеем СРЕДИ попыток, прошедших OCR (если
-    # expected_phrases непуст) — попытка с провальным OCR не выбирается лучшей, пока
-    # есть хоть одна прошедшая; если НИ ОДНА не прошла OCR — берём лучшую по coverage
-    # как есть (сработает text-fallback ниже).
+    # QC-гейт границ кадра + OCR-контроль спеллинга + QC-гейт масштаба фигуры: до
+    # timeout_retries доп. попыток генерации (итого максимум 1+timeout_retries попыток),
+    # берём попытку с максимальным coverage рамки хромакеем СРЕДИ попыток, прошедших И
+    # OCR (если expected_phrases непуст), И масштаб фигуры (bbox высоты >=
+    # config.FIGURE_MIN_FRAC) — попытка, провалившая любой из гейтов, не выбирается
+    # лучшей, пока есть хоть одна прошедшая оба; если НИ ОДНА не прошла OCR — берём
+    # лучшую по coverage как есть (сработает text-fallback ниже). Гейт масштаба фигуры
+    # НЕ участвует в text-fallback механизме (тот только про спеллинг) — если фигура
+    # мелкая на ВСЕХ попытках, используется лучшая по coverage/OCR как есть с явным
+    # предупреждением (не блокируем выпуск дизайна целиком, как и остальные QC-гейты).
     best_img, best_cov, best_seed = None, -1.0, seed
     best_img_ocr_ok, best_cov_ocr_ok = None, -1.0
+    best_img_ocr_figure_ok, best_cov_ocr_figure_ok = None, -1.0
+    best_img_figure_ok, best_cov_figure_ok = None, -1.0
     attempts_used = 0
     for attempt in range(1 + timeout_retries):
         try_seed = seed + 101 * attempt
@@ -388,7 +703,16 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         if ocr_ok and cov > best_cov_ocr_ok:
             best_img_ocr_ok, best_cov_ocr_ok = attempt_img, cov
 
-        if cov >= 0.90 and ocr_ok:
+        figure_ok, figure_frac = _figure_fills_frame(attempt_img, chroma=design["chroma"])
+        print(f"{p} масштаб фигуры: высота bbox={figure_frac:.2f} кадра "
+              f"({'OK' if figure_ok else 'фигура слишком мелкая'}, порог "
+              f"{config.FIGURE_MIN_FRAC})", flush=True)
+        if ocr_ok and figure_ok and cov > best_cov_ocr_figure_ok:
+            best_img_ocr_figure_ok, best_cov_ocr_figure_ok = attempt_img, cov
+        if figure_ok and cov > best_cov_figure_ok:
+            best_img_figure_ok, best_cov_figure_ok = attempt_img, cov
+
+        if cov >= 0.90 and ocr_ok and figure_ok:
             break
         if attempt < timeout_retries:
             reason = []
@@ -396,6 +720,9 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                 reason.append(f"coverage {cov:.2f} < 0.90")
             if not ocr_ok:
                 reason.append("OCR не сошёлся")
+            if not figure_ok:
+                reason.append(f"фигура слишком мелкая ({figure_frac:.2f} < "
+                              f"{config.FIGURE_MIN_FRAC})")
             print(f"{p} {' и '.join(reason)} -> retry", flush=True)
 
     result["attempts"] = attempts_used
@@ -406,45 +733,164 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         result["error"] = result["error"] or "нет изображения ни на одной попытке"
         return result
 
-    # Выбор финального изображения + решение про text-fallback.
+    # Выбор финального изображения + решение про text-fallback. Приоритет: попытка,
+    # прошедшая И OCR, И масштаб фигуры > попытка, прошедшая только OCR (масштаб мелкий
+    # на всех попытках — не блокируем выпуск, только предупреждаем) > text-fallback.
     text_fallback = False
-    if expected_phrases and best_img_ocr_ok is not None:
+    # single_text_no_overlay (пятнадцатый заход, регресс-фикс двойного текста): ВСЕ
+    # fallback-попытки (см. ветку ниже) пришли С художественным текстом несмотря на
+    # запрет — код НЕ должен накладывать typography_v3/typography поверх уже готового
+    # текста (иначе двойной нечитаемый принт). Остаётся False во всех остальных
+    # случаях (обычная ветка "текст встроен и OCR подтвердил" уже обрабатывается через
+    # apply_code_typography/expected_phrases, этот флаг — только для нового кейса).
+    single_text_no_overlay = False
+    if expected_phrases and best_img_ocr_figure_ok is not None:
+        raw_img, best_cov = best_img_ocr_figure_ok, best_cov_ocr_figure_ok
+    elif expected_phrases and best_img_ocr_ok is not None:
         # Хотя бы одна попытка прошла OCR — используем ЛУЧШУЮ ИЗ НИХ (не просто лучшую
         # по coverage, чтобы не выпустить принт с неверным спеллингом ради чуть более
-        # ровной рамки).
+        # ровной рамки). Масштаб фигуры мелкий на ВСЕХ попытках — предупреждаем, но не
+        # блокируем (тот же принцип, что и коммент border coverage < 0.90 ниже).
         raw_img, best_cov = best_img_ocr_ok, best_cov_ocr_ok
+        _, worst_figure_frac = _figure_fills_frame(raw_img, chroma=design["chroma"])
+        print(f"{p} !! warning: фигура мелкая на ВСЕХ попытках (высота bbox="
+              f"{worst_figure_frac:.2f} < {config.FIGURE_MIN_FRAC}) — используем "
+              f"лучшую по OCR/coverage как есть", flush=True)
     elif expected_phrases:
         # НИ ОДНА попытка не прошла OCR за все timeout_retries+1 генераций — честный
-        # откат: одна ДОПОЛНИТЕЛЬНАЯ генерация БЕЗ текст-блока (design с пустым
-        # type_spec/quote -> art_director.build_prompt добавит обычный запрет букв),
-        # текст наносится кодовой типографикой (typography_v3/typography) ниже, как
-        # раньше при TEXT_RENDER=code.
+        # откат: до _FALLBACK_NO_TEXT_MAX_ATTEMPTS ДОПОЛНИТЕЛЬНЫХ генераций БЕЗ текст-
+        # блока (design с пустым type_spec/quote -> art_director.build_prompt добавит
+        # обычный запрет букв). Текст наносится кодовой типографикой (typography_v3/
+        # typography) ниже, как раньше при TEXT_RENDER=code — НО ТОЛЬКО если сама
+        # fallback-картинка ПОДТВЕРЖДЕНА OCR-ом как реально без текста (см. ниже,
+        # пятнадцатый заход поймал регресс: живой daily_2026-07-09/0007_payback —
+        # design["prompt"] уже описывает встроенную типографику как часть сцены,
+        # модель проигнорировала безусловный запрет _NO_TEXT_TAIL в fallback-промпте и
+        # нарисовала художественный текст ВСЁ РАВНО; код безусловно применял typography_
+        # v3/typography ПОВЕРХ уже нарисованного текста -> двойной нечитаемый принт,
+        # см. tests/test_ux_fallback_double_text_regression_qa.py).
         print(f"{p} !! текст в генерации не сошёлся за {attempts_used} попыток "
               f"(OCR) — откат на кодовый путь (доп. генерация БЕЗ текст-блока)",
               flush=True)
         fallback_design = dict(design)
         fallback_design["type_spec"] = ""
         fallback_prompt = art_director.build_prompt(fallback_design)
-        fb_seed = seed + 101 * (1 + timeout_retries)
-        try:
-            attempts_used += 1
-            fb_img = providers.generate_image(fallback_prompt, seed=fb_seed,
-                                              reference=reference)
+        # best_cov/best_img на этом месте — лучшая попытка ИЗ ОСНОВНОГО цикла (по
+        # цвету рамки хромакея, ДО этой fallback-ветки; см. присвоение внутри цикла
+        # выше, строка ~608) — используются как safety-net ниже, если сама fallback-
+        # генерация придёт с чужим фоном.
+        main_loop_best_img, main_loop_best_cov = best_img, best_cov
+
+        fb_best_img, fb_best_cov = None, -1.0  # лучшая fallback-попытка ПО ЦВЕТУ (может
+                                                # содержать текст — safety-net, если ни
+                                                # одна fallback-попытка не подтвердится
+                                                # как "без текста" ни через OCR.
+        fb_confirmed_no_text_img, fb_confirmed_no_text_cov = None, -1.0  # лучшая
+                                                # fallback-попытка, OCR-подтверждённая
+                                                # как РЕАЛЬНО без текста — приоритетный
+                                                # выбор, безопасно накладывать код поверх.
+        for fb_attempt in range(_FALLBACK_NO_TEXT_MAX_ATTEMPTS):
+            fb_seed = seed + 101 * (1 + timeout_retries + fb_attempt)
+            try:
+                attempts_used += 1
+                fb_img = providers.generate_image(fallback_prompt, seed=fb_seed,
+                                                  reference=reference)
+            except Exception as e:  # noqa: BLE001
+                print(f"{p} !! фолбэк-генерация {fb_attempt + 1}/"
+                      f"{_FALLBACK_NO_TEXT_MAX_ATTEMPTS} упала: {e}", flush=True)
+                continue
             fb_cov = _border_chroma_coverage(fb_img, chroma=design["chroma"])
-            print(f"{p} фолбэк-генерация (без текста) border coverage={fb_cov:.2f}",
+            print(f"{p} фолбэк-генерация {fb_attempt + 1}/"
+                  f"{_FALLBACK_NO_TEXT_MAX_ATTEMPTS} (без текста) border "
+                  f"coverage={fb_cov:.2f}", flush=True)
+            if fb_cov > fb_best_cov:
+                fb_best_img, fb_best_cov = fb_img, fb_cov
+
+            if fb_cov < main_loop_best_cov:
+                # РЕГРЕСС (живой баг daily_2026-07-09/0008_рудеус_грейрат__mushoku,
+                # двенадцатый заход) — fallback-генерация не проходит тот же цветовой
+                # QC-гейт хромакея, что и основные попытки (чужой фон, например белый
+                # вместо запрошенного design["chroma"]). Картинка с ЗАВЕДОМО плохим
+                # цветом рамки бессмысленна как кандидат независимо от того, есть на
+                # ней текст или нет — не тратим доп. OCR-вызов/следующую fallback-
+                # попытку, сразу выходим из цикла (main_loop_best используется ниже).
+                print(f"{p} !! fallback-фон хуже основной попытки (fb_cov="
+                      f"{fb_cov:.2f} < best_cov={main_loop_best_cov:.2f}) — "
+                      f"пропускаем OCR-контроль отсутствия текста для этой попытки, "
+                      f"прерываем fallback-цикл", flush=True)
+                break
+
+            fb_no_text_ok = _verify_no_text(fb_img)
+            print(f"{p} OCR-контроль отсутствия текста (fallback): "
+                  f"{'подтверждено — текста нет' if fb_no_text_ok else 'провал — текст ЕСТЬ'}",
                   flush=True)
-            raw_img, best_cov = fb_img, fb_cov
+            if fb_no_text_ok and fb_cov > fb_confirmed_no_text_cov:
+                fb_confirmed_no_text_img = fb_img
+                fb_confirmed_no_text_cov = fb_cov
+            if fb_no_text_ok and fb_cov >= 0.90:
+                break  # хорошая безтекстовая попытка найдена — не тратим лишние вызовы
+
+        if fb_confirmed_no_text_img is not None:
+            # Лучший случай: fallback реально пришла без текста (OCR подтвердил) —
+            # безопасно накладывать typography_v3/typography поверх ниже.
+            if fb_confirmed_no_text_cov < main_loop_best_cov:
+                # РЕГРЕСС (живой баг daily_2026-07-09/0008_рудеус_грейрат__mushoku):
+                # fallback-генерация не проходит тот же цветовой QC-гейт хромакея
+                # (_border_chroma_coverage), что и основные попытки — например модель
+                # нарисовала БЕЛЫЙ фон вместо запрошенного design["chroma"]. Слепое
+                # принятие такой картинки ломает вырезку (chroma_remove.cutout_green
+                # берёт чужой цвет как ключ и съедает куски фигуры). Если среди
+                # ОСНОВНЫХ попыток была картинка с лучшим/равным цветом рамки (пусть
+                # и без встроенного текста — тот всё равно будет наложен кодом ниже) —
+                # используем ЕЁ вместо испорченного фолбэка.
+                print(f"{p} !! fallback-фон хуже основной попытки (fb_cov="
+                      f"{fb_confirmed_no_text_cov:.2f} < best_cov={main_loop_best_cov:.2f}) "
+                      f"— используем лучшую основную попытку вместо fallback-картинки "
+                      f"с чужим фоном", flush=True)
+                raw_img, best_cov = main_loop_best_img, main_loop_best_cov
+            else:
+                raw_img, best_cov = fb_confirmed_no_text_img, fb_confirmed_no_text_cov
             text_fallback = True
-        except Exception as e:  # noqa: BLE001
-            print(f"{p} !! фолбэк-генерация тоже упала: {e} — используем лучшую "
-                  f"попытку по coverage как есть (спеллинг НЕ подтверждён)", flush=True)
-            raw_img = best_img
+        else:
+            # НИ ОДНА fallback-попытка (максимум _FALLBACK_NO_TEXT_MAX_ATTEMPTS) не
+            # подтвердилась OCR-ом как "без текста" — модель упорно рисует
+            # художественный текст несмотря на запрет (см. докстринг ветки выше).
+            # text_fallback ВСЁ РАВНО True (fallback-путь был запрошен и пройден — это
+            # факт хода пайплайна, отдельная задача от "что теперь делать с текстом"),
+            # но НАЛОЖИТЬ КОДОВУЮ ТИПОГРАФИКУ ПОВЕРХ ЗАПРЕЩЕНО (это и есть сам баг,
+            # который чиним) — лучше выпустить принт БЕЗ повторного текста (единственный
+            # уже нарисованный художественный слой остаётся как есть), чем удвоить его.
+            # single_text_no_overlay=True — отдельный флаг для apply_code_typography
+            # ниже (отменяет наложение безусловно, ДАЖЕ раз text_fallback=True обычно
+            # включал бы typography_v3/typography поверх).
+            candidate_img = fb_best_img if fb_best_img is not None else main_loop_best_img
+            candidate_cov = fb_best_cov if fb_best_img is not None else main_loop_best_cov
+            if fb_best_img is not None and fb_best_cov < main_loop_best_cov:
+                candidate_img, candidate_cov = main_loop_best_img, main_loop_best_cov
+            print(f"{p} !! warning: {_FALLBACK_NO_TEXT_MAX_ATTEMPTS} фолбэк-попыток "
+                  f"БЕЗ текста ВСЕ ПРИШЛИ С художественным текстом (модель "
+                  f"игнорирует запрет) — принимаем как есть БЕЗ наложения кодовой "
+                  f"типографики (двойной текст хуже, чем принт без слогана)",
+                  flush=True)
+            raw_img, best_cov = candidate_img, candidate_cov
+            text_fallback = True
+            single_text_no_overlay = True
+    elif best_img_figure_ok is not None:
+        # TEXT_RENDER=code (или design без type_spec) — OCR не участвует, но масштаб
+        # фигуры проверяется всегда: используем лучшую по coverage СРЕДИ попыток,
+        # прошедших QC-гейт масштаба, если хоть одна нашлась.
+        raw_img, best_cov = best_img_figure_ok, best_cov_figure_ok
     else:
+        _, worst_figure_frac = _figure_fills_frame(best_img, chroma=design["chroma"])
+        print(f"{p} !! warning: фигура мелкая на ВСЕХ попытках (высота bbox="
+              f"{worst_figure_frac:.2f} < {config.FIGURE_MIN_FRAC}) — используем "
+              f"лучшую по coverage как есть", flush=True)
         raw_img = best_img
 
     result["attempts"] = attempts_used
     result["coverage"] = best_cov
     result["text_fallback"] = text_fallback
+    result["single_text_no_overlay"] = single_text_no_overlay
     if best_cov < 0.90:
         print(f"{p} !! warning: лучшая попытка coverage={best_cov:.2f} < 0.90, "
               f"используем её (seed={best_seed})", flush=True)
@@ -461,7 +907,18 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     # design.json без type_spec, воспроизводимый через reprocess_typo.py). Если текст
     # встроен и OCR подтвердил (не text_fallback, expected_phrases непуст) — код НЕ
     # накладывает ничего поверх, диекат = вырезка как есть.
-    apply_code_typography = (not text_render_image) or text_fallback or not expected_phrases
+    #
+    # single_text_no_overlay (пятнадцатый заход, регресс-фикс двойного текста):
+    # ВСЕ fallback-попытки без текст-блока (_FALLBACK_NO_TEXT_MAX_ATTEMPTS) ВСЁ РАВНО
+    # пришли с художественным текстом — единственный уже нарисованный текстовый слой
+    # ЗАПРЕЩЕНО дублировать кодовой typography_v3/typography, даже если общая формула
+    # ниже иначе сказала бы apply_code_typography=True (text_fallback здесь намеренно
+    # False — см. ветку выбора raw_img выше). Проверяется ПЕРВОЙ, отменяет остальные
+    # условия безусловно.
+    apply_code_typography = (
+        not single_text_no_overlay
+        and ((not text_render_image) or text_fallback or not expected_phrases)
+    )
 
     try:
         cut = chroma_remove.cutout_green(raw_img, tol=52.0).convert("RGBA")
@@ -469,7 +926,13 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         # тексте (expected_phrases непуст И текст НЕ ушёл в фолбэк) буквы у края
         # фигуры могут лежать отдельными альфа-островами — не срезать их наравне с
         # мусором водяных знаков (см. drop_small_islands/_TEXT_ISLAND_PROTECT_FRAC).
-        protect_islands = text_render_image and bool(expected_phrases) and not text_fallback
+        # single_text_no_overlay: raw_img здесь несёт художественный текст, который
+        # модель нарисовала вопреки запрету (принят как единственный текстовый слой,
+        # код ничего не накладывает поверх) — буквы у края фигуры так же нуждаются в
+        # защите от drop_small_islands, поэтому попадает под защиту наравне с "текст
+        # встроен и подтверждён", несмотря на text_fallback=True.
+        protect_islands = text_render_image and bool(expected_phrases) and (
+            not text_fallback or single_text_no_overlay)
         cut = drop_small_islands(cut, protect_text_islands=protect_islands)
         if not no_juice:
             cut = juice(cut)
@@ -478,7 +941,14 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         slogan_color = design.get("slogan_color", "orange")
         kana = design.get("kana", "")
 
-        if not apply_code_typography:
+        if ring_medallion:
+            # Медальон-гибрид: генерация нарисовала ПУСТОЕ декоративное кольцо (см.
+            # _RING_MEDALLION_SUFFIX выше) — точный спеллинг кольцевого текста кладёт
+            # typography_v3.ring_text КОДОМ поверх вырезки. Никакая другая типографика
+            # (v2/v3/apply_style) поверх НЕ накладывается — ring_text САМ единственный
+            # текстовый элемент этого режима.
+            final = typography_v3.ring_text(cut, ring_phrase) if ring_phrase else cut
+        elif not apply_code_typography:
             # TEXT_RENDER=image, текст встроен генерацией и подтверждён OCR — диекат
             # = вырезка как есть, кодовая типографика НЕ накладывается поверх.
             final = cut
@@ -514,14 +984,46 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         result["diecut"] = str(diecut_path)
 
         # Версия на ровном зелёном RGB(0,177,64) ПОВЕРХ вырезки (кодом, всегда одна и
-        # та же — независимо от того, какой хромакей был при генерации).
+        # та же — независимо от того, какой хромакей был при генерации). ongreen —
+        # ПРЕВЬЮ, остаётся в исходном (не апскейленном) размере намеренно.
         ongreen = Image.new("RGBA", final.size, (0, 177, 64, 255))
         ongreen.alpha_composite(final)
         ongreen_path = outdir / f"{tag}_ongreen.png"
         ongreen.convert("RGB").save(ongreen_path)
         result["ongreen"] = str(ongreen_path)
 
-        print(f"{p} ok -> {raw_path.name} + diecut.png + ongreen.png "
+        # Апскейл до печатных 300 DPI (upscale.py, portable realesrgan-ncnn-vulkan) —
+        # <tag>_print.png = адаптивный апскейл (x4 realesrgan + Lanczos-досчёт до
+        # config.PRINT_MIN_SIDE, см. upscale.upscale_to_print_min, пятнадцатый заход)
+        # поверх diecut. config.UPSCALE=off отключает; отсутствие exe/модели на диске
+        # ИЛИ таймаут/сбой subprocess -> upscale_to_print_min САМА откатывается на
+        # чистый Lanczos с исходника (result["ok"]=True, result["print_fallback"]=True)
+        # — печатный размер гарантирован даже без realesrgan, просто хуже качеством
+        # (задача лида: "при таймауте/сбое — Lanczos-фолбэк ... + предупреждение").
+        result["print_png"] = None
+        result["print_fallback"] = False
+        if config.UPSCALE:
+            up_path = outdir / f"{tag}_print.png"
+            up_res = upscale.upscale_to_print_min(
+                diecut_path, up_path, min_side=config.PRINT_MIN_SIDE,
+                scale=config.UPSCALE_SCALE, model=config.UPSCALE_MODEL,
+                timeout=config.UPSCALE_TIMEOUT)
+            result["print_fallback"] = bool(up_res.get("print_fallback"))
+            if up_res["ok"]:
+                result["print_png"] = str(up_path)
+                if up_res["print_fallback"]:
+                    print(f"{p} !! апскейл: realesrgan недоступен/упал, Lanczos-фолбэк "
+                          f"до {config.PRINT_MIN_SIDE}px -> {up_path.name} "
+                          f"({up_res['out_size']}, {up_res['elapsed_sec']}с, "
+                          f"причина: {up_res['error']})", flush=True)
+                else:
+                    print(f"{p} апскейл x{config.UPSCALE_SCALE} -> {up_path.name} "
+                          f"({up_res['out_size']}, {up_res['elapsed_sec']}с)", flush=True)
+            else:
+                print(f"{p} !! апскейл пропущен: {up_res['error']}", flush=True)
+
+        print(f"{p} ok -> {raw_path.name} + diecut.png + ongreen.png"
+              f"{' + print.png' if result['print_png'] else ''} "
               f"(slogan={slogan!r}, text_fallback={text_fallback})", flush=True)
         result["ok"] = True
         return result
@@ -587,11 +1089,19 @@ def main() -> None:
         themes = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
     print(f"файл тем: {len(themes)} тем(ы), по 1 дизайну на каждую\n", flush=True)
 
+    # Ротация банка стилей (docs/STYLE_BANK.json) — скользящее окно последних
+    # style_id по ВСЕМУ батчу тем файла, та же логика, что в daily_prints.py (не
+    # давать один стиль дважды подряд); последовательный цикл здесь, поэтому просто
+    # snapshot()/record() без гонок потоков.
+    recent_styles = art_director.RecentStyles()
+
     designs = []
     for t in themes:
         print(f"  прошу дизайн для «{t}»...", flush=True)
         try:
-            d = art_director.make_ideas(t, 1, args.format)[0]
+            recent = recent_styles.snapshot()
+            d = art_director.make_ideas(t, 1, args.format, recent_styles=recent)[0]
+            recent_styles.record(d.get("style_id", ""))
             designs.append(d)
         except Exception as e:  # noqa: BLE001
             print(f"  !! пропуск «{t}»: {e}", flush=True)

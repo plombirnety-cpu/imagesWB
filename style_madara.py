@@ -56,8 +56,15 @@ import batch_print  # noqa: E402
 DEFAULT_RECIPES_PATH = HERE / "docs" / "MADARA_RECIPES.json"
 DEFAULT_OUTDIR = HERE / "out_batch" / "madara_styles"
 
-DEFAULT_CHARACTER_EN = "Madara Uchiha"
-DEFAULT_TITLE_EN = "Naruto"
+# Дефолт ПУСТОЙ (не "Madara Uchiha") — баг заражения Мадарой: скрипт обобщён под
+# ЛЮБОЙ набор рецептов (--recipes docs/KAMINA_RECIPES.json и т.п.), молчаливый дефолт
+# на конкретного персонажа рисовал бы Мадару поверх ЛЮБОГО чужого рецепта, у которого
+# нет собственного поля "character_en" И пользователь забыл передать --character (было
+# видно на прогонах не-мадаровских рецептов без явного --character — молча съезжали на
+# Мадару вместо честной ошибки). --character/--title теперь ОБЯЗАТЕЛЬНЫ, если ни один
+# рецепт в файле не задаёт character_en/title_en сам (см. main() — явная проверка).
+DEFAULT_CHARACTER_EN = ""
+DEFAULT_TITLE_EN = ""
 
 # slogan/slogan_color санация в art_director._parse режет slogan регексом
 # [^A-Za-z0-9 !?'\-] и обрезает до 34 симв — рецепт 06 ("DANCE, MADARA!" содержит
@@ -167,7 +174,8 @@ def recipe_to_design(recipe: dict, character_en: str, title_en: str) -> dict:
     if vertical_jp:
         exact_spelling_notes.append(
             f"The vertical Japanese column reads EXACTLY, character by character, top to "
-            f"bottom, exactly once: {vertical_jp}."
+            f"bottom, exactly once: {vertical_jp}. Render dakuten and handakuten marks "
+            f"accurately (for example distinguish ハ from バ from パ)."
         )
 
     type_spec = (
@@ -250,10 +258,13 @@ def main() -> None:
                      help=f"папка результатов (дефолт {DEFAULT_OUTDIR.name})")
     ap.add_argument("--character", default=DEFAULT_CHARACTER_EN,
                      help="character_en для character_ref-референса, если рецепт сам "
-                          "его не задаёт полем \"character_en\" (дефолт Madara Uchiha)")
+                          "его не задаёт полем \"character_en\" — ДЕФОЛТ ПУСТОЙ, нужно "
+                          "передавать явно (напр. \"Madara Uchiha\"), если файл рецептов "
+                          "сам не содержит character_en в каждом рецепте")
     ap.add_argument("--title", default=DEFAULT_TITLE_EN,
                      help="title_en (франшиза) для character_ref, если рецепт сам его "
-                          "не задаёт полем \"title_en\" (дефолт Naruto)")
+                          "не задаёт полем \"title_en\" — ДЕФОЛТ ПУСТОЙ, аналогично "
+                          "--character")
     ap.add_argument("--workers", type=int, default=2,
                      help="сколько рецептов генерировать параллельно (дефолт 2 — не "
                           "ловить лимиты API)")
@@ -267,6 +278,19 @@ def main() -> None:
     outdir = args.outdir if args.outdir.is_absolute() else HERE / args.outdir
 
     recipes = load_recipes(recipes_path)
+
+    # Дефолт --character/--title ПУСТОЙ (баг заражения Мадарой, см. DEFAULT_CHARACTER_EN
+    # докстринг) — честно остановиться, если ни один рецепт в файле не задаёт свой
+    # собственный "character_en" И пользователь не передал --character: иначе
+    # recipe_to_design тихо соберёт design с пустым character_en (без референса,
+    # промпт-фраза "who" тоже пустая) — молчаливая деградация хуже понятной ошибки.
+    if not args.character and not all(r.get("character_en") for r in recipes):
+        missing_ids = [r.get("id") for r in recipes if not r.get("character_en")]
+        print(f"!! --character не передан, а эти рецепты не задают свой character_en: "
+              f"{missing_ids} — укажи --character \"Имя Персонажа\" [--title \"Франшиза\"]",
+              flush=True)
+        sys.exit(1)
+
     if args.only:
         # --only принимает и "a b c" (nargs="*" разбивает по пробелу сам), и одну
         # строку "a,b,c" (запятая) — каждый переданный токен ещё раз режем по запятой
