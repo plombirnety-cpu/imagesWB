@@ -1,11 +1,23 @@
 # -*- coding: utf-8 -*-
 """Тесты режима green_only (заказ владельца, мега-партия D:\\800, 2026-07-10):
-на успешный принт — РОВНО ОДИН файл <base>.png (исходная генерация на эталонном
-зелёном RGB(0,177,64)), без вырезки/апскейла/ongreen; паспорт design.json — в
-зеркальную _meta; синий хромакей перекрашивается ТОЛЬКО по фону
-(chroma_remove.recolor_bg), пиксели фигуры бит-в-бит; смета — по фактически
-полученным изображениям (429/500 без картинки бесплатны); --migrate-legacy
-переводит старую (full-set) партию в новую раскладку без генераций.
+на успешный принт — РОВНО ОДИН файл <base>.png, сохраняемый КАК ЕСТЬ, вообще БЕЗ
+обработки пикселей — фон остаётся ТЕМ хромакеем, что реально сгенерился (зелёным
+ИЛИ синим), без вырезки/апскейла/ongreen; паспорт design.json — в зеркальную
+_meta; смета — по фактически полученным изображениям (429/500 без картинки
+бесплатны); --migrate-legacy переводит старую (full-set) партию в новую
+раскладку без генераций.
+
+Правка владельца 2026-07-10 (дословно): "правило синего фона если зеленые
+элементы на персонаже, сохраняем. Просто не вырезай фон и все, мне нужны файлы
+с фоном Зеленый или синий, в зависимости от принта" — render_design(green_only=
+True) БОЛЬШЕ НЕ вызывает chroma_remove.recolor_bg вообще (ни для blue, ни для
+green); файл в тематической папке = raw бит-в-бит для ОБОИХ цветов хромакея.
+Правило арт-директора "зелёные элементы у персонажа -> синий хромакей"
+(art_director._chroma_bg, определяет, каким хромакеем ИДЁТ генерация) не
+трогается и здесь не тестируется. chroma_remove.recolor_bg САМА функция и её
+юнит-тесты ниже (перекраска синего в эталонный зелёный) ОСТАВЛЕНЫ как рабочая
+утилита на будущее — просто больше не вызываются из green_only-пути
+render_design.
 
 Полностью офлайн — генерация мокается (как в остальных тестах проекта), сеть не
 используется.
@@ -157,16 +169,19 @@ def _forbid(name):
     return _boom
 
 
-def test_render_design_green_only_blue_chroma_single_file_and_meta_passport(
+def test_render_design_green_only_blue_chroma_saved_bit_exact_no_recolor(
         tmp_path, monkeypatch):
-    """chroma=blue: в outdir РОВНО ОДИН файл <tag>.png с эталонно зелёным фоном;
-    паспорт design.json — по переданному зеркальному пути; вырезка/апскейл/
-    ongreen НЕ вызываются и НЕ сохраняются."""
+    """chroma=blue: в outdir РОВНО ОДИН файл <tag>.png, сохранённый БИТ-В-БИТ
+    (правка владельца 2026-07-10 — recolor_bg из green_only-пути убран, фон
+    остаётся синим, каким сгенерился); паспорт design.json — по переданному
+    зеркальному пути; вырезка/апскейл/ongreen НЕ вызываются и НЕ сохраняются."""
     gen = _gen_img(REF_BLUE)
     monkeypatch.setattr(batch_print.providers, "generate_image",
                         lambda *a, **k: gen)
     monkeypatch.setattr(batch_print.chroma_remove, "cutout_green",
                         _forbid("chroma_remove.cutout_green"))
+    monkeypatch.setattr(batch_print.chroma_remove, "recolor_bg",
+                        _forbid("chroma_remove.recolor_bg"))
     monkeypatch.setattr(batch_print.upscale, "upscale_to_print_min",
                         _forbid("upscale.upscale_to_print_min"))
 
@@ -186,9 +201,13 @@ def test_render_design_green_only_blue_chroma_single_file_and_meta_passport(
     # паспорт лежит в зеркальной _meta и воспроизводит design
     assert meta_path.exists()
     assert json.loads(meta_path.read_text(encoding="utf-8"))["chroma"] == "blue"
-    # фон перекрашен в эталонный зелёный
+    # фон НЕ перекрашен — файл бит-в-бит равен сгенерированной картинке (синий
+    # хромакей остаётся синим, как заказал владелец)
+    saved = np.array(Image.open(outdir / "z01.png").convert("RGB"))
+    assert np.array_equal(saved, np.array(gen)), (
+        "blue-генерация обязана сохраняться бит-в-бит, без перекраски фона")
     out = np.array(Image.open(outdir / "z01.png").convert("RGB"))
-    assert tuple(out[2, 2]) == REF_GREEN
+    assert tuple(out[2, 2]) == REF_BLUE
     assert res["raw"] is None and res["diecut"] is None and res["ongreen"] is None \
         and res["print_png"] is None
 
