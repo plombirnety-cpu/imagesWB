@@ -552,7 +552,8 @@ def _expected_text_phrases(design: dict) -> list:
 
 def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2,
                    text_style: str = "auto", no_juice: bool = False,
-                   log_prefix: str = "") -> dict:
+                   log_prefix: str = "", green_only: bool = False,
+                   design_json_path: Path = None) -> dict:
     """Полный цикл ОДНОГО дизайна: генерация (с QC-гейтом границ + масштаба фигуры) ->
     вырезка -> типографика -> апскейл -> 4-5 файлов (tag_raw.png/tag_diecut.png/
     tag_ongreen.png/tag_print.png/tag_design.json) в outdir. Переиспользуется и CLI-
@@ -595,14 +596,43 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     (config.UPSCALE=on, дефолт), None если апскейл отключён вовсе — НЕ считается
     ошибкой дизайна, result["ok"] может быть True с print_png=None. print_fallback=
     True — realesrgan был недоступен/упал/таймаутировал, print_png получен ЦЕЛИКОМ
-    через Lanczos с исходника (хуже качеством, но печатный размер гарантирован)."""
+    через Lanczos с исходника (хуже качеством, но печатный размер гарантирован).
+
+    green_only (шестнадцатый+1 заход, заказ владельца для мега-партии D:\\800): на
+    успешный дизайн сохраняется РОВНО ОДИН файл <tag>.png — исходная генерация на
+    эталонном зелёном RGB(0,177,64). Вырезка (diecut), апскейл (print) и ongreen-
+    превью НЕ выполняются и НЕ сохраняются (экономия времени и денег Replicate),
+    _raw.png отдельно тоже не пишется — <tag>.png И ЕСТЬ raw. Если генерация шла на
+    СИНЕМ хромакее (предохранитель art_director._chroma_bg) — ТОЛЬКО фон
+    перекрашивается в эталонный зелёный (chroma_remove.recolor_bg: пиксели фигуры
+    бит-в-бит, кромка un-mix к зелёному без синего ореола); генерация на зелёном
+    сохраняется как есть, вообще без обработки. ВСЕ QC-гейты цикла генерации (цвет
+    рамки против эталона хромакея, масштаб фигуры, OCR-контроль текста, text-fallback)
+    работают КАК ЕСТЬ — они от вырезки не зависят. Нюанс ring_medallion: кольцевой
+    текст в этом режиме НЕ наносится (он накладывался кодом ПОСЛЕ вырезки) — кольцо
+    остаётся пустым, фраза сохранена в design.json-паспорте для дообработки. Путь к
+    <tag>.png возвращается в result["green"].
+
+    design_json_path: куда писать паспорт design.json (дефолт None — рядом с
+    картинкой, <outdir>/<tag>_design.json, старое поведение). mega_batch_run в
+    режиме green_only передаёт зеркальный путь D:\\800\\_meta\\<category>\\... —
+    тематическая папка остаётся с одной картинкой на принт.
+
+    result["images"] — сколько картинок ФАКТИЧЕСКИ отдал провайдер за все попытки
+    (main-цикл + text-fallback): попытки, где Gemini НЕ отдал картинку (429/500 —
+    реально не списываются с баланса), в attempts входят, а в images НЕТ — точный
+    учёт сметы ведётся по images (mega_batch_run --budget-cap)."""
     p = log_prefix or f"[{tag}]"
-    design_json_path = outdir / f"{tag}_design.json"
+    if design_json_path is None:
+        design_json_path = outdir / f"{tag}_design.json"
+    design_json_path = Path(design_json_path)
+    design_json_path.parent.mkdir(parents=True, exist_ok=True)
     design_json_path.write_text(
         json.dumps(design, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    result = {"ok": False, "attempts": 0, "coverage": 0.0, "error": None,
+    result = {"ok": False, "attempts": 0, "images": 0, "coverage": 0.0, "error": None,
               "raw": None, "diecut": None, "ongreen": None, "print_png": None,
+              "green": None,
               "design_json": str(design_json_path), "text_fallback": False,
               "single_text_no_overlay": False, "print_fallback": False}
 
@@ -675,6 +705,9 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     best_img_ocr_figure_ok, best_cov_ocr_figure_ok = None, -1.0
     best_img_figure_ok, best_cov_figure_ok = None, -1.0
     attempts_used = 0
+    images_received = 0  # попытки, где провайдер РЕАЛЬНО отдал картинку (только они
+                         # списываются с баланса — 429/500 без изображения бесплатны),
+                         # учёт сметы mega_batch_run ведётся по этому счётчику.
     for attempt in range(1 + timeout_retries):
         try_seed = seed + 101 * attempt
         attempts_used += 1
@@ -686,6 +719,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             print(f"{p} !! попытка {attempt + 1} упала: {e}", flush=True)
             result["error"] = str(e)
             continue
+        images_received += 1
         cov = _border_chroma_coverage(attempt_img, chroma=design["chroma"])
         print(f"{p} border coverage={cov:.2f}", flush=True)
         if cov > best_cov:
@@ -726,6 +760,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             print(f"{p} {' и '.join(reason)} -> retry", flush=True)
 
     result["attempts"] = attempts_used
+    result["images"] = images_received
     result["coverage"] = best_cov
 
     if best_img is None:
@@ -799,6 +834,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                 print(f"{p} !! фолбэк-генерация {fb_attempt + 1}/"
                       f"{_FALLBACK_NO_TEXT_MAX_ATTEMPTS} упала: {e}", flush=True)
                 continue
+            images_received += 1
             fb_cov = _border_chroma_coverage(fb_img, chroma=design["chroma"])
             print(f"{p} фолбэк-генерация {fb_attempt + 1}/"
                   f"{_FALLBACK_NO_TEXT_MAX_ATTEMPTS} (без текста) border "
@@ -888,12 +924,44 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         raw_img = best_img
 
     result["attempts"] = attempts_used
+    result["images"] = images_received
     result["coverage"] = best_cov
     result["text_fallback"] = text_fallback
     result["single_text_no_overlay"] = single_text_no_overlay
     if best_cov < 0.90:
         print(f"{p} !! warning: лучшая попытка coverage={best_cov:.2f} < 0.90, "
               f"используем её (seed={best_seed})", flush=True)
+
+    if green_only:
+        # Режим green_only (заказ владельца, мега-партия D:\800): РОВНО ОДИН файл
+        # <tag>.png на успешный принт — исходная генерация на эталонном зелёном.
+        # Никакой вырезки/апскейла/ongreen/отдельного _raw.png (см. докстринг).
+        green_path = outdir / f"{tag}.png"
+        try:
+            if design.get("chroma") == "blue":
+                # Генерация шла на СИНЕМ хромакее (предохранитель art_director.
+                # _chroma_bg для зелёных персонажей) — перекрасить ТОЛЬКО фон в
+                # эталонный зелёный, пиксели фигуры/текста бит-в-бит (recolor_bg:
+                # un-mix кромки, без синего ореола).
+                out_img = chroma_remove.recolor_bg(raw_img, src_chroma="blue")
+                print(f"{p} green_only: фон перекрашен blue -> эталонный зелёный "
+                      f"RGB(0,177,64), фигура не тронута", flush=True)
+            else:
+                # Генерация на зелёном — сохранить raw КАК ЕСТЬ, вообще без
+                # обработки (пиксели бит-в-бит; фактический зелёный nano-banana
+                # варьирует вокруг эталона — это норма, не выравниваем).
+                out_img = raw_img
+            out_img.save(green_path)
+        except Exception as e:  # noqa: BLE001 — сбой перекраски/записи = провал дизайна
+            print(f"{p} !! green_only: перекраска/сохранение упали: {e}", flush=True)
+            result["error"] = str(e)
+            return result
+        result["green"] = str(green_path)
+        result["ok"] = True
+        print(f"{p} ok (green_only) -> {green_path.name} "
+              f"(chroma={design.get('chroma')}, text_fallback={text_fallback}, "
+              f"паспорт: {design_json_path})", flush=True)
+        return result
 
     raw_path = outdir / f"{tag}_raw.png"
     raw_img.save(raw_path)

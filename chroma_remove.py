@@ -17,6 +17,12 @@ import cv2
 import numpy as np
 from PIL import Image
 
+# Эталонные RGB хромакея проекта — те же значения, что art_director._chroma_bg
+# подставляет в промпт (hex 00B140 / 0047FF) и batch_print._CHROMA_REF_RGB
+# использует в QC-гейте цвета рамки. Дублируются здесь (а не импортируются из
+# batch_print), чтобы не заводить циклический импорт batch_print <-> chroma_remove.
+CHROMA_REF_RGB = {"green": (0, 177, 64), "blue": (0, 71, 255)}
+
 
 def _border_key(rgb: np.ndarray) -> np.ndarray:
     """Медианный цвет рамки кадра = цвет фона-ключа."""
@@ -27,6 +33,90 @@ def _border_key(rgb: np.ndarray) -> np.ndarray:
         rgb[:, :b].reshape(-1, 3), rgb[:, -b:].reshape(-1, 3),
     ])
     return np.median(px, axis=0)
+
+
+def _ycc_of(rgb_tuple) -> np.ndarray:
+    """RGB-тройка -> YCrCb (float32, форма (3,)) — общий помощник recolor-пути."""
+    arr = np.array(rgb_tuple, dtype=np.uint8).reshape(1, 1, 3)
+    return cv2.cvtColor(arr, cv2.COLOR_RGB2YCrCb)[0, 0].astype(np.float32)
+
+
+def _robust_bg_key(rgb: np.ndarray, ref_rgb: tuple,
+                   prefilter_tol: float = 40.0, min_frac: float = 0.05) -> np.ndarray:
+    """Цвет ФАКТИЧЕСКОГО фона-хромакея кадра: медиана пикселей рамки, ПРЕДВАРИТЕЛЬНО
+    отфильтрованных близостью (CrCb) к ЭТАЛОННОМУ цвету запрошенного хромакея ref_rgb.
+
+    Отличие от _border_key (голая медиана ВСЕЙ рамки): декор стиля, дотянувшийся до
+    истинного края холста (инцидент «Зоро» 28_metal_cover, см. GOTCHAS команды),
+    утаскивает голую медиану в грязный серо-синий тон декора — на реальном raw того
+    инцидента _border_key даёт (19,82,152) при настоящем фоне (0,82,254): CrCb-дистанция
+    ключа до фона ~57, перекраска по такому ключу не нашла бы фон вовсе. Фильтр по
+    близости к эталону (prefilter_tol=40 — реальный фон nano-banana варьирует, но
+    остаётся в пределах ~40 CrCb от эталона; белый/серый/чёрный декор лежит на 90-115)
+    отбрасывает пиксели декора ДО взятия медианы. Если близких к эталону пикселей на
+    рамке меньше min_frac (фон вообще не дотянулся до рамки — весь периметр в декоре)
+    — возвращаем сам эталон ref_rgb как лучший доступный ключ."""
+    h, w = rgb.shape[:2]
+    b = max(2, min(h, w) // 50)
+    px = np.concatenate([
+        rgb[:b].reshape(-1, 3), rgb[-b:].reshape(-1, 3),
+        rgb[:, :b].reshape(-1, 3), rgb[:, -b:].reshape(-1, 3),
+    ]).astype(np.uint8)
+    ycc = cv2.cvtColor(px.reshape(-1, 1, 3), cv2.COLOR_RGB2YCrCb)[:, 0, :].astype(np.float32)
+    ref = _ycc_of(ref_rgb)
+    dist = np.sqrt((ycc[:, 1] - ref[1]) ** 2 + (ycc[:, 2] - ref[2]) ** 2)
+    near = px[dist < prefilter_tol]
+    if len(near) < max(1, int(min_frac * len(px))):
+        return np.array(ref_rgb, dtype=np.float64)
+    return np.median(near.astype(np.float64), axis=0)
+
+
+def recolor_bg(img_pil: Image.Image, src_chroma: str = "blue",
+               target_rgb: tuple = CHROMA_REF_RGB["green"],
+               tol_a: float = 12.0, tol_b: float = 48.0) -> Image.Image:
+    """Перекрасить ТОЛЬКО фон-хромакей в target_rgb (эталонный зелёный по умолчанию),
+    НЕ трогая пиксели фигуры/текста — режим green_only mega_batch_run: генерация шла
+    на СИНЕМ хромакее (предохранитель art_director._chroma_bg для зелёных персонажей),
+    а на выходе нужен единый эталонный зелёный фон БЕЗ вырезки.
+
+    Маска — тот же колор-кей, что remove_chroma/cutout_green: CrCb-расстояние пикселя
+    до ключа фона -> альфа фигуры a=0..1 по тем же калиброванным допускам (tol_a=12
+    «чистый фон», tol_b=48 «уверенная фигура» — НЕ менять, калибровка проекта под
+    nano-banana). Ключ — _robust_bg_key (см. выше): устойчив к декору, дотянувшемуся
+    до рамки (голая медиана _border_key на таком кадре съезжает с фона).
+
+    Итог по зонам альфы:
+      a==1 (фигура)  — пиксель БИТ-В-БИТ исходный (не участвует ни в одном пересчёте);
+      a==0 (фон)     — ровно target_rgb (эталон, без шума/градиента исходного фона);
+      0<a<1 (кромка) — un-mix: из полупрозрачного пикселя ВЫЧИТАЕТСЯ вклад старого
+                       ключа (пиксель = fg*a + key*(1-a) -> fg восстанавливается), и
+                       той же долей подмешивается target_rgb — полутоновый край
+                       переходит в зелёный БЕЗ синего ореола (простое смешение
+                       «пиксель*а + зелёный*(1-a)» оставляло бы старый синий вклад
+                       внутри пикселя).
+
+    Никакого despill/чистки/морфологии alpha: это НЕ вырезка, фигура не редактируется.
+    src_chroma — какой хромакей просил design (ключ эталона для _robust_bg_key)."""
+    rgb = np.array(img_pil.convert("RGB"))
+    ref_rgb = CHROMA_REF_RGB.get(src_chroma, CHROMA_REF_RGB["blue"])
+    key_rgb = _robust_bg_key(rgb, ref_rgb)
+
+    ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
+    key = _ycc_of(tuple(int(round(v)) for v in key_rgb))
+    d = np.sqrt((ycc[:, :, 1] - key[1]) ** 2 + (ycc[:, :, 2] - key[2]) ** 2)
+    a = np.clip((d - tol_a) / float(tol_b - tol_a), 0.0, 1.0)[:, :, None]
+
+    src = rgb.astype(np.float32)
+    key_f = key_rgb.astype(np.float32).reshape(1, 1, 3)
+    target = np.array(target_rgb, dtype=np.float32).reshape(1, 1, 3)
+
+    # un-mix кромки: восстановить цвет фигуры без вклада старого ключа, подмешать
+    # target той же долей (a>0 гарантировано делителю зоной применения ниже).
+    fg = np.clip((src - key_f * (1.0 - a)) / np.maximum(a, 1e-6), 0.0, 255.0)
+    out = fg * a + target * (1.0 - a)
+    out = np.where(a >= 1.0, src, out)      # фигура — бит-в-бит исходник
+    out = np.where(a <= 0.0, np.broadcast_to(target, src.shape), out)  # фон — эталон
+    return Image.fromarray(np.clip(np.round(out), 0, 255).astype(np.uint8), "RGB")
 
 
 def _clean_alpha(a01: np.ndarray, min_area: int, smooth: float = 1.0) -> np.ndarray:

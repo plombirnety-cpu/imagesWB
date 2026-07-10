@@ -10,7 +10,20 @@ docstring make_ideas) — часть тем плана (taro_zodiac/часть p
 форсирует конкретный style_id из docs/STYLE_BANK.json, остальные (style_pref=null)
 идут через обычную авторотацию банка (RecentStyles, как в daily_prints.py).
 
-На запись:
+РЕЖИМ green_only — ДЕФОЛТ (заказ владельца, докатка после пополнения кредитов):
+на успешный принт в тематической папке остаётся РОВНО ОДИН файл
+<filename_base>.png — исходная генерация на эталонном зелёном RGB(0,177,64)
+(генерация на СИНЕМ хромакее перекрашивается ТОЛЬКО по фону, chroma_remove.
+recolor_bg, фигура бит-в-бит; генерация на зелёном сохраняется как есть, вообще
+без обработки). Вырезка (diecut), апскейл (Replicate/_print) и ongreen-превью НЕ
+выполняются — экономия времени и денег Replicate; QC-гейты на raw (цвет рамки,
+масштаб фигуры, OCR-текст) работают как есть. design.json-паспорт пишется НЕ
+рядом с картинкой, а в зеркальную папку <outroot>/_meta/<category>/<filename_
+base>_design.json — паспорт будущей БЕСПЛАТНОЙ дообработки (вырезка/апскейл
+потом, без повторной оплаты генерации). Флаг --full-set возвращает СТАРОЕ
+поведение (полный набор файлов, как описано ниже).
+
+На запись (--full-set, старый режим):
   1. art_director.make_ideas(theme, 1, format, recent_styles=..., style_pref=...)
   2. batch_print.render_design(design, filename_base, outdir, ...) — пишет
      outdir/<filename_base>_raw.png (ВСЕГДА, см. batch_print.py) + _diecut.png +
@@ -27,24 +40,40 @@ docstring make_ideas) — часть тем плана (taro_zodiac/часть p
 Журнал `<outroot>/_journal.jsonl` (одна строка на ЗАВЕРШЁННОЕ задание, JSONL,
 append-only) — резюмируемость: повторный запуск того же плана пропускает
 filename_base со статусом "done" в журнале (не платим дважды за уже готовые
-принты), "failed"/"skipped_budget_cap" обрабатываются заново.
+принты), "failed"/"skipped_budget_cap" обрабатываются заново. Смена режима
+(green_only <-> full-set) резюмируемость НЕ ломает: done-запись со СТАРЫМ
+набором файлов остаётся done (ключ — filename_base+status, не список файлов);
+партию старого формата на диске переводит в новую раскладку --migrate-legacy.
 
-Потолок стоимости (задача лида, страховка $60, ожидаемая полная смета ~$35-40) —
-СОВОКУПНО по ВСЕМ прогонам (включая прошлые, читает журнал), не только текущему:
-как только накопленная est-стоимость (по факту attempts * COST_PER_IMAGE_USD)
-достигает потолка, ВСЕ ещё НЕ НАЧАТЫЕ задания (Future.cancel() — работает только
-для заданий, которые ThreadPoolExecutor ещё не взял в работу) отменяются, уже
-выполняющиеся доигрывают до конца (нельзя прервать поток на середине без риска
-битых файлов) — небольшой заброс за потолок возможен и ожидаем, это страховка,
-не жёсткий hard-limit посреди одного вызова render_design.
+Потолок стоимости — СОВОКУПНО по ВСЕМ прогонам (включая прошлые, читает журнал),
+не только текущему: как только накопленная est-стоимость достигает потолка, ВСЕ
+ещё НЕ НАЧАТЫЕ задания (Future.cancel() — работает только для заданий, которые
+ThreadPoolExecutor ещё не взял в работу) отменяются, уже выполняющиеся доигрывают
+до конца (нельзя прервать поток на середине без риска битых файлов) — небольшой
+заброс за потолок возможен и ожидаем, это страховка, не жёсткий hard-limit
+посреди одного вызова render_design. Дефолт потолка — env MEGA_BUDGET_CAP_USD
+(config.py, .env, сейчас 150). ВАЖНО (учёт с пополнения 2026-07-10): в смету
+НОВЫХ записей идут только попытки, где Gemini ФАКТИЧЕСКИ отдал картинку
+(result["images"] из render_design) — 429/500 без изображения реально не
+списываются с баланса; QC-ретраи С полученной картинкой считаются. СТАРЫЕ записи
+журнала (до поля "images") посчитаны по attempts — консервативный перекос вверх
+(предохранитель может сработать чуть раньше, лишнего не потратим).
+
+--migrate-legacy — разовая миграция уже снятой СТАРЫМ режимом партии в раскладку
+green_only (без генераций): <base>_ongreen.png -> <base>.png (остаётся в
+тематической папке), оплаченные _diecut/_print -> <outroot>/_full/<category>/
+(НЕ удалять — деньги уплачены), design.json -> <outroot>/_meta/<category>/.
 
 Использование:
-    python mega_batch_run.py                    # полный план (800, за вычетом done)
+    python mega_batch_run.py                    # green_only (дефолт), докатка по журналу
+    python mega_batch_run.py --full-set          # старый полный набор файлов
+    python mega_batch_run.py --migrate-legacy    # миграция старой партии, без генераций
     python mega_batch_run.py --limit 6           # смоук-тест (маленький живой прогон)
     python mega_batch_run.py --workers 4 --budget-cap 60
 """
 import argparse
 import json
+import shutil
 import sys
 import threading
 import time
@@ -61,8 +90,13 @@ import upscale                 # noqa: E402
 
 DEFAULT_PLAN_PATH = HERE / "mega_plan_800.json"
 DEFAULT_OUTROOT = Path("D:/800")
-DEFAULT_BUDGET_CAP_USD = 60.0
 PROGRESS_EVERY = 5
+
+# Служебные папки в корне outroot — НЕ тематические категории: _meta (паспорта
+# design.json, зеркало категорий), _full (оплаченные diecut/print старого режима,
+# перенесённые --migrate-legacy).
+META_DIRNAME = "_meta"
+FULL_DIRNAME = "_full"
 
 
 def _journal_path(outroot: Path) -> Path:
@@ -121,6 +155,15 @@ def _out_dir(outroot: Path, category: str) -> Path:
     return d
 
 
+def _meta_design_path(outroot: Path, category: str, filename_base: str) -> Path:
+    """Путь паспорта design.json в зеркальной папке _meta (режим green_only):
+    <outroot>/_meta/<category>/<filename_base>_design.json. Папка создаётся здесь же
+    (mkdir идемпотентен, безопасно из параллельных воркеров)."""
+    d = outroot.joinpath(META_DIRNAME, *category.split("/"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{filename_base}_design.json"
+
+
 def _empty_journal_record(rec: dict, status: str, error: str = None) -> dict:
     """Журнальная запись-заглушка для веток, где обработка НЕ дошла до
     batch_print.render_design (отмена бюджетом / необработанное исключение) —
@@ -135,14 +178,17 @@ def _empty_journal_record(rec: dict, status: str, error: str = None) -> dict:
     }
 
 
-def _process_one(rec: dict, outroot: Path, recent_styles: "art_director.RecentStyles") -> dict:
+def _process_one(rec: dict, outroot: Path, recent_styles: "art_director.RecentStyles",
+                 full_set: bool = False) -> dict:
     """Обрабатывает ОДНО задание плана: арт-директор (style_pref-приоритет) ->
-    render_design -> удаление raw при успехе. Отказ ОДНОГО задания (исключение
-    любого рода) НЕ должен ронять весь прогон — вызывающий код (run_mega_batch)
-    оборачивает fut.result() в try/except на случай необработанного исключения
-    здесь тоже, но эта функция сама уже ловит ожидаемые точки отказа
-    (арт-директор/render_design) и всегда возвращает журнальную запись, не
-    бросает наружу."""
+    render_design (green_only по умолчанию, см. докстринг модуля; full_set=True —
+    старый полный набор файлов) -> удаление raw при успехе (только full_set —
+    в green_only отдельного raw нет, <base>.png И ЕСТЬ raw). Отказ ОДНОГО задания
+    (исключение любого рода) НЕ должен ронять весь прогон — вызывающий код
+    (run_mega_batch) оборачивает fut.result() в try/except на случай
+    необработанного исключения здесь тоже, но эта функция сама уже ловит ожидаемые
+    точки отказа (арт-директор/render_design) и всегда возвращает журнальную
+    запись, не бросает наружу."""
     seq = rec["seq"]
     filename_base = rec["filename_base"]
     theme = rec["theme"]
@@ -153,6 +199,7 @@ def _process_one(rec: dict, outroot: Path, recent_styles: "art_director.RecentSt
     tag_p = f"[{seq:04d}/{filename_base}]"
 
     journal_rec = _empty_journal_record(rec, "failed")
+    journal_rec["mode"] = "full_set" if full_set else "green_only"
 
     try:
         recent = recent_styles.snapshot() if recent_styles else None
@@ -165,10 +212,17 @@ def _process_one(rec: dict, outroot: Path, recent_styles: "art_director.RecentSt
         print(f"{tag_p} !! арт-директор упал: {e}", flush=True)
         return journal_rec
 
+    # green_only: паспорт design.json уходит в зеркальную _meta (тематическая папка
+    # остаётся с одной картинкой на принт); full_set — рядом с файлами, как раньше.
+    design_json_path = (None if full_set
+                        else _meta_design_path(outroot, category, filename_base))
+
     try:
         res = batch_print.render_design(design, filename_base, outdir,
                                         timeout_retries=2, text_style="auto",
-                                        no_juice=False, log_prefix=tag_p)
+                                        no_juice=False, log_prefix=tag_p,
+                                        green_only=not full_set,
+                                        design_json_path=design_json_path)
     except Exception as e:  # noqa: BLE001 — render_design не должен ронять весь прогон
         journal_rec["error"] = f"render_design упал: {e}"
         print(f"{tag_p} !! render_design упал: {e}", flush=True)
@@ -176,18 +230,25 @@ def _process_one(rec: dict, outroot: Path, recent_styles: "art_director.RecentSt
 
     per_item_cost = config.COST_PER_IMAGE_USD.get(config.IMAGE_PROVIDER, 0.14)
     journal_rec["attempts"] = res["attempts"]
+    # Смета — по ФАКТИЧЕСКИ полученным изображениям (result["images"]): попытки, где
+    # Gemini не отдал картинку (429/500), с баланса реально не списываются; QC-ретраи
+    # с полученной картинкой — считаются. .get с фолбэком на attempts — страховка
+    # для гипотетического вызова со старой сигнатурой render_design (перекос вверх
+    # безопасен: предохранитель сработает раньше, а не позже).
+    journal_rec["images"] = res.get("images", res["attempts"])
     journal_rec["error"] = res["error"]
-    journal_rec["est_cost_usd"] = round(res["attempts"] * per_item_cost, 4)
+    journal_rec["est_cost_usd"] = round(journal_rec["images"] * per_item_cost, 4)
     journal_rec["print_fallback"] = bool(res.get("print_fallback"))
+    journal_rec["text_fallback"] = bool(res.get("text_fallback"))
     journal_rec["style_id"] = design.get("style_id", "")
 
     if res["ok"]:
         journal_rec["status"] = "done"
         # raw НЕ хранить при успешной вырезке (задача лида) — только диагностика
-        # при провале (см. докстринг модуля). batch_print.render_design ВСЕГДА
-        # сохраняет <tag>_raw.png безусловно (см. batch_print.py) — удаляем его
-        # здесь ПОСЛЕ успеха, не трогаем модуль (общий, много других вызывающих).
-        raw_path = res.get("raw")
+        # при провале (см. докстринг модуля). Актуально ТОЛЬКО для full_set:
+        # в green_only render_design отдельный _raw.png не пишет вовсе
+        # (res["raw"] is None), <base>.png и есть исходная генерация.
+        raw_path = res.get("raw") if full_set else None
         if raw_path:
             try:
                 Path(raw_path).unlink(missing_ok=True)
@@ -200,7 +261,8 @@ def _process_one(rec: dict, outroot: Path, recent_styles: "art_director.RecentSt
 
 
 def run_mega_batch(plan_path: Path, outroot: Path, workers: int,
-                    budget_cap_usd: float, limit: int = None) -> dict:
+                    budget_cap_usd: float, limit: int = None,
+                    full_set: bool = False) -> dict:
     outroot.mkdir(parents=True, exist_ok=True)
     plan = _load_plan(plan_path)
     if limit is not None:
@@ -234,7 +296,8 @@ def run_mega_batch(plan_path: Path, outroot: Path, workers: int,
     t0 = time.time()
     if todo:
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-            futs = {pool.submit(_process_one, rec, outroot, recent_styles): rec
+            futs = {pool.submit(_process_one, rec, outroot, recent_styles,
+                                full_set): rec
                    for rec in todo}
             for fut in as_completed(futs):
                 rec = futs[fut]
@@ -280,6 +343,7 @@ def run_mega_batch(plan_path: Path, outroot: Path, workers: int,
 
     summary = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "mode": "full_set" if full_set else "green_only",
         "plan_path": str(plan_path),
         "outroot": str(outroot),
         "total_plan": len(plan),
@@ -302,6 +366,56 @@ def run_mega_batch(plan_path: Path, outroot: Path, workers: int,
     return summary
 
 
+def migrate_legacy(outroot: Path) -> dict:
+    """Разовая миграция партии, снятой СТАРЫМ (full-set) режимом, в раскладку
+    green_only — БЕЗ единой генерации (кредиты не тратятся):
+
+      <base>_ongreen.png  -> <base>.png              (остаётся в тематической папке —
+                                                      единственный файл принта)
+      <base>_diecut.png   -> <outroot>/_full/<cat>/  (ОПЛАЧЕНЫ — НЕ удалять)
+      <base>_print.png    -> <outroot>/_full/<cat>/  (ОПЛАЧЕНЫ — НЕ удалять)
+      <base>_design.json  -> <outroot>/_meta/<cat>/  (паспорт дообработки)
+      <base>_raw.png      — не трогаем (диагностика брака, только у failed)
+
+    Идемпотентна: уже перенесённые файлы пропускаются; существующая цель НЕ
+    перезаписывается (skip с предупреждением — не потерять данные молча).
+    Служебные папки _full/_meta в корне outroot обходом не затрагиваются."""
+    outroot = Path(outroot)
+    stats = {"renamed_ongreen": 0, "moved_full": 0, "moved_meta": 0,
+             "skipped_exists": 0}
+
+    def _move(src: Path, dst: Path, counter: str) -> None:
+        if dst.exists():
+            print(f"  !! пропуск (цель уже существует): {src} -> {dst}", flush=True)
+            stats["skipped_exists"] += 1
+            return
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        stats[counter] += 1
+
+    service_roots = {outroot / META_DIRNAME, outroot / FULL_DIRNAME}
+    for f in sorted(outroot.rglob("*")):
+        if not f.is_file():
+            continue
+        # файлы в служебных папках и в корне outroot (журнал/summary/логи) не трогаем
+        if any(root in f.parents for root in service_roots) or f.parent == outroot:
+            continue
+        rel_dir = f.parent.relative_to(outroot)
+        name = f.name
+        if name.endswith("_ongreen.png"):
+            base = name[: -len("_ongreen.png")]
+            _move(f, f.parent / f"{base}.png", "renamed_ongreen")
+        elif name.endswith("_diecut.png") or name.endswith("_print.png"):
+            _move(f, outroot / FULL_DIRNAME / rel_dir / name, "moved_full")
+        elif name.endswith("_design.json"):
+            _move(f, outroot / META_DIRNAME / rel_dir / name, "moved_meta")
+
+    print(f"миграция {outroot}: ongreen->base {stats['renamed_ongreen']}, "
+          f"в _full {stats['moved_full']}, в _meta {stats['moved_meta']}, "
+          f"пропущено (цель существует) {stats['skipped_exists']}", flush=True)
+    return stats
+
+
 def main() -> None:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -316,17 +430,35 @@ def main() -> None:
                     help="куда сохранять принты (дефолт D:\\800)")
     ap.add_argument("--workers", type=int, default=config.WORKERS,
                     help="параллельные генерации (дефолт .env WORKERS)")
-    ap.add_argument("--budget-cap", type=float, default=DEFAULT_BUDGET_CAP_USD,
-                    help="потолок совокупной сметы USD, страховка (дефолт 60)")
+    ap.add_argument("--budget-cap", type=float, default=config.MEGA_BUDGET_CAP_USD,
+                    help="потолок совокупной сметы USD, страховка (дефолт из env "
+                         "MEGA_BUDGET_CAP_USD, сейчас "
+                         f"{config.MEGA_BUDGET_CAP_USD:.0f})")
     ap.add_argument("--limit", type=int, default=None,
                     help="обрезать план до N заданий (смоук-тест)")
+    ap.add_argument("--full-set", action="store_true",
+                    help="СТАРЫЙ режим: полный набор файлов (diecut/ongreen/print/"
+                         "design.json рядом) — по умолчанию режим green_only: один "
+                         "<base>.png на принт (генерация на эталонном зелёном), "
+                         "паспорт в _meta, без вырезки/апскейла")
+    ap.add_argument("--migrate-legacy", action="store_true",
+                    help="разовая миграция партии старого формата в раскладку "
+                         "green_only (_ongreen -> <base>.png, diecut/print -> _full, "
+                         "design.json -> _meta) — без генераций; после неё выйти")
     args = ap.parse_args()
 
-    replicate_note = ("Replicate ПЕРВЫМ путём" if upscale.replicate_available()
-                      else "Replicate НЕ настроен — локальный realesrgan/Lanczos")
-    print(f"провайдер: {config.IMAGE_PROVIDER}, апскейл: {replicate_note}", flush=True)
+    if args.migrate_legacy:
+        migrate_legacy(Path(args.outroot))
+        return
+
+    replicate_note = ("апскейл в green_only не выполняется" if not args.full_set
+                      else ("Replicate ПЕРВЫМ путём" if upscale.replicate_available()
+                            else "Replicate НЕ настроен — локальный realesrgan/Lanczos"))
+    print(f"провайдер: {config.IMAGE_PROVIDER}, "
+          f"режим: {'full_set' if args.full_set else 'green_only'}, "
+          f"{replicate_note}", flush=True)
     run_mega_batch(Path(args.plan), Path(args.outroot), args.workers,
-                   args.budget_cap, args.limit)
+                   args.budget_cap, args.limit, full_set=args.full_set)
 
 
 if __name__ == "__main__":
