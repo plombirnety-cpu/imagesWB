@@ -262,6 +262,17 @@ _COMMON_RULES_BASE = (
     "notched and chipped cutting edge, hilt wrapped in worn bandages'. Если канон говорит, "
     "что клинок длинный и зазубренный, так и опиши форму, но термин предмета — точный, не "
     "обобщённый. "
+    "(2б) АНАТОМИЯ РУК — если сцена включает человекоподобную фигуру (человек, аниме/"
+    "игровой персонаж, гуманоид, антропоморфный маскот с руками), у неё ДОЛЖНО быть "
+    "РОВНО ДВЕ руки и РОВНО ДВЕ кисти (по одной на конце каждой руки), пять пальцев "
+    "анатомически верной формы на каждой кисти — НИКАКИХ третьих/лишних/задвоенных рук, "
+    "НИКАКИХ отсутствующих или ампутированных кистей, НИКАКИХ сросшихся или "
+    "деформированных пальцев; хват оружия/предмета в руке — анатомически правдоподобный "
+    "(пальцы естественно обхватывают предмет). Также заполни поле has_human_figure ниже: "
+    "true для человекоподобной фигуры (тогда код дополнительно жёстко закрепит это "
+    "требование прямо в промпте картинки), false, если сцена вообще БЕЗ рук-персонажа "
+    "(машина, предмет, животное на четырёх лапах, дорожный знак и т.п.) — тогда правило "
+    "анатомии рук неприменимо. "
     "(3) ПОЛНЫЙ СИЛУЭТ С ШИРОКИМИ ПОЛЯМИ: персонаж (и любые эффекты вокруг) ПОЛНОСТЬЮ "
     "помещается в кадр, ничего не обрезано и не упирается в край — явно опиши широкие "
     "равномерные поля хромакей-фона со всех сторон вокруг фигуры. "
@@ -368,6 +379,19 @@ def _signature_props_schema() -> str:
     )
 
 
+def _has_human_figure_schema() -> str:
+    return (
+        "\"has_human_figure\":\"<true ИЛИ false — true, если ГЛАВНЫЙ субъект принта "
+        "human ИЛИ human-like (человек, аниме/игровой персонаж, гуманоид, "
+        "антропоморфный маскот С РУКАМИ); false ТОЛЬКО если субъект вообще без "
+        "человекоподобных рук (машина, предмет, чистое животное/маскот на четырёх "
+        "лапах, дорожный знак, абстрактная типографика без фигуры). При любом "
+        "сомнении — true (защита от аномалий рук срабатывает только когда true — "
+        "лучше применить её лишний раз на не-фигуративной сцене, чем пропустить на "
+        "реальном персонаже)>\","
+    )
+
+
 # type_spec (десятый заход, TEXT_RENDER=image) — англ. описание ВСТРОЕННОЙ типографики
 # по правилам стайлгайда (docs/PRINT_STYLE_GUIDE.md разделы 2-3): стиль леттеринга по
 # mood, размещение относительно фигуры, цвета СЛОВАМИ (не hex — генерация текста не
@@ -449,6 +473,7 @@ _CUTOUT_BODY = (
     "\"title_en\":\"<франшиза/тайтл персонажа ЛАТИНИЦЕЙ (напр. \\\"Bleach\\\"); ПУСТАЯ "
     "строка \\\"\\\", если character_en пустой или франшиза неизвестна>\","
     + _signature_props_schema() +
+    _has_human_figure_schema() +
     _TEXT_MODE_SCHEMA +
     _TEXT_MODE_V3_SCHEMA +
     _TYPE_SPEC_SCHEMA +
@@ -482,6 +507,7 @@ _DIECUT_BODY = (
     "\"title_en\":\"<франшиза/тайтл персонажа ЛАТИНИЦЕЙ (напр. \\\"Bleach\\\"); ПУСТАЯ "
     "строка \\\"\\\", если character_en пустой или франшиза неизвестна>\","
     + _signature_props_schema() +
+    _has_human_figure_schema() +
     _TEXT_MODE_SCHEMA +
     _TEXT_MODE_V3_SCHEMA +
     _TYPE_SPEC_SCHEMA +
@@ -526,7 +552,8 @@ def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
     user = (f"Запрос: {theme}. Дай ровно {n} разных дизайн(ов). JSON-массив из {n} "
             f"объектов {{\"prompt\":..., \"chroma\":..., \"slogan\":..., "
             f"\"slogan_color\":..., \"kana\":..., \"character_en\":..., \"title_en\":..., "
-            f"\"signature_props\":..., \"text_mode\":..., \"text_modes_v3\":..., "
+            f"\"signature_props\":..., \"has_human_figure\":..., \"text_mode\":..., "
+            f"\"text_modes_v3\":..., "
             f"\"quote\":..., \"name_jp\":..., \"mood\":..., \"type_spec\":..., "
             f"\"style_id\":..., \"style_mix\":...}}.")
     system_fn = _SYSTEMS_FN.get(fmt, system_cutout)
@@ -542,8 +569,8 @@ def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
 def make_ideas(theme: str, n: int, fmt: str = "cutout", recent_styles: list = None,
                style_pref: str = None) -> list:
     """N дизайнов: список dict {prompt, chroma, slogan, slogan_color, kana, character_en,
-    title_en, signature_props, text_mode, text_modes_v3, quote, name_jp, mood, type_spec,
-    style_id, style_mix}.
+    title_en, signature_props, has_human_figure, text_mode, text_modes_v3, quote, name_jp,
+    mood, type_spec, style_id, style_mix}.
 
     recent_styles (опционально) — скользящее окно последних использованных style_id
     (см. STYLE_ROTATION_WINDOW) — прокидывается в системный промпт как "не давай эти
@@ -654,6 +681,23 @@ def _parse(text: str) -> list:
         signature_props = re.sub(r"[^A-Za-z0-9 .,'\-]", "",
                                  str(x.get("signature_props") or "")).strip()[:200]
 
+        # has_human_figure: true/false — есть ли в дизайне человекоподобная фигура (см.
+        # _ANATOMY_BLOCK/build_prompt, код-предохранитель против аномалий рук). Дефолт
+        # True при отсутствии поля/невалидном значении — "лучше применить защиту лишний
+        # раз, чем пропустить её" (обратная совместимость: старый JSON БЕЗ этого поля
+        # тоже получает защиту, не теряет её молча — подавляющее большинство дизайнов
+        # конвейера И ЕСТЬ человекоподобные аниме-персонажи). Единственное явное false
+        # (bool ИЛИ строка "false", на случай если Claude вернёт строку вместо JSON-
+        # boolean) отключает блок — не доверяем LLM вслепую в СТОРОНУ отключения защиты,
+        # но доверяем в сторону включения (несимметрично специально, тот же принцип, что
+        # chroma-предохранитель форсит blue, а не наоборот).
+        raw_has_figure = x.get("has_human_figure")
+        has_human_figure = not (
+            raw_has_figure is False
+            or (isinstance(raw_has_figure, str)
+                and raw_has_figure.strip().lower() == "false")
+        )
+
         # text_mode: режим типографики v2 (typography.compose_text). Дефолт "punch" при
         # отсутствии/невалидном значении — ближе всего к прежнему поведению (anton-стиль
         # слогана впритык к фигуре), не "none", чтобы старые дампы без поля не теряли
@@ -737,7 +781,8 @@ def _parse(text: str) -> list:
         out.append({"prompt": prompt, "chroma": chroma,
                     "slogan": slogan, "slogan_color": scolor, "kana": kana,
                     "character_en": character_en, "title_en": title_en,
-                    "signature_props": signature_props, "text_mode": text_mode,
+                    "signature_props": signature_props,
+                    "has_human_figure": has_human_figure, "text_mode": text_mode,
                     "text_modes_v3": text_modes_v3, "quote": quote,
                     "name_jp": name_jp, "mood": mood, "type_spec": type_spec,
                     "style_id": style_id, "style_mix": style_mix})
@@ -825,6 +870,35 @@ def _chroma_bg(color: str) -> str:
 _NO_TEXT_TAIL = (
     "No letters, no words, no typography, no lettering, no watermarks, no signature "
     "anywhere in the artwork."
+)
+
+
+# Анатомия рук — код-предохранитель (жалоба владельца на аномалии рук — 3 руки, 1 рука,
+# без руки — 2026-07-11). Системный промпт уже просит верное число рук/конечностей
+# (_COMMON_RULES_BASE пункт 2б) и просит Claude заполнить design["has_human_figure"], но
+# не полагаемся ТОЛЬКО на добросовестность LLM/nano-banana (тот же принцип, что
+# _chroma_bg/_style_bank_prompt_block/_RING_MEDALLION_PROMPT_SUFFIX) — build_prompt ЯВНО
+# дописывает это жёсткое требование В КОНЕЦ промпта КАЖДОГО дизайна, где
+# design.get("has_human_figure", True) истинно (дефолт True — старые/прямые design-dict
+# БЕЗ этого поля, напр. style_madara.py, ВСЕ про конкретного человекоподобного
+# персонажа, получают защиту по умолчанию, см. build_prompt докстринг ниже). Для НЕ-
+# фигуративных тем (design["has_human_figure"]=False явно) блок не добавляется —
+# требование "ровно две руки" бессмысленно для машины/животного/дорожного знака.
+#
+# Работает ВСЕГДА независимо от config.ANATOMY_QC (бесплатное промпт-усиление) — флаг
+# ANATOMY_QC отключает только ДОПОЛНИТЕЛЬНУЮ платную vision-проверку РЕЗУЛЬТАТА (см.
+# batch_print._verify_anatomy/providers.verify_anatomy_in_image).
+_ANATOMY_BLOCK = (
+    "STRICT HUMAN ANATOMY: the character has EXACTLY TWO arms, no more and no fewer, "
+    "each arm ending in EXACTLY ONE hand with five fingers. Both hands are anatomically "
+    "correct in shape, proportion, and placement. Do NOT draw a third arm, a fourth arm, "
+    "or any extra or duplicated limb anywhere on the body. Do NOT omit, hide as a stump, "
+    "or amputate a hand or arm — both arms and both hands are fully present (a hand may "
+    "be behind the back, in a pocket, gripping something out of view, or off-frame due "
+    "to the pose, but never simply missing where an arm should be). Fingers are distinct "
+    "and correctly shaped — no fused, webbed, extra, missing, or malformed fingers. If a "
+    "hand grips a weapon, prop, or object, the grip is anatomically plausible, with "
+    "fingers wrapped naturally around it."
 )
 
 
@@ -951,6 +1025,15 @@ def build_prompt(design: dict) -> str:
     добросовестность LLM. hybrid_ring_text-стили (кольцо-медальон) получают явный
     запрет рисовать буквы на самом кольце — эту типографику накладывает код позже.
 
+    Анатомия рук (жалоба владельца, 2026-07-11): если design.get("has_human_figure",
+    True) истинно (дефолт True — фигуративный персонаж предполагается, пока явно не
+    сказано обратное, см. art_director._parse) — _ANATOMY_BLOCK дописывается кодом В
+    КОНЕЦ промпта (жёсткое требование "ровно две руки, ровно две кисти, без
+    лишних/отсутствующих конечностей"), тем же способом код-предохранителя, что
+    signature_props/style_block/chroma-хвост. has_human_figure=False (тема БЕЗ
+    человекоподобной фигуры — машина, животное на четырёх лапах, знак) — блок не
+    добавляется вовсе, требование неприменимо.
+
     TEXT_RENDER=image (десятый заход, дефолт): если у дизайна есть type_spec и фраза
     для exact-spelling (quote ИЛИ slogan) — вставляется блок ВСТРОЕННОЙ типографики
     (см. _text_render_block); иначе — старый безусловный запрет букв (_NO_TEXT_TAIL),
@@ -964,6 +1047,9 @@ def build_prompt(design: dict) -> str:
             f"The character's signature weapon/prop must match canon exactly: "
             f"{signature_props}."
         )
+
+    if design.get("has_human_figure", True):
+        parts.append(_ANATOMY_BLOCK)
 
     style_block = _style_bank_prompt_block(design)
     if style_block:

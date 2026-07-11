@@ -548,6 +548,48 @@ def _expected_text_phrases(design: dict) -> list:
     return out
 
 
+# ── vision-QC-гейт анатомии рук (жалоба владельца на 3-рукие/безрукие персонажи, ────
+# 2026-07-11) ─────────────────────────────────────────────────────────────────────
+
+def _verify_anatomy(design: dict, image: Image.Image) -> tuple:
+    """QC-гейт vision-контроля анатомии рук: для ФИГУРАТИВНЫХ персонажей
+    (design.get("has_human_figure", True) — дефолт True, см. art_director._parse/
+    _ANATOMY_BLOCK) дешёвая текстовая модель Gemini (providers.verify_anatomy_in_image,
+    ТА ЖЕ _OCR_MODEL, что OCR-контроль спеллинга) считает руки/кисти ГЛАВНОГО персонажа
+    и оценивает аномалии (лишняя рука, отсутствующая рука, сросшиеся/неверные пальцы).
+
+    Возвращает (ok: bool, info: dict) — info пробрасывается наверх для логирования
+    ({"arms_visible", "anomaly", "reason"} при успешном вызове, {"error": ...} при сбое
+    самого вызова, {} — гейт не применялся вовсе, см. ниже).
+
+    Гейт НЕ применяется (ok=True, info={} — ПУСТОЙ dict, БЕЗ vision-вызова, экономия
+    RPD-квоты) в ДВУХ случаях:
+    - design реально НЕ фигуративен (has_human_figure=False, явно проставлено
+      art_director — животное-мем/машина/дорожный знак и т.п.);
+    - config.ANATOMY_QC=off (владелец выключил гейт вручную — дневная квота Gemini на
+      исходе, см. .env.example).
+
+    Любой сбой САМОГО vision-вызова (нет ключа/сеть/HTTP/битый ответ) -> ok=False (тот
+    же консервативный принцип, что _verify_text: лучше лишний ретрай, чем молча
+    пропустить возможную аномалию) — вызывающий код (render_design) ретраит наравне с
+    OCR/масштабом, а при исчерпании попыток принимает лучшую как есть (best-effort, см.
+    докстринг render_design)."""
+    if not design.get("has_human_figure", True):
+        return True, {}
+    if not config.ANATOMY_QC:
+        return True, {}
+    try:
+        info = providers.verify_anatomy_in_image(image)
+    except Exception as e:  # noqa: BLE001
+        print(f"  !! vision-QC анатомии упал: {e}", flush=True)
+        return False, {"error": str(e)}
+    ok = not info.get("anomaly")
+    if not ok:
+        print(f"  vision-QC анатомии: аномалия — arms_visible="
+              f"{info.get('arms_visible')!r}, reason={info.get('reason')!r}", flush=True)
+    return ok, info
+
+
 # ── Генерация одного дизайна (переиспользуемое ядро пайплайна) ──────────────────
 
 def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2,
@@ -581,8 +623,9 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     Возвращает {"ok": bool, "attempts": int, "coverage": float, "error": str|None,
     "raw": path|None, "diecut": path|None, "ongreen": path|None, "print_png":
     path|None, "design_json": path, "text_fallback": bool, "single_text_no_overlay":
-    bool, "print_fallback": bool} — attempts нужен вызывающему коду для точного учёта
-    стоимости (QC-ретраи И OCR-ретраи спеллинга считаются в один общий счётчик).
+    bool, "print_fallback": bool, "anatomy_warning": bool} — attempts нужен вызывающему
+    коду для точного учёта стоимости (QC-ретраи И OCR-ретраи спеллинга считаются в один
+    общий счётчик).
     text_fallback=True — TEXT_RENDER=image не сошёлся по OCR-контролю спеллинга за
     все попытки основного цикла, откат на fallback-генерацию БЕЗ текст-блока (см.
     раздел «Текст в генерации» в README). single_text_no_overlay=True (пятнадцатый
@@ -597,6 +640,14 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     ошибкой дизайна, result["ok"] может быть True с print_png=None. print_fallback=
     True — realesrgan был недоступен/упал/таймаутировал, print_png получен ЦЕЛИКОМ
     через Lanczos с исходника (хуже качеством, но печатный размер гарантирован).
+    anatomy_warning=True (жалоба владельца, 2026-07-11) — vision-QC-гейт анатомии
+    (_verify_anatomy, только для design["has_human_figure"] и только при
+    config.ANATOMY_QC=on) НЕ подтвердил чистую анатомию НИ НА ОДНОЙ попытке основного
+    цикла — best-effort, дизайн ВСЁ РАВНО выпускается (не блокируем, та же логика, что
+    border coverage < 0.90/фигура мелкая на всех попытках), просто честное
+    предупреждение в результат и в лог. anatomy_warning=False — либо гейт не
+    применялся вовсе (не фигуративный дизайн/ANATOMY_QC=off), либо хотя бы одна
+    попытка подтвердилась как анатомически чистая.
 
     green_only (шестнадцатый+1 заход, заказ владельца для мега-партии D:\\800): на
     успешный дизайн сохраняется РОВНО ОДИН файл <tag>.png — исходная генерация
@@ -613,7 +664,8 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     синий хромакей" (art_director._chroma_bg) работает КАК РАНЬШЕ и здесь не
     трогается — оно определяет, каким хромакеем ИДЁТ генерация, а не что делает
     green_only с уже сгенерённым файлом. ВСЕ QC-гейты цикла генерации (цвет рамки
-    против эталона хромакея, масштаб фигуры, OCR-контроль текста, text-fallback)
+    против эталона хромакея, масштаб фигуры, OCR-контроль текста, vision-QC анатомии
+    рук, text-fallback)
     работают КАК ЕСТЬ — они от вырезки не зависят. Нюанс ring_medallion: кольцевой
     текст в этом режиме НЕ наносится (он накладывался кодом ПОСЛЕ вырезки) — кольцо
     остаётся пустым, фраза сохранена в design.json-паспорте для дообработки. Путь к
@@ -640,7 +692,8 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
               "raw": None, "diecut": None, "ongreen": None, "print_png": None,
               "green": None,
               "design_json": str(design_json_path), "text_fallback": False,
-              "single_text_no_overlay": False, "print_fallback": False}
+              "single_text_no_overlay": False, "print_fallback": False,
+              "anatomy_warning": False}
 
     # Медальон-гибрид (typography_v3.ring_text): design реально просит стиль с
     # hybrid_ring_text=true — ЛИБО банковский путь (docs/STYLE_BANK.json, "09_ring_
@@ -710,6 +763,17 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     best_img_ocr_ok, best_cov_ocr_ok = None, -1.0
     best_img_ocr_figure_ok, best_cov_ocr_figure_ok = None, -1.0
     best_img_figure_ok, best_cov_figure_ok = None, -1.0
+    # vision-QC анатомии рук (см. _verify_anatomy) — НЕ отдельная тир-лестница, а
+    # ДОПОЛНИТЕЛЬНОЕ AND-условие, слитое С СУЩЕСТВУЮЩИМ гейтом масштаба фигуры
+    # (best_img_ocr_figure_ok/best_img_figure_ok ниже теперь требуют "фигура нормального
+    # размера И анатомия чистая" одновременно) — лучшая попытка должна быть физически
+    # корректной по ОБОИМ критериям сразу, если такая попытка вообще нашлась. Отдельно
+    # (для честного best-effort предупреждения, не влияет на выбор лучшей попытки)
+    # отслеживаем: был ли гейт вообще применим (anatomy_gate_applicable, т.е.
+    # design реально фигуративен И config.ANATOMY_QC=on) и была ли ХОТЬ ОДНА попытка
+    # анатомически чистой (any_attempt_anatomy_ok).
+    anatomy_gate_applicable = False
+    any_attempt_anatomy_ok = False
     attempts_used = 0
     images_received = 0  # попытки, где провайдер РЕАЛЬНО отдал картинку (только они
                          # списываются с баланса — 429/500 без изображения бесплатны),
@@ -747,12 +811,33 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         print(f"{p} масштаб фигуры: высота bbox={figure_frac:.2f} кадра "
               f"({'OK' if figure_ok else 'фигура слишком мелкая'}, порог "
               f"{config.FIGURE_MIN_FRAC})", flush=True)
-        if ocr_ok and figure_ok and cov > best_cov_ocr_figure_ok:
+
+        # vision-QC анатомии рук (жалоба владельца, см. _verify_anatomy докстринг) —
+        # ТОЛЬКО фигуративные персонажи (has_human_figure), ТОЛЬКО если config.ANATOMY_QC
+        # включён; иначе ok=True без вызова (info={} — печатать нечего, гейт не
+        # применялся). Отдельный дешёвый текстовый vision-вызов, НЕ платный image-вызов
+        # — не увеличивает attempts_used, наравне с OCR-контролем спеллинга выше.
+        anatomy_ok, anatomy_info = _verify_anatomy(design, attempt_img)
+        if anatomy_info:
+            anatomy_gate_applicable = True
+            print(f"{p} vision-QC анатомии: {'OK' if anatomy_ok else 'аномалия'} "
+                  f"(arms_visible={anatomy_info.get('arms_visible')!r}, "
+                  f"reason={anatomy_info.get('reason', '')!r})", flush=True)
+        if anatomy_ok:
+            any_attempt_anatomy_ok = True
+
+        # figure_ok и anatomy_ok идут В ОДНОЙ связке ("физическая корректность фигуры")
+        # для целей выбора ЛУЧШЕЙ попытки — лучшая попытка должна одновременно иметь
+        # адекватный масштаб И чистую анатомию, если хоть одна попытка даёт оба сразу
+        # (anatomy_ok тривиально True, когда гейт неприменим — фигуративность/флаг —
+        # тогда это условие полностью эквивалентно старому "просто figure_ok").
+        figure_anatomy_ok = figure_ok and anatomy_ok
+        if ocr_ok and figure_anatomy_ok and cov > best_cov_ocr_figure_ok:
             best_img_ocr_figure_ok, best_cov_ocr_figure_ok = attempt_img, cov
-        if figure_ok and cov > best_cov_figure_ok:
+        if figure_anatomy_ok and cov > best_cov_figure_ok:
             best_img_figure_ok, best_cov_figure_ok = attempt_img, cov
 
-        if cov >= 0.90 and ocr_ok and figure_ok:
+        if cov >= 0.90 and ocr_ok and figure_ok and anatomy_ok:
             break
         if attempt < timeout_retries:
             reason = []
@@ -763,6 +848,9 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             if not figure_ok:
                 reason.append(f"фигура слишком мелкая ({figure_frac:.2f} < "
                               f"{config.FIGURE_MIN_FRAC})")
+            if not anatomy_ok:
+                reason.append(f"аномалия анатомии рук "
+                              f"({anatomy_info.get('reason') or anatomy_info.get('error') or 'см. лог'})")
             print(f"{p} {' и '.join(reason)} -> retry", flush=True)
 
     result["attempts"] = attempts_used
@@ -794,9 +882,11 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         # блокируем (тот же принцип, что и коммент border coverage < 0.90 ниже).
         raw_img, best_cov = best_img_ocr_ok, best_cov_ocr_ok
         _, worst_figure_frac = _figure_fills_frame(raw_img, chroma=design["chroma"])
-        print(f"{p} !! warning: фигура мелкая на ВСЕХ попытках (высота bbox="
-              f"{worst_figure_frac:.2f} < {config.FIGURE_MIN_FRAC}) — используем "
-              f"лучшую по OCR/coverage как есть", flush=True)
+        print(f"{p} !! warning: масштаб фигуры и/или анатомия рук не сошлись ни на "
+              f"одной попытке, прошедшей OCR (высота bbox={worst_figure_frac:.2f} < "
+              f"{config.FIGURE_MIN_FRAC} и/или anatomy_warning, см. отдельный лог "
+              f"vision-QC анатомии выше) — используем лучшую по OCR/coverage как есть",
+              flush=True)
     elif expected_phrases:
         # НИ ОДНА попытка не прошла OCR за все timeout_retries+1 генераций — честный
         # откат: до _FALLBACK_NO_TEXT_MAX_ATTEMPTS ДОПОЛНИТЕЛЬНЫХ генераций БЕЗ текст-
@@ -919,14 +1009,17 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             single_text_no_overlay = True
     elif best_img_figure_ok is not None:
         # TEXT_RENDER=code (или design без type_spec) — OCR не участвует, но масштаб
-        # фигуры проверяется всегда: используем лучшую по coverage СРЕДИ попыток,
-        # прошедших QC-гейт масштаба, если хоть одна нашлась.
+        # фигуры И анатомия рук проверяются всегда: используем лучшую по coverage
+        # СРЕДИ попыток, прошедших ОБА QC-гейта (масштаб + анатомия), если хоть одна
+        # нашлась (см. figure_anatomy_ok в цикле выше).
         raw_img, best_cov = best_img_figure_ok, best_cov_figure_ok
     else:
         _, worst_figure_frac = _figure_fills_frame(best_img, chroma=design["chroma"])
-        print(f"{p} !! warning: фигура мелкая на ВСЕХ попытках (высота bbox="
-              f"{worst_figure_frac:.2f} < {config.FIGURE_MIN_FRAC}) — используем "
-              f"лучшую по coverage как есть", flush=True)
+        print(f"{p} !! warning: масштаб фигуры и/или анатомия рук не сошлись ни на "
+              f"одной попытке (высота bbox={worst_figure_frac:.2f} < "
+              f"{config.FIGURE_MIN_FRAC} и/или anatomy_warning, см. отдельный лог "
+              f"vision-QC анатомии выше) — используем лучшую по coverage как есть",
+              flush=True)
         raw_img = best_img
 
     result["attempts"] = attempts_used
@@ -934,6 +1027,17 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     result["coverage"] = best_cov
     result["text_fallback"] = text_fallback
     result["single_text_no_overlay"] = single_text_no_overlay
+
+    # anatomy_warning: гейт реально был применим (фигуративный дизайн И ANATOMY_QC=on)
+    # НА ХОТЬ ОДНОЙ попытке, но НИ ОДНА попытка не подтвердилась как анатомически чистая
+    # — best-effort (не блокируем выпуск дизайна, та же логика, что border coverage <
+    # 0.90 ниже), только честное предупреждение в result и в лог.
+    result["anatomy_warning"] = anatomy_gate_applicable and not any_attempt_anatomy_ok
+    if result["anatomy_warning"]:
+        print(f"{p} !! warning: vision-QC анатомии не подтвердил чистую анатомию НИ "
+              f"НА ОДНОЙ попытке ({attempts_used} попыт.) — используем лучшую попытку "
+              f"как есть (best-effort, не блокируем выпуск дизайна)", flush=True)
+
     if best_cov < 0.90:
         print(f"{p} !! warning: лучшая попытка coverage={best_cov:.2f} < 0.90, "
               f"используем её (seed={best_seed})", flush=True)

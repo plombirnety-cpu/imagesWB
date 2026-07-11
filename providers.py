@@ -22,11 +22,20 @@ verify_text_in_image(image, prompt=...) -> str — ОТДЕЛЬНАЯ дешёв
 (ДЕШЁВАЯ текстовая модель gemini-2.5-flash, НЕ image-модель): транскрипция всего
 видимого текста на картинке, используется batch_print._verify_text для OCR-контроля
 спеллинга при TEXT_RENDER=image (см. GOTCHAS/README раздел «Текст в генерации»).
+
+verify_anatomy_in_image(image, prompt=...) -> dict — ЕЩЁ ОДНА дешёвая точка входа
+(ТА ЖЕ _OCR_MODEL, НЕ image-модель): считает руки/кисти ГЛАВНОГО персонажа и
+структурировано отдаёт {"arms_visible": int|None, "anomaly": bool, "reason": str} —
+используется batch_print._verify_anatomy для vision-QC-гейта анатомии рук (жалоба
+владельца на 3-рукие/безрукие персонажи, 2026-07-11), гейт за config.ANATOMY_QC.
 """
 import base64
 import io
+import json
 import logging
+import os
 import random
+import re
 import time
 from urllib.parse import quote
 
@@ -171,7 +180,20 @@ def generate_image(prompt: str, seed: int = None, model: str = None,
 
 # Дешёвая ТЕКСТОВАЯ модель Gemini (не image-модель) — только транскрипция, не
 # генерация картинки, стоимость на порядки меньше image-вызова.
-_OCR_MODEL = "gemini-2.5-flash"
+#
+# РЕГРЕСС (2026-07-09, живой смоук прод-job 832a4d13, "Зоро..."): жёстко
+# зашитая "gemini-2.5-flash" стала отдавать HTTP 404 "This model
+# models/gemini-2.5-flash is no longer available" — Google ротирует модели
+# без предупреждения в коде. КАЖДЫЙ вызов OCR-контроля (обязателен при
+# TEXT_RENDER=image) падал -> 3 ретрая исчерпывались -> откат на text_fallback
+# (доп. генерация БЕЗ встроенного текста) на 100% партий с текстом, тихая
+# деградация качества (не падение батча — потому и не было замечено раньше).
+# Взято "gemini-flash-latest" — алиас, который Google сам держит указывающим
+# на актуальную рекомендованную flash-модель (тот же принцип, что убирает
+# целый класс будущих 404 от ротации конкретных версионных имён). Оставлен
+# env-override (GEMINI_OCR_MODEL) на случай если alias тоже когда-то подведёт
+# и нужно быстро поставить конкретную версию без правки кода.
+_OCR_MODEL = os.getenv("GEMINI_OCR_MODEL", "gemini-flash-latest")
 
 _OCR_PROMPT = (
     "Transcribe ALL text visible in this image, exactly as written. "
@@ -217,3 +239,94 @@ def verify_text_in_image(image: Image.Image, prompt: str = _OCR_PROMPT) -> str:
         if text:
             return text
     raise RuntimeError(f"OCR-контроль: ответ без текста: {str(data)[:300]}")
+
+
+# ── vision-QC-гейт анатомии рук (жалоба владельца на 3-рукие/безрукие персонажи, ────
+# 2026-07-11) ─────────────────────────────────────────────────────────────────────
+
+# Тот же ВОПРОС к ТОЙ ЖЕ дешёвой текстовой модели Gemini (_OCR_MODEL выше, НЕ отдельная
+# платная image-модель), что OCR-контроль спеллинга, но другой prompt: считает руки/
+# кисти ГЛАВНОГО персонажа и явно называет паттерны аномалий (лишняя/третья рука,
+# отсутствующая/ампутированная рука, сросшиеся/неверное число пальцев). Модель отвечает
+# КОМПАКТНЫМ JSON на одной строке, verify_anatomy_in_image разбирает его и отдаёт
+# структурировано вызывающему коду (batch_print._verify_anatomy).
+_ANATOMY_PROMPT = (
+    "Look ONLY at the main human or human-like character in this image (ignore any "
+    "background ornament, weapon, or decorative ring/border). Count how many arms and "
+    "how many hands are visible or clearly implied by the pose on that character. "
+    "Reply with STRICT compact JSON on a single line, no markdown, no code fences, no "
+    "extra commentary before or after it: "
+    "{\"arms_visible\": <integer, how many arms you can count>, "
+    "\"anomaly\": <true or false>, "
+    "\"reason\": \"<short reason in English, empty string if no anomaly>\"}. "
+    "Set \"anomaly\" to true ONLY for a genuine anatomical defect: a third or extra arm, "
+    "a duplicated limb, a hand or arm that is missing/amputated where one clearly should "
+    "be, or a fused/malformed hand with the wrong number of fingers. A hand that is "
+    "simply hidden behind the back, in a pocket, gripping a weapon, or out of frame "
+    "because of the pose is NOT an anomaly — only flag a REAL drawing defect."
+)
+
+
+def verify_anatomy_in_image(image: Image.Image, prompt: str = _ANATOMY_PROMPT) -> dict:
+    """Vision-QC анатомии рук: ОДИН доп. вызов _OCR_MODEL (та же дешёвая текстовая
+    модель Gemini, что verify_text_in_image, НЕ отдельная платная image-модель) с
+    вопросом посчитать руки/кисти ГЛАВНОГО персонажа и оценить аномалии. Используется
+    batch_print._verify_anatomy — гейт применяется ТОЛЬКО к фигуративным персонажам
+    (design["has_human_figure"]) и только при config.ANATOMY_QC=on (см. .env.example —
+    каждый вызов = +1 запрос к дневной RPD-квоте Gemini, отдельной от квоты OCR-
+    контроля спеллинга).
+
+    Возвращает {"arms_visible": int|None, "anomaly": bool, "reason": str} — разобранный
+    JSON-ответ модели. "arms_visible" — None, если модель не назвала распознаваемое
+    целое число (не блокирует саму проверку — "anomaly" остаётся главным сигналом).
+
+    Любой сбой (нет ключа, сеть, HTTP-ошибка, ответ без валидного JSON) -> RuntimeError
+    — ОДНА попытка (ретраи и трактовка сбоя как "не подтверждено" — забота вызывающего
+    кода batch_print._verify_anatomy, тот же принцип, что verify_text_in_image)."""
+    if not config.GEMINI_API_KEY:
+        raise RuntimeError(
+            "GEMINI_API_KEY не задан в .env — нужен для vision-QC-контроля анатомии")
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{_OCR_MODEL}:generateContent")
+    headers = {"Content-Type": "application/json", "x-goog-api-key": config.GEMINI_API_KEY}
+    buf = io.BytesIO()
+    image.convert("RGB").save(buf, format="JPEG", quality=90)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    body = {
+        "contents": [{"parts": [
+            {"inline_data": {"mime_type": "image/jpeg", "data": b64}},
+            {"text": prompt},
+        ]}],
+    }
+    try:
+        r = requests.post(url, headers=headers, json=body, timeout=60)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"vision-QC анатомии: сеть упала: {e}") from e
+    if r.status_code != 200:
+        raise RuntimeError(f"vision-QC анатомии: HTTP {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    raw_text = ""
+    for cand in data.get("candidates", []):
+        raw_text = "".join(
+            p.get("text", "") for p in cand.get("content", {}).get("parts", [])
+        ).strip()
+        if raw_text:
+            break
+    if not raw_text:
+        raise RuntimeError(f"vision-QC анатомии: ответ без текста: {str(data)[:300]}")
+    m = re.search(r"\{.*\}", raw_text, re.S)
+    if not m:
+        raise RuntimeError(f"vision-QC анатомии: ответ без JSON: {raw_text[:300]}")
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(
+            f"vision-QC анатомии: битый JSON в ответе: {raw_text[:300]}") from e
+    arms_visible = parsed.get("arms_visible")
+    try:
+        arms_visible = int(arms_visible) if arms_visible is not None else None
+    except (TypeError, ValueError):
+        arms_visible = None
+    anomaly = bool(parsed.get("anomaly"))
+    reason = str(parsed.get("reason") or "").strip()[:300]
+    return {"arms_visible": arms_visible, "anomaly": anomaly, "reason": reason}
