@@ -10,6 +10,15 @@ docstring make_ideas) — часть тем плана (taro_zodiac/часть p
 форсирует конкретный style_id из docs/STYLE_BANK.json, остальные (style_pref=null)
 идут через обычную авторотацию банка (RecentStyles, как в daily_prints.py).
 
+meme_ref (жалоба владельца 2026-07-11 — интернет-мемы сова на скакалке/кот со
+слюной/Backrooms генерятся НЕ похожими на оригинал, см. meme_ref.py): поле
+"meme_ref" записи плана (slug -> data/meme_refs/<slug>.png, кладёт владелец
+вручную) прокидывается в design["meme_ref"] ПОСЛЕ make_ideas (_process_one) —
+batch_print.render_design использует его как ПРИОРИТЕТНЫЙ референс-картинку
+оригинала мема (приоритетнее character_ref). trends_plan.json — основной
+потребитель этого поля (owl_*/kolyaka_*/drooling_cat_*/backrooms_*), но работает
+для любого плана, включая mega_plan_800.json, если запись содержит "meme_ref".
+
 РЕЖИМ green_only — ДЕФОЛТ (заказ владельца, докатка после пополнения кредитов):
 на успешный принт в тематической папке остаётся РОВНО ОДИН файл
 <filename_base>.png — исходная генерация СОХРАНЯЕТСЯ КАК ЕСТЬ, вообще БЕЗ
@@ -216,6 +225,18 @@ def _process_one(rec: dict, outroot: Path, recent_styles: "art_director.RecentSt
         journal_rec["error"] = f"арт-директор: {e}"
         print(f"{tag_p} !! арт-директор упал: {e}", flush=True)
         return journal_rec
+
+    # meme_ref (референс-картинка ОРИГИНАЛА интернет-мема, жалоба владельца
+    # 2026-07-11 — см. meme_ref.py/batch_print._MEME_REFERENCE_PREFIX) —
+    # прокидывается ИЗ ЗАПИСИ ПЛАНА (trends_plan.json) НАПРЯМУЮ в design ПОСЛЕ
+    # art_director.make_ideas: Claude про meme_ref ничего не знает (это чисто
+    # владельческая привязка slug->файл data/meme_refs/<slug>.png, не часть
+    # художественной идеи, которую формирует арт-директор). Пусто/отсутствует —
+    # design["meme_ref"] просто не выставляется, batch_print.render_design
+    # работает как раньше (только character_ref, если character_en задан).
+    meme_ref_slug = str(rec.get("meme_ref") or "").strip()
+    if meme_ref_slug:
+        design["meme_ref"] = meme_ref_slug
 
     # green_only: паспорт design.json уходит в зеркальную _meta (тематическая папка
     # остаётся с одной картинкой на принт); full_set — рядом с файлами, как раньше.

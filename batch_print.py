@@ -41,6 +41,7 @@ import art_director            # noqa: E402
 import character_ref           # noqa: E402
 import chroma_remove           # noqa: E402
 import config                  # noqa: E402
+import meme_ref                # noqa: E402
 import providers               # noqa: E402
 import typography              # noqa: E402
 import typography_v3           # noqa: E402
@@ -56,6 +57,21 @@ _REFERENCE_PREFIX = (
     "hairstyle, same iconic outfit and accessories, and the character's signature "
     "weapon exactly as in canon. Redraw this character in a NEW pose and composition "
     "as described below. Do not copy the reference pose or background. "
+)
+
+# Блок промпта, форсирующий рисование ПО РЕФЕРЕНСУ ОРИГИНАЛА МЕМА (жалоба владельца
+# 2026-07-11 — интернет-мемы, см. meme_ref.get_reference) — добавляется СПЕРЕДИ
+# художественного промпта, когда для темы нашёлся файл data/meme_refs/<slug>.png.
+# ПРИОРИТЕТНЕЕ character_ref (см. выбор reference ниже в render_design) — meme_ref
+# указывает на ТОЧНУЮ картинку оригинала, а не на общий канон-портрет персонажа,
+# формулировка сама требует превосходство референса над текстовым описанием.
+_MEME_REFERENCE_PREFIX = (
+    "Reproduce the meme subject EXACTLY as shown in the reference image — identical "
+    "character/creature design, same colours, same proportions, same art style; this "
+    "is a known viral meme, stay faithful to the reference, do NOT invent your own "
+    "version. The reference image takes PRIORITY over the text description below "
+    "wherever they might disagree — reinterpret the scene/composition/style requested "
+    "in the text, but keep the meme subject itself identical to the reference. "
 )
 
 # Медальон-гибрид (typography_v3.ring_text, четвёртая задача) — ДВА независимых
@@ -605,7 +621,20 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     character_en/title_en/signature_props/text_mode). Если character_en непусто —
     перед генерацией достаётся каноничный референс-портрет персонажа
     (character_ref.get_reference) и рисование идёт ПО РЕФЕРЕНСУ (см.
-    providers.generate_image(reference=...)), иначе как раньше. Если design реально
+    providers.generate_image(reference=...)), иначе как раньше.
+
+    design["meme_ref"] (опционально, жалоба владельца 2026-07-11 — интернет-мемы
+    сова на скакалке/кот со слюной/Backrooms генерятся НЕ похожими на оригинал) —
+    slug РУЧНОГО референса data/meme_refs/<slug>.png (см. meme_ref.py): если
+    задан И файл существует — ПРИОРИТЕТНЕЕ character_en (мемы почти всегда без
+    character_en, но если оба заданы — meme_ref побеждает, т.к. указывает на
+    ТОЧНУЮ картинку оригинала мема). Не Claude-поле — art_director про meme_ref
+    ничего не знает, это владельческая привязка slug->файл, прокидывается ИЗВНЕ
+    (mega_batch_run._process_one читает его из записи плана trends_plan.json и
+    кладёт в design ПОСЛЕ art_director.make_ideas). Если slug задан, но файла нет
+    (владелец ещё не положил референс) — НЕ падает, генерация идёт по текстовому
+    описанию, КАК СЕЙЧАС (обычный character_ref-путь, если character_en тоже
+    задан, иначе просто по тексту), с предупреждением в лог. Если design реально
     просит стиль с hybrid_ring_text=true (docs/STYLE_BANK.json "09_ring_medallion",
     через design["style_id"]/["style_mix"], см. _is_hybrid_ring_style) — медальон-
     гибрид: art_director.build_prompt сам просит ПУСТОЕ декоративное кольцо (без
@@ -717,14 +746,41 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         prompt = prompt + _RING_MEDALLION_PROMPT_SUFFIX
     seed = random.randint(0, 2**31 - 1)
 
-    # Рисование ПО РЕФЕРЕНСУ: если арт-директор распознал конкретного вымышленного
-    # персонажа (character_en непусто), достаём каноничный портрет (Jikan/AniList,
-    # см. character_ref.py) и подмешиваем его в запрос — иначе nano-banana рисует
-    # персонажа «по мотивам» (лицо/канон-приметы приблизительные). Любой сбой поиска
-    # референса -> None, генерация идёт по чистому тексту, как раньше (не падаем).
+    # Рисование ПО РЕФЕРЕНСУ — ДВА независимых источника, ОБА кладут результат в
+    # один и тот же `reference` (PIL.Image) и уходят в generate_image ТЕМ ЖЕ
+    # механизмом (providers.generate_image(reference=...), inline_data ПЕРЕД
+    # текстом) — ничего нового в providers.py не добавлено:
+    #
+    # 1) meme_ref (design["meme_ref"], жалоба владельца 2026-07-11 — интернет-мемы
+    #    сова на скакалке/кот со слюной/Backrooms генерятся НЕ похожими на
+    #    оригинал) — РУЧНОЙ файл data/meme_refs/<slug>.png (см. meme_ref.py).
+    #    ПРИОРИТЕТНЕЕ character_ref: указывает на ТОЧНУЮ картинку оригинала мема,
+    #    а не на общий канон-портрет вымышленного персонажа. Проверяется ПЕРВЫМ.
+    # 2) character_ref (design["character_en"], см. докстринг выше) — только если
+    #    meme_ref не задан ВООБЩЕ, либо задан, но файла нет/он битый (graceful:
+    #    "генерация по описанию как сейчас" — тот же путь, что был бы БЕЗ этой
+    #    задачи вовсе, meme_ref.get_reference уже напечатала своё предупреждение).
+    #
+    # Любой сбой поиска референса (любого из двух источников) -> None, генерация
+    # идёт по чистому тексту, как раньше (не падаем).
     reference = None
+    meme_ref_slug = str(design.get("meme_ref") or "").strip()
+    if meme_ref_slug:
+        try:
+            reference = meme_ref.get_reference(meme_ref_slug)
+        except Exception as e:  # noqa: BLE001 — поиск референса не должен ронять генерацию
+            print(f"{p} !! meme_ref упал для {meme_ref_slug!r}: {e} — без референса мема",
+                  flush=True)
+            reference = None
+        if reference is not None:
+            prompt = _MEME_REFERENCE_PREFIX + prompt
+            print(f"{p} meme_ref найден: {meme_ref_slug!r} — рисуем ПО РЕФЕРЕНСУ мема",
+                  flush=True)
+        # reference is None здесь (файла нет/битый/недопустимый slug) — падаем
+        # НИЖЕ на обычный character_ref-путь, как будто meme_ref не было вовсе.
+
     character_en = str(design.get("character_en") or "").strip()
-    if character_en:
+    if reference is None and character_en:
         try:
             reference = character_ref.get_reference(character_en, design.get("title_en", ""))
         except Exception as e:  # noqa: BLE001 — поиск референса не должен ронять генерацию
