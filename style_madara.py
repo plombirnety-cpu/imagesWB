@@ -98,7 +98,8 @@ def _mood_for_recipe(art_style: str, typography: str) -> str:
     return "duotone_quote"
 
 
-def recipe_to_design(recipe: dict, character_en: str, title_en: str) -> dict:
+def recipe_to_design(recipe: dict, character_en: str, title_en: str,
+                     subject_default: str = "An adult man") -> dict:
     """docs/*_RECIPES.json[i] -> design-dict формата art_director/batch_print
     (см. docstring модуля). Единственный источник текста type_spec/quote/slogan —
     typography+text_content самого рецепта, ничего не придумываем поверх.
@@ -106,9 +107,16 @@ def recipe_to_design(recipe: dict, character_en: str, title_en: str) -> dict:
     character_en/title_en: рецепт может задать их сам полями "character_en"/
     "title_en" (переопределяет для конкретного персонажа внутри смешанного набора
     рецептов); если рецепт их не задаёт — берутся значения по умолчанию, переданные
-    вызывающим кодом (--character/--title CLI или DEFAULT_*)."""
+    вызывающим кодом (--character/--title CLI или DEFAULT_*).
+
+    subject_default: как назвать фигуру во ВВОДНОМ предложении промпта. Раньше было
+    жёстко "An adult man" (мадаровский прогон), что ломало генерацию персонажей-женщин
+    (референс женский, а текст говорил "man" → конфликт лица/фигуры). Теперь берётся из
+    рецепта (поле "subject") или из --subject CLI; дефолт сохраняет старое поведение
+    для мадаровских/каминовских наборов, где все персонажи — мужчины."""
     character_en = str(recipe.get("character_en") or character_en or "").strip()
     title_en = str(recipe.get("title_en") or title_en or "").strip()
+    subject = str(recipe.get("subject") or subject_default or "An adult person").strip()
 
     text_content = recipe.get("text_content", {}) or {}
     main = str(text_content.get("main") or "").strip()
@@ -122,19 +130,31 @@ def recipe_to_design(recipe: dict, character_en: str, title_en: str) -> dict:
     chroma = str(recipe.get("chroma") or "green").strip().lower()
     chroma = chroma if chroma in ("green", "blue") else "green"
 
+    # framing — КРОП/масштаб фигуры. Дефолт = полный рост (обратная совместимость с
+    # мадаровскими рецептами). Рецепт может задать бюст-портрет, макро-фрагмент,
+    # фигуру-в-сцене и т.п. — так варьируется САМ ТИП принта, а не только рамка/техника
+    # (правка владельца 12.07: набор не должен быть 10 однотипных «фигур в рамке»).
+    framing = str(recipe.get("framing") or "").strip() or (
+        "The full figure is shown head-to-toe in full length inside the frame."
+    )
+    # render — базовая манера рендера. Дефолт = аниме cel-shading (как раньше). Рецепт
+    # может задать полу-реализм, акварель, дуотон-постер, минимал line-art и т.п.
+    render = str(recipe.get("render") or "").strip() or (
+        "Rich saturated anime cel-shading colors with bold clean ink outlines, no pastel softness."
+    )
+
     # ── КИНЕМАТОГРАФИЧНАЯ ПРОЗА сцены (без типографики — та идёт в type_spec, как в
-    # обычном пайплайне art_director.build_prompt собирает их раздельно). Прямым
-    # текстом называем пол (мужчина) и канон-приметы согласно требованиям
-    # art_director._COMMON_RULES_BASE (2-3 приметы, точный термин оружия).
+    # обычном пайплайне art_director.build_prompt собирает их раздельно). framing/render
+    # параметризованы (см. выше), но хромакей-поля по краям обязательны ВСЕГДА — иначе
+    # падает QC-гейт границ (_border_key) и вырезка фона.
     who = f"{character_en} from {title_en}" if title_en else character_en
     prompt = (
-        f"An adult man, {who}, is shown as follows: {moment} "
-        f"Rendered in {art_style}. Palette: {palette}, rich saturated anime cel-shading "
-        f"colors with bold clean ink outlines, no pastel softness. The full figure is "
-        f"completely unclipped inside the frame, with generous even chroma-key margin "
-        f"on all four sides — nothing touching the frame edge. There is only one "
-        f"subject in the frame — no companions, no background figures, no secondary "
-        f"transformations beside him."
+        f"{subject}, {who}, is shown as follows: {moment} "
+        f"Rendered in {art_style}. Palette: {palette}. {render} {framing} "
+        f"A generous even chroma-key margin is always kept on all four sides — the "
+        f"subject and every graphic element stay clear of the frame edge so the flat "
+        f"chroma background stays clean for cutout. There is only one subject in the "
+        f"frame — no companions, no background figures, no duplicate or alternate poses."
     )
 
     # signature_props — только для рецептов, где gunbai war fan реально часть сцены
@@ -225,9 +245,10 @@ def recipe_to_design(recipe: dict, character_en: str, title_en: str) -> dict:
     }
 
 
-def run_recipe(recipe: dict, outdir: Path, character_en: str, title_en: str) -> dict:
+def run_recipe(recipe: dict, outdir: Path, character_en: str, title_en: str,
+               subject_default: str = "An adult man") -> dict:
     tag = recipe.get("id", "unknown")
-    design = recipe_to_design(recipe, character_en, title_en)
+    design = recipe_to_design(recipe, character_en, title_en, subject_default)
     t0 = time.time()
     try:
         res = batch_print.render_design(design, tag, outdir, timeout_retries=2,
@@ -265,6 +286,11 @@ def main() -> None:
                      help="title_en (франшиза) для character_ref, если рецепт сам его "
                           "не задаёт полем \"title_en\" — ДЕФОЛТ ПУСТОЙ, аналогично "
                           "--character")
+    ap.add_argument("--subject", default="An adult man",
+                     help="как назвать фигуру во вводном предложении промпта, если рецепт "
+                          "не задаёт своё поле \"subject\" (дефолт \"An adult man\" — для "
+                          "мадаровских/каминовских мужских наборов; для женских персонажей "
+                          "передавать явно, напр. \"A young-looking female elf, Frieren\")")
     ap.add_argument("--workers", type=int, default=2,
                      help="сколько рецептов генерировать параллельно (дефолт 2 — не "
                           "ловить лимиты API)")
@@ -307,10 +333,10 @@ def main() -> None:
     results = []
     if args.workers <= 1:
         for r in recipes:
-            results.append(run_recipe(r, outdir, args.character, args.title))
+            results.append(run_recipe(r, outdir, args.character, args.title, args.subject))
     else:
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            futs = {pool.submit(run_recipe, r, outdir, args.character, args.title): r
+            futs = {pool.submit(run_recipe, r, outdir, args.character, args.title, args.subject): r
                     for r in recipes}
             for fut in as_completed(futs):
                 results.append(fut.result())
