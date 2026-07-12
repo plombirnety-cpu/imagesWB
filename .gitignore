@@ -6,3 +6,5 @@ __pycache__/
 *.pyc
 .DS_Store
 tools/
+trends_queue.jsonl
+trends_queue.done.jsonl
