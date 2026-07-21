@@ -381,6 +381,31 @@ def test_system_diecut_threads_style_pref_through():
     assert 'style_id ДОЛЖЕН быть ровно "09_ring_medallion"' in sys_prompt
 
 
+def test_magazine_cover_quality_hint_is_style_specific():
+    hint = ad._magazine_cover_quality_hint("34_anime_magazine_cover")
+    assert "ВЕРТИКАЛЬ 2:3" in hint
+    assert "70-85%" in hint
+    assert "character_ref" in hint
+    assert "green/blue chroma" in hint
+    assert ad._magazine_cover_quality_hint("19_tarot") == ""
+
+
+def test_ask_claude_includes_magazine_cover_grid(monkeypatch):
+    captured = {}
+
+    def fake_generate_text(system, user, max_tokens):
+        captured["user"] = user
+        return "[]"
+
+    monkeypatch.setattr(ad.llm_provider, "generate_text", fake_generate_text)
+    ad._ask_claude("Тандзиро Камадо", 1, "cutout",
+                   style_pref="34_anime_magazine_cover")
+
+    assert "ВЕРТИКАЛЬ 2:3" in captured["user"]
+    assert "огромный катакана-заголовок сверху" in captured["user"]
+    assert "идеально ровный выбранный green/blue chroma" in captured["user"]
+
+
 def test_make_ideas_style_pref_forces_style_id_even_if_claude_ignores(monkeypatch):
     """Claude (мокнутый) возвращает ДРУГОЙ style_id (симулирует несоблюдение
     инструкции) — make_ideas обязан переписать его на style_pref (двойная

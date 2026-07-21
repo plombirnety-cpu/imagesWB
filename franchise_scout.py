@@ -41,10 +41,12 @@ CLI (ручной инструмент владельца):
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import sys
 import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -129,6 +131,32 @@ def _anilist_characters(title: str) -> list:
             "role": str(edge.get("role") or "").strip(),
         })
     return out
+
+
+_ANILIST_TITLE_QUERY = (
+    "query ($search: String) { Media(search: $search, type: ANIME) "
+    "{ title { romaji english } } }"
+)
+
+
+def _anilist_title(title: str) -> str:
+    """Романизированный (или английский) канон-тайтл с AniList по поисковому запросу.
+    Нужен для character_ref: тот сверяет франшизу персонажа по romaji/english-тайтлу,
+    а НЕ по кириллице (пользователь вводит «Гачиакута», AniList знает «Gachiakuta»).
+    Прокидывается в досье как title_ref -> orchestrator подставляет его в дизайн для
+    точного title-match референса. Пусто при любом сбое (graceful degradation, тогда
+    character_ref работает по best-effort как раньше)."""
+    try:
+        r = requests.post(_ANILIST_URL,
+                          json={"query": _ANILIST_TITLE_QUERY, "variables": {"search": title}},
+                          timeout=_REQUEST_TIMEOUT)
+        r.raise_for_status()
+        media = ((r.json().get("data") or {}).get("Media")) or {}
+        t = media.get("title") or {}
+        return (t.get("romaji") or t.get("english") or "").strip()
+    except Exception as e:  # noqa: BLE001 — тайтл-референс не критичен
+        print(f"  !! franchise_scout: _anilist_title({title!r}) не удалось: {e}", flush=True)
+        return ""
 
 
 # ── Jikan (MyAnimeList) ──────────────────────────────────────────────────────
@@ -596,8 +624,27 @@ def _ask_and_parse_dossier_with_retry(user_text: str) -> dict:
 # ── Кэш ────────────────────────────────────────────────────────────────────
 
 def _slugify(title: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", title.strip().lower()).strip("_")
-    return slug or "untitled"
+    """Стабильный безопасный ключ кэша без коллизий между Unicode-тайтлами.
+
+    Раньше функция оставляла только ``[a-z0-9]`` и превращала любое полностью
+    кириллическое название в один и тот же ``untitled``. В результате дневное
+    досье первой русской темы (например, «Гачиакута») повторно использовалось
+    для всех следующих («Клинок рассекающий демонов» и т.д.).
+
+    Чистый ASCII сохраняет прежние читаемые ключи и существующий кэш. Если в
+    нормализованном названии есть Unicode, добавляем детерминированный digest;
+    это также различает смешанные названия с одинаковой ASCII-частью.
+    """
+    normalized = unicodedata.normalize("NFKC", (title or "")).strip().casefold()
+    ascii_slug = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
+    if not normalized:
+        return "untitled"
+    if normalized.isascii():
+        return ascii_slug or "untitled"
+
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+    prefix = ascii_slug[:40].strip("_")
+    return f"{prefix}_{digest}" if prefix else f"title_{digest}"
 
 
 def _cache_path(title: str) -> Path:
@@ -723,6 +770,10 @@ def build_dossier(title: str, kind: str = "auto") -> dict:
     dossier = _ask_and_parse_dossier_with_retry(user_text)
     if not dossier.get("title"):
         dossier["title"] = title
+
+    # title_ref — romaji/english канон-тайтл для character_ref (см. _anilist_title):
+    # надёжнее и синтез-title (может быть кириллицей), и догадки арт-директора.
+    dossier["title_ref"] = _anilist_title(title) or dossier.get("title") or title
 
     _write_cache(title, dossier)
     return dossier

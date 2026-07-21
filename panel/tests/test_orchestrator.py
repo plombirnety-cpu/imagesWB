@@ -62,6 +62,60 @@ def test_plan_tasks_franchise_branch(monkeypatch):
     assert [t.label for t in tasks] == ["Гоку", "Веджита", "Гоку", "Веджита"]
 
 
+def test_plan_tasks_franchise_preserves_canonical_reference_identity(monkeypatch):
+    """Имя и канонический romaji-тайтл из досье должны дойти до рендера.
+    Арт-директор не обязан знать свежую франшизу и может иначе подменить героя
+    буквальной трактовкой имени (Enjin -> engine)."""
+    def fake_build_dossier(title, kind="auto"):
+        assert title == "Клинок рассекающий демонов"
+        return {
+            "title": "Клинок рассекающий демонов",
+            "title_ref": "Kimetsu no Yaiba",
+            "characters": [
+                {"name_ru": "Тандзиро Камадо", "name_en": "Tanjirou Kamado", "score": 100},
+            ],
+        }
+
+    monkeypatch.setattr(orchestrator.franchise_scout, "build_dossier", fake_build_dossier)
+    task = orchestrator.plan_tasks(
+        styles=["34_anime_magazine_cover"], count=1,
+        theme="Клинок рассекающий демонов", characters="",
+    )[0]
+
+    assert task.label == "Тандзиро Камадо"
+    assert task.char_en == "Tanjirou Kamado"
+    assert task.title_hint == "Kimetsu no Yaiba"
+
+
+def test_render_task_overrides_art_director_reference_guess(tmp_path, monkeypatch):
+    """Для franchise-задачи надёжное досье сильнее догадки арт-директора."""
+    monkeypatch.setattr(orchestrator.art_director, "make_ideas", lambda *a, **kw: [{
+        "prompt": "generic mechanic",
+        "chroma": "green",
+        "character_en": "",
+        "title_en": "Original Concept",
+    }])
+    captured = {}
+
+    def fake_render_design(design, tag, outdir, **kw):
+        captured.update(design)
+        path = outdir / f"{tag}.png"
+        Image.new("RGB", (4, 4), (0, 200, 0)).save(path)
+        return {"ok": True, "green": str(path), "error": None}
+
+    monkeypatch.setattr(orchestrator.batch_print, "render_design", fake_render_design)
+    task = orchestrator.DesignTask(
+        index=1, label="Энджин", style_id="34_anime_magazine_cover",
+        tag="01_enjin", source="franchise", char_en="Enjin", title_hint="Gachiakuta",
+    )
+
+    result = orchestrator.render_task(task, tmp_path)
+
+    assert result["ok"] is True
+    assert captured["character_en"] == "Enjin"
+    assert captured["title_en"] == "Gachiakuta"
+
+
 def test_plan_tasks_franchise_falls_back_to_name_en(monkeypatch):
     def fake_build_dossier(title, kind="auto"):
         return {"characters": [{"name_en": "Levi Ackerman", "score": 70.0}]}

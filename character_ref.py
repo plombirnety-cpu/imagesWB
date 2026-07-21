@@ -40,9 +40,13 @@ _ANILIST_URL = "https://graphql.anilist.co"
 
 _ANILIST_CHARACTER_QUERY = """
 query ($search: String) {
-  Character(search: $search) {
-    name { full }
-    image { large }
+  Page(perPage: 6) {
+    characters(search: $search, sort: FAVOURITES_DESC) {
+      name { full }
+      favourites
+      image { large }
+      media(perPage: 8) { nodes { title { romaji english } } }
+    }
   }
 }
 """
@@ -56,12 +60,16 @@ def _slug(character_en: str) -> str:
     return slug or "character"
 
 
-def _cache_path(character_en: str) -> Path:
-    return CACHE_DIR / f"{_slug(character_en)}.jpg"
+def _cache_path(character_en: str, title_en: str = "") -> Path:
+    # Ключ кэша включает ТАЙТЛ: разные аниме могут иметь персонажей с ОДНИМ именем
+    # (напр. "Enjin"), и кэш по одному имени их путал (портрет чужого персонажа).
+    # title_en пуст (нет франшизы) -> старый ключ по имени (обратная совместимость).
+    key = f"{character_en}__{title_en}" if title_en.strip() else character_en
+    return CACHE_DIR / f"{_slug(key)}.jpg"
 
 
-def _load_cached(character_en: str) -> Image.Image | None:
-    path = _cache_path(character_en)
+def _load_cached(character_en: str, title_en: str = "") -> Image.Image | None:
+    path = _cache_path(character_en, title_en)
     if not path.exists():
         return None
     try:
@@ -73,10 +81,10 @@ def _load_cached(character_en: str) -> Image.Image | None:
         return None
 
 
-def _save_cache(character_en: str, img: Image.Image) -> None:
+def _save_cache(character_en: str, img: Image.Image, title_en: str = "") -> None:
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        img.convert("RGB").save(_cache_path(character_en), format="JPEG", quality=92)
+        img.convert("RGB").save(_cache_path(character_en, title_en), format="JPEG", quality=92)
     except Exception as e:  # noqa: BLE001 — кэш не критичен, просто следующий раз сходим в сеть
         print(f"  !! character_ref: не удалось сохранить кэш для {character_en!r}: {e}",
               flush=True)
@@ -205,23 +213,39 @@ def _get_reference_jikan(character_en: str, title_en: str) -> Image.Image | None
 
 # ── Источник 2 (fallback): AniList ───────────────────────────────────────────
 
-def _get_reference_anilist(character_en: str) -> Image.Image | None:
-    try:
-        resp = requests.post(
+def _anilist_media_titles(character_node: dict) -> list:
+    """Все тайтлы (romaji+english) аниме, в которых снимается персонаж — для сверки
+    с запрошенной франшизой (не хватать однофамильца из другого тайтла)."""
+    titles = []
+    for m in ((character_node.get("media") or {}).get("nodes") or []):
+        t = m.get("title") or {}
+        for key in ("romaji", "english"):
+            if t.get(key):
+                titles.append(str(t[key]))
+    return titles
+
+
+def _get_reference_anilist(character_en: str, title_en: str = "") -> Image.Image | None:
+    """AniList-fallback, ТЕПЕРЬ title-aware: тянем НЕСКОЛЬКО одноимённых кандидатов
+    (Page, sort по favourites) с их тайтлами. Если задан title_en — предпочитаем
+    кандидата, у которого он есть в media (это ТОТ САМЫЙ персонаж, а не однофамилец
+    из другого аниме — корень плохого сходства на нишевых тайтлах). Если title_en
+    пуст или ни у кого не совпал — берём самого популярного с картинкой (как раньше,
+    но раньше был вообще один произвольный Character без сверки тайтла)."""
+    def _query():
+        return requests.post(
             _ANILIST_URL,
             json={"query": _ANILIST_CHARACTER_QUERY, "variables": {"search": character_en}},
             timeout=_REQUEST_TIMEOUT,
         )
+    try:
+        resp = _query()
         if resp.status_code == 429:
             retry_after = int(resp.headers.get("Retry-After", "5") or "5")
             print(f"  !! character_ref: AniList 429 — жду {retry_after}с и повторяю один раз",
                   flush=True)
             time.sleep(retry_after)
-            resp = requests.post(
-                _ANILIST_URL,
-                json={"query": _ANILIST_CHARACTER_QUERY, "variables": {"search": character_en}},
-                timeout=_REQUEST_TIMEOUT,
-            )
+            resp = _query()
         resp.raise_for_status()
         payload = resp.json()
     except Exception as e:  # noqa: BLE001
@@ -233,12 +257,20 @@ def _get_reference_anilist(character_en: str) -> Image.Image | None:
               f"{payload['errors']}", flush=True)
         return None
 
-    node = (payload.get("data") or {}).get("Character") or {}
-    image_url = (node.get("image") or {}).get("large") or ""
-    if not image_url:
+    chars = (((payload.get("data") or {}).get("Page") or {}).get("characters")) or []
+    candidates = [c for c in chars if (c.get("image") or {}).get("large")]
+    if not candidates:
         print(f"  !! character_ref: AniList не нашёл персонажа {character_en!r}", flush=True)
         return None
-    return _download_image(image_url)
+
+    want_title = title_en.strip().lower()
+    if want_title:
+        for c in candidates:  # candidates уже отсортированы AniList по favourites
+            if any(want_title in t.lower() for t in _anilist_media_titles(c)):
+                return _download_image(c["image"]["large"])
+        print(f"  character_ref: AniList — среди одноимённых {character_en!r} никто не из "
+              f"{title_en!r}; беру самого популярного (best-effort)", flush=True)
+    return _download_image(candidates[0]["image"]["large"])
 
 
 # ── Точка входа ───────────────────────────────────────────────────────────────
@@ -248,10 +280,11 @@ def get_reference(character_en: str, title_en: str = "") -> Image.Image | None:
     generate_image(reference=...). None при любом сбое — вызывающий код продолжает
     генерацию по чистому тексту, как раньше (graceful degradation)."""
     character_en = (character_en or "").strip()
+    title_en = (title_en or "").strip()
     if not character_en:
         return None
 
-    cached = _load_cached(character_en)
+    cached = _load_cached(character_en, title_en)
     if cached is not None:
         return cached
 
@@ -259,12 +292,12 @@ def get_reference(character_en: str, title_en: str = "") -> Image.Image | None:
     if img is None:
         print(f"  character_ref: Jikan без результата для {character_en!r} — пробую AniList",
               flush=True)
-        img = _get_reference_anilist(character_en)
+        img = _get_reference_anilist(character_en, title_en)
 
     if img is None:
         print(f"  !! character_ref: референс для {character_en!r} не найден ни в одном "
               f"источнике — генерация пойдёт без референса", flush=True)
         return None
 
-    _save_cache(character_en, img)
+    _save_cache(character_en, img, title_en)
     return img

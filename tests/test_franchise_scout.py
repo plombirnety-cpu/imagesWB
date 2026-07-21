@@ -24,6 +24,7 @@ def _no_network(monkeypatch, module=fscout):
     """Глушит все 5 источников сигналов на пустые значения — тест сам подставляет
     нужные ему заглушки поверх при необходимости."""
     monkeypatch.setattr(module, "_anilist_characters", lambda title: [])
+    monkeypatch.setattr(module, "_anilist_title", lambda title: "")
     monkeypatch.setattr(module, "_jikan_characters", lambda title: [])
     monkeypatch.setattr(module, "_tmdb_credits", lambda title: [])
     monkeypatch.setattr(module, "_youtube_edits", lambda title: [])
@@ -155,6 +156,30 @@ def test_ask_and_parse_with_retry_recovers_after_one_failure(monkeypatch):
 
 
 # ------------------------------------------------------------- кэш
+def test_cyrillic_titles_have_distinct_cache_keys():
+    """Регрессия: старый ASCII-only slug превращал ЛЮБОЙ кириллический тайтл
+    в ``untitled``. Поэтому досье «Гачиакуты» повторно использовалось для
+    «Клинка, рассекающего демонов» и панель генерировала не тех персонажей."""
+    gachi = fscout._slugify("Гачиакута")
+    demon_slayer = fscout._slugify("Клинок рассекающий демонов")
+
+    assert gachi != "untitled"
+    assert demon_slayer != "untitled"
+    assert gachi != demon_slayer
+    assert fscout._cache_path("Гачиакута") != fscout._cache_path(
+        "Клинок рассекающий демонов"
+    )
+    assert fscout._signals_cache_path("Гачиакута") != fscout._signals_cache_path(
+        "Клинок рассекающий демонов"
+    )
+
+
+def test_cache_key_is_stable_for_equivalent_unicode():
+    """Визуально одинаковый Unicode должен попадать в один кэш независимо от
+    формы нормализации и регистра."""
+    assert fscout._slugify("  КЛИНОК  ") == fscout._slugify("клинок")
+
+
 def test_build_dossier_cache_hit_does_not_touch_network(monkeypatch, tmp_path):
     """Второй вызов build_dossier для того же тайтла в тот же день читает кэш и
     НЕ дёргает ни один сетевой источник, ни Claude — проверяется через

@@ -131,6 +131,46 @@ def test_cache_path_is_slugified_and_reused():
     assert p1.parent == cref.CACHE_DIR
 
 
+def test_cache_path_includes_franchise_to_avoid_namesake_collisions():
+    """Одинаковое имя в разных тайтлах не должно переиспользовать чужой портрет."""
+    gachi = cref._cache_path("Enjin", "Gachiakuta")
+    other = cref._cache_path("Enjin", "Some Other Anime")
+
+    assert gachi != other
+    assert gachi.name == "enjin-gachiakuta.jpg"
+
+
+def test_anilist_reference_prefers_candidate_from_requested_title(monkeypatch):
+    payload = {
+        "data": {"Page": {"characters": [
+            {
+                "name": {"full": "Enjin"},
+                "favourites": 9000,
+                "image": {"large": "https://example.test/wrong.jpg"},
+                "media": {"nodes": [
+                    {"title": {"romaji": "Some Other Anime", "english": None}},
+                ]},
+            },
+            {
+                "name": {"full": "Enjin"},
+                "favourites": 2300,
+                "image": {"large": "https://example.test/gachiakuta.jpg"},
+                "media": {"nodes": [
+                    {"title": {"romaji": "Gachiakuta", "english": "Gachiakuta"}},
+                ]},
+            },
+        ]}},
+    }
+    monkeypatch.setattr(
+        cref.requests, "post", lambda *args, **kwargs: _FakeResponse(json_data=payload)
+    )
+    monkeypatch.setattr(cref, "_download_image", lambda url: url)
+
+    result = cref._get_reference_anilist("Enjin", "Gachiakuta")
+
+    assert result == "https://example.test/gachiakuta.jpg"
+
+
 # ------------------------------------------------------------- graceful degradation
 def test_get_reference_network_failure_returns_none(monkeypatch, tmp_path):
     """Оба источника (Jikan и AniList) недоступны — get_reference не бросает
@@ -141,7 +181,7 @@ def test_get_reference_network_failure_returns_none(monkeypatch, tmp_path):
     test_anilist_reference_returns_none_on_network_error)."""
     monkeypatch.setattr(cref, "CACHE_DIR", tmp_path / "char_refs")
     monkeypatch.setattr(cref, "_get_reference_jikan", lambda c, t: None)
-    monkeypatch.setattr(cref, "_get_reference_anilist", lambda c: None)
+    monkeypatch.setattr(cref, "_get_reference_anilist", lambda c, t=None: None)
 
     result = cref.get_reference("Несуществующий Персонаж")
     assert result is None

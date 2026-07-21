@@ -89,6 +89,14 @@ class DesignTask:
     style_id: str         # style_pref
     tag: str              # уникальное имя файла (без расширения)
     source: str            # "characters" | "franchise" | "theme" — для отладки/лога
+    # Протяжка из досье franchise_scout (ветка "franchise"): надёжные имя ЛАТИНИЦЕЙ и
+    # тайтл персонажа, которыми ПЕРЕЗАПИСЫВАЕМ character_en/title_en в дизайне ПОСЛЕ
+    # арт-директора — тот на нишевых/свежих тайтлах не узнаёт персонажа и оставляет
+    # character_en пустым (или трактует имя буквально: "Энджин"->движок), из-за чего
+    # character_ref не тянет референс и сходство теряется. Пусто для веток
+    # "characters"/"theme" (там character_en решает арт-директор, как раньше).
+    char_en: str = ""       # name_en персонажа из досье (для character_ref)
+    title_hint: str = ""     # тайтл франшизы из досье (для character_ref, fallback)
 
 
 def plan_tasks(styles: list[str], count: int, theme: str, characters: str) -> list[DesignTask]:
@@ -102,36 +110,42 @@ def plan_tasks(styles: list[str], count: int, theme: str, characters: str) -> li
     style_list = [s for s in (styles or []) if s] or [settings.DEFAULT_STYLE]
 
     names = _split_characters(characters)
+    title_hint = ""
+    # entries — список (label, char_en): label уходит арт-директору как theme,
+    # char_en (name_en из досье) ПЕРЕЗАПИШЕТ character_en в дизайне для character_ref.
     if names:
-        labels = _expand_round_robin(names, count)
+        entries = [(n, "") for n in _expand_round_robin(names, count)]
         source = "characters"
     else:
-        dossier_names: list[str] = []
+        dossier_pairs: list[tuple[str, str]] = []  # (label=name_ru, name_en)
         if theme:
             try:
                 dossier = franchise_scout.build_dossier(theme, kind="auto")
-                dossier_names = [
-                    (c.get("name_ru") or c.get("name_en") or "").strip()
-                    for c in (dossier.get("characters") or [])
-                ]
-                dossier_names = [n for n in dossier_names if n]
+                # title_ref — romaji/english-тайтл для character_ref (точный
+                # title-match); title/theme (может быть кириллицей) — fallback.
+                title_hint = (dossier.get("title_ref") or dossier.get("title") or theme).strip()
+                for c in (dossier.get("characters") or []):
+                    label = (c.get("name_ru") or c.get("name_en") or "").strip()
+                    if label:
+                        dossier_pairs.append((label, (c.get("name_en") or "").strip()))
             except Exception as e:  # noqa: BLE001 — сеть/LLM не должны валить панель
                 logger.warning(f"franchise_scout.build_dossier({theme!r}) упал, "
                                 f"считаем тему НЕ тайтлом: {e}")
-                dossier_names = []
-        if dossier_names:
-            labels = _expand_round_robin(dossier_names, count)
+                dossier_pairs, title_hint = [], ""
+        if dossier_pairs:
+            entries = _expand_round_robin(dossier_pairs, count)
             source = "franchise"
         else:
             if not theme:
                 raise ValueError("нужно указать тему или персонажей")
-            labels = [theme] * count
+            entries = [(theme, "")] * count
             source = "theme"
+            title_hint = ""
 
     style_cycle = itertools.cycle(style_list)
     tasks: list[DesignTask] = []
     used_tags: set[str] = set()
-    for i, label in enumerate(labels, start=1):
+    for i, (label, char_en) in enumerate(entries, start=1):
         style_id = next(style_cycle)
         base = sanitize_slug(label, fallback="item")
         tag = f"{i:02d}_{base}_{style_id}"[:120]
@@ -140,7 +154,11 @@ def plan_tasks(styles: list[str], count: int, theme: str, characters: str) -> li
             tag = f"{i:02d}_{base}_{style_id}_{suffix}"[:120]
             suffix += 1
         used_tags.add(tag)
-        tasks.append(DesignTask(index=i, label=label, style_id=style_id, tag=tag, source=source))
+        tasks.append(DesignTask(
+            index=i, label=label, style_id=style_id, tag=tag, source=source,
+            char_en=char_en,
+            title_hint=(title_hint if source == "franchise" else ""),
+        ))
     return tasks
 
 
@@ -161,6 +179,22 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
         design = designs[0]
     except Exception as e:  # noqa: BLE001
         return {"tag": task.tag, "ok": False, "path": None, "error": f"арт-директор: {e}"}
+
+    # Протяжка из досье (ветка franchise): перезаписываем character_en/title_en
+    # НАДЁЖНЫМИ значениями досье поверх догадки арт-директора — иначе на нишевых
+    # тайтлах он оставляет character_en пустым и character_ref не тянет референс
+    # (см. DesignTask.char_en). character_en заменяем всегда (если досье его знает);
+    # title_en — только если арт-директор оставил пустым (его romaji-тайтл, когда он
+    # его узнал, точнее нашего title_hint).
+    if task.char_en:
+        design["character_en"] = task.char_en
+        # Тайтл из досье ПЕРЕЗАПИСЫВАЕТ догадку арт-директора (для нишевых он ставит
+        # мусор вроде 'Original Concept' -> title-match референса ломается). title_hint
+        # = romaji title_ref, если досье его добыло.
+        if task.title_hint:
+            design["title_en"] = task.title_hint
+        logger.info(f"[{task.tag}] протяжка досье -> character_en={task.char_en!r} "
+                    f"title_en={design.get('title_en')!r}")
 
     try:
         result = batch_print.render_design(design, task.tag, outdir, green_only=True)
