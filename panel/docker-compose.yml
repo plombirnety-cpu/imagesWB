@@ -1,0 +1,37 @@
+services:
+  print-factory-panel:
+    build:
+      context: ..
+      dockerfile: panel/Dockerfile
+    image: print-factory-panel:latest
+    container_name: print-factory-panel
+    restart: unless-stopped
+    ports:
+      - "8040:8040"
+    # Ключи движка (GEMINI_API_KEY и т.п.) — из корневого .env (тот же файл, что
+    # использует движок локально), НЕ дублируем секреты в compose.
+    env_file:
+      - ../.env
+    environment:
+      # Панель — только green_only превью, апскейл не нужен (владелец делает его
+      # отдельной программой); текстовый и картиночный провайдер — Gemini (см.
+      # panel/PLAN.md "Деплой").
+      UPSCALE: "off"
+      IMAGE_PROVIDER: "gemini"
+      ART_DIRECTOR_PROVIDER: "gemini"
+      # Вертикаль для принтов (обложка) — иначе nano-banana даёт горизонталь.
+      IMAGE_ASPECT_RATIO: "2:3"
+      PANEL_PORT: "8040"
+      PANEL_OUTPUT_DIR: "/app/panel/panel_out"
+      PANEL_MAX_COUNT: "50"
+    volumes:
+      # Готовые PNG переживают рестарт контейнера (для job-истории/докачки ZIP).
+      - panel_out:/app/panel/panel_out
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8040/health').status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  panel_out:

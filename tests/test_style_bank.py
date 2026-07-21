@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Тесты банка утверждённых стилей (docs/STYLE_BANK.json + art_director.py).
-Полностью офлайн — никакой сети, Claude мокается через monkeypatch(anthropic.Anthropic),
-как в остальных тестах art_director/theme_scout (см. test_text_in_image.py,
-test_theme_scout.py).
+Полностью офлайн — никакой сети, арт-директор мокается через
+monkeypatch(art_director.llm_provider.generate_text) — провайдер переключаемый
+(см. llm_provider.py), art_director._ask_claude больше не зовёт anthropic
+напрямую (как в test_text_in_image.py, test_theme_scout.py).
 
 Покрывает:
 1. Каталог docs/STYLE_BANK.json валиден и полон (12+ стилей, обязательные поля).
@@ -47,23 +48,12 @@ def _reset_style_bank_cache():
     ad._style_bank_cache = orig_cache
 
 
-def _fake_anthropic_client(response_text: str):
-    """Заглушка anthropic.Anthropic (см. test_text_in_image.py) — возвращает
-    response_text как единственный текстовый content-блок, без сети."""
-    class _FakeContentBlock:
-        type = "text"
-        text = response_text
-
-    class _FakeMessages:
-        def create(self, **kwargs):
-            _FakeMessages.last_kwargs = kwargs
-            return type("R", (), {"content": [_FakeContentBlock()]})()
-
-    class _FakeClient:
-        def __init__(self, api_key=None):
-            self.messages = _FakeMessages()
-
-    return _FakeClient, _FakeMessages
+def _fake_generate_text(response_text: str):
+    """Заглушка llm_provider.generate_text (см. test_text_in_image.py) — возвращает
+    response_text как готовый ответ арт-директора, без сети."""
+    def _fn(system, user, max_tokens=1500):
+        return response_text
+    return _fn
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -253,8 +243,7 @@ def test_make_ideas_result_design_dict_contains_style_id(monkeypatch):
         "slogan": "GO", "slogan_color": "red",
         "style_id": valid_id, "style_mix": "",
     }])
-    fake_client_cls, _ = _fake_anthropic_client(response)
-    monkeypatch.setattr(ad.anthropic, "Anthropic", fake_client_cls)
+    monkeypatch.setattr(ad.llm_provider, "generate_text", _fake_generate_text(response))
 
     designs = ad.make_ideas("тестовая тема", 1, "diecut")
     assert "style_id" in designs[0]
@@ -403,8 +392,7 @@ def test_make_ideas_style_pref_forces_style_id_even_if_claude_ignores(monkeypatc
         "slogan": "FATE", "slogan_color": "purple",
         "style_id": other_id, "style_mix": "",
     }])
-    fake_client_cls, _ = _fake_anthropic_client(response)
-    monkeypatch.setattr(ad.anthropic, "Anthropic", fake_client_cls)
+    monkeypatch.setattr(ad.llm_provider, "generate_text", _fake_generate_text(response))
 
     designs = ad.make_ideas("Лев — знак зодиака", 1, "diecut", style_pref="19_tarot")
     assert designs[0]["style_id"] == "19_tarot"
@@ -419,8 +407,7 @@ def test_make_ideas_no_style_pref_keeps_old_behavior(monkeypatch):
         "prompt": "a warrior stands", "chroma": "green",
         "style_id": valid_id, "style_mix": "",
     }])
-    fake_client_cls, _ = _fake_anthropic_client(response)
-    monkeypatch.setattr(ad.anthropic, "Anthropic", fake_client_cls)
+    monkeypatch.setattr(ad.llm_provider, "generate_text", _fake_generate_text(response))
 
     designs = ad.make_ideas("тема", 1, "diecut")
     assert designs[0]["style_id"] == valid_id

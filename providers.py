@@ -123,9 +123,15 @@ def _generate_gemini(prompt: str, seed: int = None, model: str = None,
     if reference is not None:
         parts.append(_reference_to_inline_part(reference))
     parts.append({"text": prompt})
+    gen_cfg = {"responseModalities": ["IMAGE"]}
+    # Портретный аспект для принтов (config.IMAGE_ASPECT_RATIO, напр. "2:3") —
+    # без него nano-banana выбирает свою ориентацию (часто горизонталь, не
+    # годится для обложки-принта). Пусто = старое поведение.
+    if getattr(config, "IMAGE_ASPECT_RATIO", ""):
+        gen_cfg["imageConfig"] = {"aspectRatio": config.IMAGE_ASPECT_RATIO}
     body = {
         "contents": [{"parts": parts}],
-        "generationConfig": {"responseModalities": ["IMAGE"]},
+        "generationConfig": gen_cfg,
     }
     last_err = None
     for attempt in range(2):

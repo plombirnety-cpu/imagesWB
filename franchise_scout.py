@@ -41,6 +41,7 @@ CLI (ручной инструмент владельца):
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -48,9 +49,9 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-import anthropic
 
 import config
+import llm_provider
 
 HERE = Path(__file__).resolve().parent
 CACHE_DIR = HERE / "data" / "franchise_cache"
@@ -402,7 +403,10 @@ SYSTEM_FRANCHISE = (
     "characters ОБЯЗАТЕЛЬНО отсортированы по score по убыванию."
 )
 
-_MAX_TOKENS_DOSSIER = 4000
+# gemini-pro-latest — «думающая» модель: часть бюджета уходит на рассуждение,
+# а досье — многосоставный JSON (персонажи + моменты). 4000 обрезало массив
+# посреди (диагностировано 2026-07-21: персонаж выходил с оборванным именем).
+_MAX_TOKENS_DOSSIER = int(os.getenv("DOSSIER_MAX_TOKENS", "12000"))
 
 
 def _build_synthesis_input(title: str, anilist_chars: list, jikan_chars: list,
@@ -444,22 +448,22 @@ def _build_synthesis_input(title: str, anilist_chars: list, jikan_chars: list,
 
 
 def _ask_claude_dossier(user_text: str) -> str:
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    """Имя _ask_claude_dossier — историческое (обратная совместимость вызовов/
+    тестов), реально зовёт llm_provider.generate_text — провайдер переключаем
+    через config.ART_DIRECTOR_PROVIDER (gemini по умолчанию, см. llm_provider.py),
+    не только Claude."""
     try:
-        resp = client.messages.create(
-            model=config.MODEL,
-            max_tokens=_MAX_TOKENS_DOSSIER,
-            system=SYSTEM_FRANCHISE,
-            messages=[{"role": "user", "content": user_text}],
-        )
-    except anthropic.APIError as e:  # noqa: BLE001 — сеть/баланс/rate-limit/5xx Claude:
-        # тот же сигнал, что и невалидный JSON: _parse_dossier("") -> None -> вызывающий
+        return llm_provider.generate_text(
+            SYSTEM_FRANCHISE, user_text, max_tokens=_MAX_TOKENS_DOSSIER)
+    except RuntimeError as e:
+        # llm_provider.generate_text поднимает RuntimeError на ЛЮБОЙ сбой провайдера
+        # (сеть/баланс/rate-limit/5xx, независимо от gemini/openai/anthropic) — тот же
+        # сигнал, что и невалидный JSON: _parse_dossier("") -> None -> вызывающий
         # _ask_and_parse_dossier_with_retry честно ретраит один раз, при двойном сбое
         # бросает ЯВНУЮ RuntimeError (не тихий откат) — см. build_dossier/_collect_dossiers,
         # которые уже переживают падение одного тайтла.
-        print(f"  !! franchise_scout: вызов Claude не удался: {e}", flush=True)
+        print(f"  !! franchise_scout: вызов арт-директора (LLM) не удался: {e}", flush=True)
         return ""
-    return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
 
 
 def _repair_characters_array(text: str) -> list:

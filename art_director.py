@@ -32,9 +32,8 @@ import threading
 from collections import deque
 from pathlib import Path
 
-import anthropic
-
 import config
+import llm_provider
 
 MODEL = config.MODEL
 
@@ -548,7 +547,10 @@ _SYSTEMS_FN = {"cutout": system_cutout, "diecut": system_diecut}
 
 def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
                  style_pref: str = None) -> str:
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    """Имя _ask_claude — историческое (обратная совместимость вызовов/тестов),
+    реально зовёт llm_provider.generate_text — провайдер переключаем через
+    config.ART_DIRECTOR_PROVIDER (gemini по умолчанию, см. llm_provider.py),
+    не только Claude."""
     user = (f"Запрос: {theme}. Дай ровно {n} разных дизайн(ов). JSON-массив из {n} "
             f"объектов {{\"prompt\":..., \"chroma\":..., \"slogan\":..., "
             f"\"slogan_color\":..., \"kana\":..., \"character_en\":..., \"title_en\":..., "
@@ -557,13 +559,13 @@ def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
             f"\"quote\":..., \"name_jp\":..., \"mood\":..., \"type_spec\":..., "
             f"\"style_id\":..., \"style_mix\":...}}.")
     system_fn = _SYSTEMS_FN.get(fmt, system_cutout)
-    resp = client.messages.create(
-        model=MODEL,
-        max_tokens=1500,
-        system=system_fn(theme, recent_styles, style_pref),
-        messages=[{"role": "user", "content": user}],
-    )
-    return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+    # Щедрый бюджет токенов: gemini-pro-latest тратит часть на рассуждение, а
+    # каждый дизайн — длинная проза-промпт + десяток JSON-полей. Масштабируем на
+    # число дизайнов n (панель зовёт n=1, дневной конвейер — пачкой). См.
+    # config.ART_DIRECTOR_MAX_TOKENS.
+    max_tokens = max(config.ART_DIRECTOR_MAX_TOKENS, n * 4000)
+    return llm_provider.generate_text(
+        system_fn(theme, recent_styles, style_pref), user, max_tokens=max_tokens)
 
 
 def make_ideas(theme: str, n: int, fmt: str = "cutout", recent_styles: list = None,

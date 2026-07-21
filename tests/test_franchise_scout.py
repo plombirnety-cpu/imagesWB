@@ -16,9 +16,6 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import anthropic  # noqa: E402
-import httpx  # noqa: E402
-
 import franchise_scout as fscout  # noqa: E402
 import theme_scout as ts  # noqa: E402
 
@@ -376,57 +373,49 @@ def test_youtube_edits_missing_key_returns_empty(monkeypatch):
     assert fscout._youtube_edits("Some Show") == []
 
 
-# ------------------------------------------------------------- graceful degradation Claude API
-def test_ask_claude_dossier_api_failure_returns_empty_string_not_raises(monkeypatch):
+# ------------------------------------------------------------- graceful degradation LLM-провайдера
+def test_ask_claude_dossier_provider_failure_returns_empty_string_not_raises(monkeypatch):
     """РЕГРЕССИЯ (найдено тестировщиком на реальном прогоне: anthropic.BadRequestError
     из-за исчерпанного баланса Anthropic не ловился вокруг client.messages.create).
-    _ask_claude_dossier обязан ловить anthropic.APIError и возвращать "" (тот же
-    сигнал, что невалидный JSON), не пробрасывать исключение наружу — иначе
-    build_dossier падает необработанным traceback вместо явной RuntimeError с
-    понятным сообщением (см. _ask_and_parse_dossier_with_retry)."""
-    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    Провайдер теперь переключаемый (llm_provider.py, gemini/openai/anthropic) —
+    _ask_claude_dossier обязан ловить RuntimeError ОТ ЛЮБОГО провайдера
+    (llm_provider.generate_text поднимает именно RuntimeError на сеть/баланс/
+    rate-limit/5xx, независимо от того, gemini это, openai или anthropic) и
+    возвращать "" (тот же сигнал, что невалидный JSON), не пробрасывать
+    исключение наружу — иначе build_dossier падает необработанным traceback
+    вместо явной RuntimeError с понятным сообщением (см.
+    _ask_and_parse_dossier_with_retry)."""
+    def _failing_generate_text(system, user, max_tokens=1500):
+        raise RuntimeError("Gemini (арт-директор, текст): HTTP 429: RESOURCE_EXHAUSTED")
 
-    class _FailingMessages:
-        def create(self, **kwargs):
-            raise anthropic.APIConnectionError(request=req)
-
-    class _FailingClient:
-        def __init__(self, api_key):
-            self.messages = _FailingMessages()
-
-    monkeypatch.setattr(fscout.anthropic, "Anthropic", _FailingClient)
+    monkeypatch.setattr(fscout.llm_provider, "generate_text", _failing_generate_text)
 
     text = fscout._ask_claude_dossier("любой текст запроса")
     assert text == ""
 
 
-def test_build_dossier_raises_clean_runtime_error_on_claude_api_failure(monkeypatch, tmp_path):
-    """Сквозная регрессия: build_dossier при ДВОЙНОМ сбое API Claude (не парсинга)
-    должен вести себя так же, как при двойном сбое парсинга JSON — явная
-    RuntimeError с понятным сообщением, а НЕ сырой anthropic.APIConnectionError,
-    пробитый до самого верха (это и уронило daily_prints.py на реальном прогоне,
+def test_build_dossier_raises_clean_runtime_error_on_llm_provider_failure(monkeypatch, tmp_path):
+    """Сквозная регрессия: build_dossier при ДВОЙНОМ сбое LLM-провайдера (не
+    парсинга) должен вести себя так же, как при двойном сбое парсинга JSON —
+    явная RuntimeError с понятным сообщением, а НЕ сырое исключение провайдера,
+    пробитое до самого верха (это и уронило daily_prints.py на реальном прогоне,
     т.к. вызывающий _collect_dossiers ловит Exception и печатает предупреждение,
-    но сама ошибка обязана быть RuntimeError по контракту модуля, не типом SDK)."""
+    но сама ошибка обязана быть RuntimeError по контракту модуля, не типом
+    SDK/провайдера)."""
     monkeypatch.setattr(fscout, "CACHE_DIR", tmp_path / "franchise_cache")
     _no_network(monkeypatch)
 
-    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     calls = {"n": 0}
 
-    class _FailingMessages:
-        def create(self, **kwargs):
-            calls["n"] += 1
-            raise anthropic.APIConnectionError(request=req)
+    def _failing_generate_text(system, user, max_tokens=1500):
+        calls["n"] += 1
+        raise RuntimeError("Gemini (арт-директор, текст): HTTP 429: RESOURCE_EXHAUSTED")
 
-    class _FailingClient:
-        def __init__(self, api_key):
-            self.messages = _FailingMessages()
-
-    monkeypatch.setattr(fscout.anthropic, "Anthropic", _FailingClient)
+    monkeypatch.setattr(fscout.llm_provider, "generate_text", _failing_generate_text)
 
     try:
         fscout.build_dossier("Anything", kind="anime")
-        assert False, "ожидалась RuntimeError при двойном сбое API Claude"
+        assert False, "ожидалась RuntimeError при двойном сбое LLM-провайдера"
     except RuntimeError as e:
         assert "дважды подряд" in str(e)
     assert calls["n"] == 2, "ожидался ровно 1 ретрай (2 попытки), как при сбое парсинга"

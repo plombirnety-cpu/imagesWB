@@ -1,0 +1,3 @@
+# Только для тестов панели (pytest tests/) — прод-образ (Dockerfile) их не ставит.
+pytest>=8
+httpx>=0.27

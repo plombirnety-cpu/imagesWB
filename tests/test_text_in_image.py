@@ -137,26 +137,20 @@ def test_system_prompt_text_render_code_has_blanket_ban(monkeypatch):
 
 def test_ask_claude_user_prompt_includes_type_spec_field(monkeypatch):
     """_ask_claude собирает user-промпт со всеми полями схемы, включая type_spec —
-    подменяем anthropic.Anthropic, чтобы проверить БЕЗ сети."""
+    подменяем llm_provider.generate_text, чтобы проверить БЕЗ сети (провайдер
+    переключаемый, см. llm_provider.py, _ask_claude больше не зовёт anthropic
+    напрямую)."""
     captured = {}
 
-    class _FakeContentBlock:
-        type = "text"
-        text = "[]"
+    def _fake_generate_text(system, user, max_tokens=1500):
+        captured["system"] = system
+        captured["user"] = user
+        captured["max_tokens"] = max_tokens
+        return "[]"
 
-    class _FakeMessages:
-        def create(self, **kwargs):
-            captured.update(kwargs)
-            return type("R", (), {"content": [_FakeContentBlock()]})()
-
-    class _FakeClient:
-        def __init__(self, api_key=None):
-            self.messages = _FakeMessages()
-
-    monkeypatch.setattr(art_director.anthropic, "Anthropic", _FakeClient)
+    monkeypatch.setattr(art_director.llm_provider, "generate_text", _fake_generate_text)
     art_director._ask_claude("test theme", 1, "diecut")
-    user_msg = captured["messages"][0]["content"]
-    assert "type_spec" in user_msg
+    assert "type_spec" in captured["user"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

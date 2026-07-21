@@ -15,8 +15,44 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 
-# Модель Claude для арт-директора (идея + промпт + слоган + kana).
+# Модель Claude для арт-директора — используется, ТОЛЬКО когда
+# ART_DIRECTOR_PROVIDER=anthropic (см. ниже).
 MODEL = os.getenv("MODEL", "claude-sonnet-4-6")
+
+# ── Провайдер LLM арт-директора (llm_provider.py) ────────────────────────────
+# Арт-директор (идея + промпт + слоган + kana в art_director.py, синтез досье
+# в franchise_scout.py) больше не завязан жёстко на Anthropic — провайдер
+# переключаемый, см. llm_provider.generate_text.
+
+# gemini (ДЕФОЛТ) — Google Gemini текстом, тот же ключ GEMINI_API_KEY, что уже
+# используется для картинок (providers.py) — дешевле и не требует отдельного
+# баланса Anthropic | openai — OpenAI chat.completions | anthropic — старое
+# поведение 1:1 (anthropic SDK, MODEL/ANTHROPIC_API_KEY выше).
+ART_DIRECTOR_PROVIDER = os.getenv("ART_DIRECTOR_PROVIDER", "gemini").strip().lower()
+
+# Модель Gemini для ART_DIRECTOR_PROVIDER=gemini. gemini-pro-latest — живой
+# алиас текущей Pro-модели, подтверждён с NL-сервера (Амстердам) HTTP 200
+# (2026-07-21). ВАЖНО: gemini-2.5-pro отдаёт 404 "no longer available to new
+# users" для новых ключей; версионные имена Gemini ротируются — поэтому дефолт
+# именно ЖИВОЙ АЛИАС -latest (как providers.py::_OCR_MODEL = gemini-flash-latest).
+# Запасная рабочая модель — gemini-2.5-flash (тоже 200, дешевле, слабее).
+# ГЕО: generateContent для РФ-локации отдаёт 400 FAILED_PRECONDITION
+# ("User location is not supported") — арт-директор работает ТОЛЬКО с
+# поддерживаемой локации (NL-сервер), не с машины владельца. Смена модели —
+# env-override ART_DIRECTOR_MODEL без правки кода.
+ART_DIRECTOR_MODEL = os.getenv("ART_DIRECTOR_MODEL", "gemini-pro-latest")
+
+# Бюджет выходных токенов арт-директора. gemini-pro-latest — «думающая» модель
+# (Gemini 3 Pro): часть maxOutputTokens уходит на скрытое рассуждение, поэтому
+# лаконичный лимит Claude (1500) обрезал JSON на полуслове (диагностировано с
+# сервера 2026-07-21: 1500 -> обрыв на 240 симв., 8000 -> полный валидный JSON).
+# _ask_claude масштабирует это на число дизайнов в вызове; llm_provider держит
+# ещё и нижний «пол» для gemini (см. _generate_gemini_text).
+ART_DIRECTOR_MAX_TOKENS = int(os.getenv("ART_DIRECTOR_MAX_TOKENS", "8000"))
+
+# Ключ/модель OpenAI для ART_DIRECTOR_PROVIDER=openai.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
 
 # Бренд-лейбл для подвала-этикетки типографики v3 (typography_v3.compose_text_v3,
 # режим collection_footer, docs/PRINT_STYLE_GUIDE.md раздел 3.4) — не хардкод внутри
@@ -52,6 +88,14 @@ GEMINI_MODEL_PREMIUM = os.getenv("GEMINI_MODEL_PREMIUM", "gemini-3-pro-image")
 TEXT_RENDER = os.getenv("TEXT_RENDER", "image").strip().lower()
 
 IMG_SIZE = int(os.getenv("IMG_SIZE", "1536"))
+
+# Соотношение сторон генерации Gemini (nano-banana) — прокидывается в
+# generationConfig.imageConfig.aspectRatio (providers._generate_gemini). Пусто
+# по умолчанию = НЕ задавать (старое поведение: модель выбирает сама, обычно
+# горизонталь). Для принтов на футболку нужна ВЕРТИКАЛЬ — панель ставит "2:3"
+# (ближе всего к эталонам обложек ~0.65). Допустимые Gemini: 1:1, 2:3, 3:4,
+# 4:5, 9:16, 3:2, 4:3, 16:9 и т.п.
+IMAGE_ASPECT_RATIO = os.getenv("IMAGE_ASPECT_RATIO", "").strip()
 
 # ── Апскейл до печатных 300 DPI (upscale.py, portable realesrgan-ncnn-vulkan) ───
 
