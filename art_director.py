@@ -570,18 +570,34 @@ _GYM_SCENARIOS = (
     "curling an EZ-curl barbell with both hands, elbows tucked, biceps peaked",
 )
 
+# Тематический ЗАДНИК за фигурой — тоже случайный на каждую генерацию (жалоба
+# владельца: круглый диск был в КАЖДОМ принте). НЕ всегда круг: см. essence
+# 35/36_gym_hero_*. Один пункт — "почти пустой" фон (иногда задник вообще лишний).
+_GYM_BACKDROPS = (
+    "a circular halftone-dot / energy disc directly behind the torso, rimmed by a thin dark contour ring",
+    "a GIANT single word set huge BEHIND the figure (the word GYM, the gym-name, or the character's initial), the muscular figure overlapping it",
+    "a fan of bold straight radiating sunburst rays behind the figure, NO disc ring, rays kept inset from the frame corners",
+    "a dynamic spray-paint / ink splash burst behind the figure, graffiti-poster energy, no circle",
+    "a crackling energy or lightning aura silhouette hugging the figure, no disc",
+    "a clean, near-empty backdrop — just the figure plus a few small speed/impact lines, mostly bare chroma",
+    "a bold horizontal colour band / banner stripe running behind the mid-torso, the rest open chroma",
+)
+
 
 def _gym_variety_hint(style_pref: str) -> str:
-    """Случайный сценарий поза+снаряд для gym-стиля (иначе пустая строка). См.
-    _GYM_SCENARIOS. random.choice — недетерминированно специально (разнообразие
-    важнее воспроизводимости; make_ideas и так недетерминирован из-за LLM)."""
+    """Случайный сценарий поза+снаряд + случайный ЗАДНИК для gym-стиля (иначе пустая
+    строка). См. _GYM_SCENARIOS/_GYM_BACKDROPS. random.choice — недетерминированно
+    специально (разнообразие важнее воспроизводимости; make_ideas и так
+    недетерминирован из-за LLM)."""
     if not style_pref or style_pref not in _GYM_STYLE_IDS:
         return ""
     scenario = random.choice(_GYM_SCENARIOS)
+    backdrop = random.choice(_GYM_BACKDROPS)
     return (f" ДЛЯ ЭТОГО дизайна используй ИМЕННО такую позу и снаряд (НЕ фронтальный "
-            f"флекс с двумя гантелями): {scenario}. Адаптируй под конкретного персонажа "
-            f"естественно; анатомия корректная — руки от своих плеч, верное число "
-            f"кистей и пальцев, снаряд в руках держится правдоподобно.")
+            f"флекс с двумя гантелями): {scenario}. И ИМЕННО такой задник за фигурой "
+            f"(НЕ круглый диск по умолчанию): {backdrop}. Адаптируй под конкретного "
+            f"персонажа естественно; анатомия корректная — руки от своих плеч, верное "
+            f"число кистей и пальцев, снаряд в руках держится правдоподобно.")
 
 
 # Анти-портрет для gym-стилей (код-предохранитель против «реф-портрет-глюка», жалоба
@@ -594,7 +610,7 @@ def _gym_variety_hint(style_pref: str) -> str:
 _GYM_FULL_COMPOSITION_BLOCK = (
     "GYM COMPOSITION — NOT A PORTRAIT: this is a full athletic-merch print. You MUST "
     "draw the character's WHOLE hyper-muscular half-body (head, torso and both arms), "
-    "the training equipment, the large circular backdrop disc behind the torso, the "
+    "the training equipment, the thematic backdrop element behind the torso, the "
     "big arched gym-name wordmark and all the cover text — ALL of it floating on a "
     "clean flat chroma-key field that fills every edge. If a face reference image is "
     "supplied, use it ONLY for the facial identity/likeness — do NOT reproduce it as a "
