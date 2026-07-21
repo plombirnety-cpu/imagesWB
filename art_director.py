@@ -924,7 +924,14 @@ _ANATOMY_BLOCK = (
     "to the pose, but never simply missing where an arm should be). Fingers are distinct "
     "and correctly shaped — no fused, webbed, extra, missing, or malformed fingers. If a "
     "hand grips a weapon, prop, or object, the grip is anatomically plausible, with "
-    "fingers wrapped naturally around it."
+    "fingers wrapped naturally around it. "
+    "ARM PLACEMENT must be logical: the LEFT arm attaches to the LEFT shoulder and the "
+    "RIGHT arm to the RIGHT shoulder, each arm's connection to its own shoulder clearly "
+    "readable. Do NOT bunch, stack, cross or route BOTH arms onto the same side of the "
+    "body, and do NOT let both arms appear to sprout from one shoulder — the two arms "
+    "read as a natural, balanced, clearly separated pose. If the character wields two "
+    "weapons, hold them in a naturally spread stance (one to each side or clearly "
+    "staggered in depth), never both bunched together on one flank."
 )
 
 
