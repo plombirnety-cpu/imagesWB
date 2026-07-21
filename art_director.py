@@ -545,6 +545,45 @@ SYSTEM_DIECUT = system_diecut()
 _SYSTEMS_FN = {"cutout": system_cutout, "diecut": system_diecut}
 
 
+# ── Вариативность поз/снарядов для стиля «спортзал» (35/36_gym_hero_*) ──────────
+# Жалоба владельца: все gym-принты выходят в ОДНОЙ позе (фронтальный флекс) и все с
+# гантелями. Причина — независимые вызовы make_ideas (панель зовёт n=1 на дизайн)
+# кластеризуются на «любимом» варианте модели, даже когда essence перечисляет много
+# опций. Решение: на КАЖДУЮ gym-генерацию подсовываем СЛУЧАЙНЫЙ связный сценарий
+# (поза + снаряд) прямо в user-запрос — так батч реально разнообразный, а не на удачу.
+# Только для gym-стилей; на остальные style_pref не влияет (хинт пустой).
+_GYM_STYLE_IDS = {"35_gym_hero_en", "36_gym_hero_ru"}
+_GYM_SCENARIOS = (
+    "a front double-biceps flex with a heavy dumbbell in each raised hand",
+    "an overhead press, both arms extended straight up pressing a loaded barbell overhead",
+    "a single-arm kettlebell curl — one arm curling a big kettlebell, the other flexed at the side",
+    "a wide power stance with a loaded barbell racked across the upper back behind the neck, both hands gripping the bar",
+    "a most-muscular crab pose gripping a thick resistance band stretched across the chest",
+    "a strongman shoulder carry — a huge weight plate hoisted onto one shoulder, the other arm flexed",
+    "gripping battle ropes mid-slam, one thick rope in each hand, arms in motion",
+    "hanging from a pull-up bar mid rep, both hands on the bar, body and arms flexed",
+    "a confident stance holding a single massive weight plate in both hands down at the waist",
+    "one foot propped on a workout bench, forearm resting on the raised knee, a dumbbell held in the other hand, relaxed",
+    "a side-chest pose turned slightly three-quarter, pressing a kettlebell up in one hand",
+    "flexing one arm hard while holding a comedic oversized protein shaker in the other hand",
+    "a two-hand goblet stance holding a single kettlebell up at the chest",
+    "curling an EZ-curl barbell with both hands, elbows tucked, biceps peaked",
+)
+
+
+def _gym_variety_hint(style_pref: str) -> str:
+    """Случайный сценарий поза+снаряд для gym-стиля (иначе пустая строка). См.
+    _GYM_SCENARIOS. random.choice — недетерминированно специально (разнообразие
+    важнее воспроизводимости; make_ideas и так недетерминирован из-за LLM)."""
+    if not style_pref or style_pref not in _GYM_STYLE_IDS:
+        return ""
+    scenario = random.choice(_GYM_SCENARIOS)
+    return (f" ДЛЯ ЭТОГО дизайна используй ИМЕННО такую позу и снаряд (НЕ фронтальный "
+            f"флекс с двумя гантелями): {scenario}. Адаптируй под конкретного персонажа "
+            f"естественно; анатомия корректная — руки от своих плеч, верное число "
+            f"кистей и пальцев, снаряд в руках держится правдоподобно.")
+
+
 def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
                  style_pref: str = None) -> str:
     """Имя _ask_claude — историческое (обратная совместимость вызовов/тестов),
@@ -558,6 +597,8 @@ def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
             f"\"text_modes_v3\":..., "
             f"\"quote\":..., \"name_jp\":..., \"mood\":..., \"type_spec\":..., "
             f"\"style_id\":..., \"style_mix\":...}}.")
+    # Для gym-стилей — случайный сценарий поза+снаряд (разнообразие батча).
+    user = user + _gym_variety_hint(style_pref)
     system_fn = _SYSTEMS_FN.get(fmt, system_cutout)
     # Щедрый бюджет токенов: gemini-pro-latest тратит часть на рассуждение, а
     # каждый дизайн — длинная проза-промпт + десяток JSON-полей. Масштабируем на
