@@ -874,28 +874,33 @@ _NO_TEXT_TAIL = (
     "anywhere in the artwork."
 )
 
-# Правило «нейтрального» цвета ТЕКСТА (жёсткое правило владельца, правка 2026-07-21):
-# принт кладётся И на ЧЁРНУЮ, И на БЕЛУЮ футболку из ОДНОГО файла — поэтому НИ ОДНА
-# надпись не должна быть плоским чистым чёрным ИЛИ чистым белым: чёрный текст пропадает
-# на чёрной футболке, белый — на белой. Каждый текстовый элемент = средний тон из
-# ПАЛИТРЫ ИЛЛЮСТРАЦИИ (или нейтральный серый) + ТОЛСТАЯ контрастная обводка вокруг
-# КАЖДОЙ буквы (светлая обводка при тёмной заливке, тёмная — при светлой). Эталоны
-# владельца (Ранга — кремовый с тёмной обводкой, Вельдора — красный с чёрной обводкой,
-# Римуру — голубой с обводкой). Это код-предохранитель поверх правила SHIRT-NEUTRAL в
-# STYLE_BANK.text_treatment — Gemini-арт-директор/nano-banana не протаскивали его
-# достаточно жёстко, чёрный текст продолжал появляться. Ставится ПОСЛЕ описания
-# типографики (type_spec) и формулируется как перекрывающее любой другой выбор цвета.
+# Правило «нейтрального» цвета ТЕКСТА (жёсткое правило владельца, правка 2026-07-21,
+# усилено после белой строки у Наруто RU): принт кладётся И на ЧЁРНУЮ, И на БЕЛУЮ
+# футболку из ОДНОГО файла — поэтому ЗАЛИВКА НИ ОДНОЙ надписи не должна быть ни чёрной,
+# ни белой (даже с обводкой): только средний тон/акцент из ПАЛИТРЫ ИЛЛЮСТРАЦИИ (или
+# серый). Раньше была лазейка «нельзя чёрный/белый БЕЗ обводки» — модель делала белую
+# заливку с тонкой обводкой и формально проходила; убрано. Правило распространяется на
+# КАЖДЫЙ элемент, включая САМЫЕ МЕЛКИЕ вторичные (город/локация, бейдж EST/ОСН, подпись).
+# Обводка — отдельно: она МОЖЕТ быть тёмной или светлой (это контур, не заливка).
+# Эталоны владельца: Ранга — кремовый с тёмной обводкой, Вельдора — красный с чёрной,
+# Римуру — голубой. Код-предохранитель поверх SHIRT-NEUTRAL из STYLE_BANK.text_treatment;
+# ставится ПОСЛЕ type_spec, перекрывает любой другой выбор цвета.
 _SHIRT_NEUTRAL_TEXT_RULE = (
     "CRITICAL TEXT COLOUR RULE (the owner prints this design on BOTH black and white "
-    "shirts from the same single file): EVERY text element — the big katakana title "
-    "wordmark, the small English cover-lines, the vertical kanji column, any "
-    "charm-seal glyphs and the bottom quote — must be filled with a MID-TONE colour "
-    "taken from the illustration's own palette (or a neutral mid-grey), and each must "
-    "carry a THICK contrasting outline/keyline around every letter (a light outline "
-    "when the fill is darker, a dark outline when the fill is lighter). NEVER render "
-    "any lettering as flat pure black or flat pure white without such an outline — "
-    "flat black text disappears on a black shirt and flat white text disappears on a "
-    "white shirt. This colour rule OVERRIDES any other colour choice for text."
+    "shirts from the same single file, so this rule OVERRIDES any other colour choice "
+    "for text): the FILL of EVERY single text element — the largest title/wordmark, "
+    "the slogan/tagline, the vertical name column, AND every small secondary line such "
+    "as the location/city name, the EST/founding-date badge, and any tiny label or "
+    "signature — must be a MID-TONE colour or accent pulled from the illustration's own "
+    "palette (or a neutral mid-grey). The text fill must NEVER be white and NEVER be "
+    "black — not pure white, not near-white, not pure black, not near-black, and NOT "
+    "even white-or-black WITH an outline: a white fill disappears on a white shirt and "
+    "a black fill disappears on a black shirt, so neither is ever allowed as a fill. "
+    "SEPARATELY from the fill, each letter also carries a THICK contrasting "
+    "outline/keyline; that OUTLINE may be dark or light (a dark outline around a lighter "
+    "mid-tone fill, a light outline around a darker mid-tone fill) — only the outline "
+    "may be near-black or near-white, never the fill. Apply this to the smallest badge "
+    "and city line just as strictly as to the giant title."
 )
 
 
