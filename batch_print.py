@@ -1098,6 +1098,20 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         print(f"{p} !! warning: лучшая попытка coverage={best_cov:.2f} < 0.90, "
               f"используем её (seed={best_seed})", flush=True)
 
+    # HARD-reject: рамка совсем не хромакей (coverage ниже жёсткого порога) — это почти
+    # всегда off-style кадр (nano-banana перерисовала эталон-портрет лицом на не-
+    # хромакейном фоне вместо стиля, жалоба владельца на gym). Ни вырезать, ни выпускать
+    # нельзя — честный провал слота (ok=False, вызывающий код перегенерит), а не выпуск
+    # мусора как ok. Порог config.CHROMA_HARD_MIN_COVERAGE (дефолт 0.5); легитимные
+    # принты идут ~0.9-1.0. 0/off — отключить отсечку (старое поведение).
+    if config.CHROMA_HARD_MIN_COVERAGE > 0 and best_cov < config.CHROMA_HARD_MIN_COVERAGE:
+        print(f"{p} !! HARD-reject: coverage={best_cov:.2f} < "
+              f"{config.CHROMA_HARD_MIN_COVERAGE} — кадр без хромакей-фона "
+              f"(вероятно off-style/эталон-портрет), провал дизайна", flush=True)
+        result["error"] = (f"кадр без хромакей-фона (coverage {best_cov:.2f}) — "
+                           f"вероятно портрет/off-style вместо стиля, нужна перегенерация")
+        return result
+
     if green_only:
         # Режим green_only (заказ владельца, мега-партия D:\800): РОВНО ОДИН файл
         # <tag>.png на успешный принт — исходная генерация СОХРАНЯЕТСЯ КАК ЕСТЬ,

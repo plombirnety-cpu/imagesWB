@@ -21,6 +21,7 @@ characters), сеть/LLM-сбой тоже трактуется как "не т
 from __future__ import annotations
 
 import itertools
+import os
 import re
 import sys
 import unicodedata
@@ -145,11 +146,16 @@ def plan_tasks(styles: list[str], count: int, theme: str, characters: str) -> li
 
 # ── рендер одной задачи ────────────────────────────────────────────────────────
 
-def render_task(task: DesignTask, outdir: Path) -> dict:
-    """Один дизайн: make_ideas(label, style_pref=style_id) -> render_design(
-    ..., green_only=True). Возвращает {"tag", "ok", "path", "error"} —
-    НИКОГДА не бросает исключение наружу (ошибка одного дизайна не должна
-    ронять весь job), см. app.py._run_job."""
+# Сколько раз всего пытаться отрендерить один слот. >1 — авто-ретрай при провале
+# (напр. HARD-reject кадра без хромакея: nano-banana изредка перерисовывает эталон-
+# портрет персонажа вместо стиля — глюк интермиттентный, свежий make_ideas даёт новый
+# промпт/сид/сценарий и обычно проходит со 2-й попытки, чтобы батч не оставался с
+# дыркой). Каждая попытка — платная генерация; 2 = максимум 1 доп. попытка на слот.
+_RENDER_ATTEMPTS = int(os.getenv("PANEL_RENDER_ATTEMPTS", "2"))
+
+
+def _render_once(task: "DesignTask", outdir: Path) -> dict:
+    """Одна попытка рендера слота (без ретрая). См. render_task."""
     try:
         designs = art_director.make_ideas(task.label, 1, fmt="cutout", style_pref=task.style_id)
         design = designs[0]
@@ -170,3 +176,20 @@ def render_task(task: DesignTask, outdir: Path) -> dict:
         return {"tag": task.tag, "ok": False, "path": None,
                 "error": "render_design вернул ok=True без пути green_only"}
     return {"tag": task.tag, "ok": True, "path": path, "error": None}
+
+
+def render_task(task: DesignTask, outdir: Path) -> dict:
+    """Один дизайн с авто-ретраем (_RENDER_ATTEMPTS попыток): make_ideas(label,
+    style_pref=style_id) -> render_design(..., green_only=True). Возвращает
+    {"tag", "ok", "path", "error"} — НИКОГДА не бросает исключение наружу (ошибка
+    одного дизайна не должна ронять весь job, см. app.py._run_job). При провале
+    (напр. HARD-reject off-style-кадра) пробует заново — глюк интермиттентный."""
+    res = {"tag": task.tag, "ok": False, "path": None, "error": "не запускалось"}
+    for attempt in range(1, max(1, _RENDER_ATTEMPTS) + 1):
+        res = _render_once(task, outdir)
+        if res.get("ok"):
+            return res
+        if attempt < max(1, _RENDER_ATTEMPTS):
+            logger.warning(f"[{task.tag}] попытка {attempt} провалилась "
+                           f"({res.get('error')}) — авто-ретрай")
+    return res

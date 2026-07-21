@@ -168,6 +168,30 @@ def test_render_task_render_design_not_ok(tmp_path, monkeypatch):
     assert result["error"] == "border coverage < 0.90"
 
 
+def test_render_task_retries_then_succeeds(tmp_path, monkeypatch):
+    # Авто-ретрай (_RENDER_ATTEMPTS): первая попытка render_design падает
+    # (off-style/HARD-reject кадра без хромакея — интермиттентный глюк), вторая —
+    # успех. render_task должен вернуть ok=True, не оставляя слот пустым.
+    monkeypatch.setattr(orchestrator.art_director, "make_ideas", lambda *a, **kw: _fake_design())
+    calls = {"n": 0}
+
+    def flaky(design, tag, outdir, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"ok": False, "error": "кадр без хромакей-фона (coverage 0.00)"}
+        p = outdir / f"{tag}.png"
+        Image.new("RGB", (4, 4), (0, 200, 0)).save(p)
+        return {"ok": True, "green": str(p), "error": None}
+    monkeypatch.setattr(orchestrator.batch_print, "render_design", flaky)
+
+    task = orchestrator.DesignTask(index=1, label="тачки", style_id="01_baroque_frame",
+                                    tag="01_tachki", source="theme")
+    result = orchestrator.render_task(task, tmp_path)
+    assert result["ok"] is True
+    assert result["path"] and Path(result["path"]).exists()
+    assert calls["n"] == 2  # ровно 1 провал + 1 успех
+
+
 def test_render_task_missing_green_path(tmp_path, monkeypatch):
     monkeypatch.setattr(orchestrator.art_director, "make_ideas", lambda *a, **kw: _fake_design())
     monkeypatch.setattr(orchestrator.batch_print, "render_design",

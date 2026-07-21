@@ -584,6 +584,26 @@ def _gym_variety_hint(style_pref: str) -> str:
             f"кистей и пальцев, снаряд в руках держится правдоподобно.")
 
 
+# Анти-портрет для gym-стилей (код-предохранитель против «реф-портрет-глюка», жалоба
+# владельца: ~1 из 4 gym-генераций nano-banana перерисовывала эталон-портрет ЛИЦА
+# персонажа на не-хромакейном фоне вместо стиля). Дописывается в build_prompt для
+# gym-стилей: эталон — ТОЛЬКО для лица/сходства, а не как готовый кадр; выход обязан
+# быть полной стилевой композицией на хромакее, а не портретом. Работает в паре с
+# HARD-reject по coverage (batch_print), который отбраковывает такой кадр, если он
+# всё же проскочил.
+_GYM_FULL_COMPOSITION_BLOCK = (
+    "GYM COMPOSITION — NOT A PORTRAIT: this is a full athletic-merch print. You MUST "
+    "draw the character's WHOLE hyper-muscular half-body (head, torso and both arms), "
+    "the training equipment, the large circular backdrop disc behind the torso, the "
+    "big arched gym-name wordmark and all the cover text — ALL of it floating on a "
+    "clean flat chroma-key field that fills every edge. If a face reference image is "
+    "supplied, use it ONLY for the facial identity/likeness — do NOT reproduce it as a "
+    "cropped face close-up, and NEVER place the character on a realistic, blurred or "
+    "any non-chroma background. The output is the styled gym composition, never a plain "
+    "character portrait."
+)
+
+
 def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
                  style_pref: str = None) -> str:
     """Имя _ask_claude — историческое (обратная совместимость вызовов/тестов),
@@ -1134,6 +1154,10 @@ def build_prompt(design: dict) -> str:
     style_block = _style_bank_prompt_block(design)
     if style_block:
         parts.append(style_block)
+
+    # Анти-портрет для gym-стилей (реф-портрет-глюк) — см. _GYM_FULL_COMPOSITION_BLOCK.
+    if str(design.get("style_id") or "") in _GYM_STYLE_IDS:
+        parts.append(_GYM_FULL_COMPOSITION_BLOCK)
 
     if config.TEXT_RENDER == "image":
         text_block = _text_render_block(design)

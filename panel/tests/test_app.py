@@ -100,11 +100,13 @@ def test_full_job_progress_thumbs_and_zip(monkeypatch):
 def test_job_with_partial_failures(monkeypatch):
     monkeypatch.setattr(orchestrator.art_director, "make_ideas", lambda *a, **kw: _fake_design())
 
-    calls = {"n": 0}
-
     def flaky_render_design(design, tag, outdir, **kw):
-        calls["n"] += 1
-        if calls["n"] % 2 == 0:
+        # Детерминированно ПО СЛОТУ (номер в начале тега): чётные слоты ВСЕГДА
+        # падают — ретрай их не спасает, проверяем именно устойчивый частичный
+        # сбой. (Раньше мок падал «каждый 2-й вызов» — с авто-ретраем render_task
+        # такой слот вытягивался на повторе, ломая проверку числа сбоев.)
+        idx = int(tag.split("_", 1)[0])
+        if idx % 2 == 0:
             return {"ok": False, "error": "border coverage low"}
         return _fake_render_design(design, tag, outdir, **kw)
     monkeypatch.setattr(orchestrator.batch_print, "render_design", flaky_render_design)
