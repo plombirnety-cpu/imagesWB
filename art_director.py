@@ -874,6 +874,30 @@ _NO_TEXT_TAIL = (
     "anywhere in the artwork."
 )
 
+# Правило «нейтрального» цвета ТЕКСТА (жёсткое правило владельца, правка 2026-07-21):
+# принт кладётся И на ЧЁРНУЮ, И на БЕЛУЮ футболку из ОДНОГО файла — поэтому НИ ОДНА
+# надпись не должна быть плоским чистым чёрным ИЛИ чистым белым: чёрный текст пропадает
+# на чёрной футболке, белый — на белой. Каждый текстовый элемент = средний тон из
+# ПАЛИТРЫ ИЛЛЮСТРАЦИИ (или нейтральный серый) + ТОЛСТАЯ контрастная обводка вокруг
+# КАЖДОЙ буквы (светлая обводка при тёмной заливке, тёмная — при светлой). Эталоны
+# владельца (Ранга — кремовый с тёмной обводкой, Вельдора — красный с чёрной обводкой,
+# Римуру — голубой с обводкой). Это код-предохранитель поверх правила SHIRT-NEUTRAL в
+# STYLE_BANK.text_treatment — Gemini-арт-директор/nano-banana не протаскивали его
+# достаточно жёстко, чёрный текст продолжал появляться. Ставится ПОСЛЕ описания
+# типографики (type_spec) и формулируется как перекрывающее любой другой выбор цвета.
+_SHIRT_NEUTRAL_TEXT_RULE = (
+    "CRITICAL TEXT COLOUR RULE (the owner prints this design on BOTH black and white "
+    "shirts from the same single file): EVERY text element — the big katakana title "
+    "wordmark, the small English cover-lines, the vertical kanji column, any "
+    "charm-seal glyphs and the bottom quote — must be filled with a MID-TONE colour "
+    "taken from the illustration's own palette (or a neutral mid-grey), and each must "
+    "carry a THICK contrasting outline/keyline around every letter (a light outline "
+    "when the fill is darker, a dark outline when the fill is lighter). NEVER render "
+    "any lettering as flat pure black or flat pure white without such an outline — "
+    "flat black text disappears on a black shirt and flat white text disappears on a "
+    "white shirt. This colour rule OVERRIDES any other colour choice for text."
+)
+
 
 # Анатомия рук — код-предохранитель (жалоба владельца на аномалии рук — 3 руки, 1 рука,
 # без руки — 2026-07-11). Системный промпт уже просит верное число рук/конечностей
@@ -948,6 +972,7 @@ def _text_render_block(design: dict) -> str:
     parts = [
         f"The design INCLUDES integrated typography as part of the artwork: "
         f"{type_spec_sentence}",
+        _SHIRT_NEUTRAL_TEXT_RULE,
         f"Spell the phrase EXACTLY, letter by letter: {phrase}.",
         "Write the phrase exactly ONCE — no duplicates elsewhere, no repeated or "
         "smaller copy of the same text anywhere else in the artwork.",

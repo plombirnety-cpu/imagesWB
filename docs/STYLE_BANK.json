@@ -364,6 +364,37 @@
         "мин. кегль номера 0.35-0.5 ширины кадра",
         "chroma green по умолчанию"
       ]
+    },
+    {
+      "id": "34_anime_magazine_cover",
+      "name_ru": "Аниме журнальная обложка / weeb-стритвир",
+      "essence": "A bootleg anime magazine-cover / weeb streetwear zine layout with ALL elements floating on a clean flat chroma-key background (NO filled paper rectangle or box behind them — the print sits directly on the bare garment fabric, like the reference tees where the white is the shirt itself): a single anime character is the cover hero, drawn as a DETAILED retro-anime illustration with soft cel-and-gradient shading, fine confident linework and glossy highlights (1990s-2000s OVA / vintage manga-cover rendering, NOT flat modern sticker-vector). Frame the hero to MATCH the character's temperament: for a composed, serious, elegant, cool or non-combat character, use a calm HEAD-AND-SHOULDERS BUST PORTRAIT facing the viewer that fills most of the frame (like a real anime magazine cover portrait), face and gaze forward, minimal or no weapon; for an energetic, aggressive, combat or action character, use a dramatic three-quarter or dynamic pose gripping their signature weapon. Either way hair and effects sweep across the layout. A HUGE stylised retro KATAKANA title wordmark dominates the upper area — chunky angular katakana with a bold outline and an inner highlight streak, slight italic energy — this fake 'magazine name' is the single largest graphic element. A tiny issue marker (a small kanji-plus-number tag like a year or number) sits beside the title. Scattered faux-Japanese cover typography surrounds the figure: a few small katakana/kanji labels, one short block of tiny Japanese flavour text, and two or three short lines of deadpan ironic ENGLISH cover-lines (weeb humour). A bold VERTICAL kanji column runs down one side reading a seasonal or thematic phrase, punctuated by a big '!!'. A little cluster of small circular and heart-shaped kanji charm-seal stamps (omamori style) sits in the lower area, and one large single decorative kanji chop-seal accents a lower corner. The artwork itself carries a vintage finish: a light halftone dot screen in the shading and gently faded, muted retro inks, like an old screen-printed manga page — but this treatment lives ON the elements only, there is NO paper background behind them. Slightly imperfect, hand-assembled bootleg charm. NO real-world brand or band wordmark anywhere — the katakana title itself is the only wordmark.",
+      "text_treatment": "The big katakana title = the character's name transliterated into katakana (or a punchy katakana phrase), rendered once as a chunky outlined retro wordmark across the top, the largest text by far. Two or three short ironic English cover-lines set small and stacked in the left margin, condensed all-caps sans, plain fill. The vertical kanji seasonal column plus one bold '!!'. The circular and heart charm-seal kanji clusters and the big corner kanji chop are DECORATIVE short kanji (may be loose or imperfect, that is authentic to the genre) — never overlapping the face. Keep exactly one giant title plus a light scattering of small accents; do NOT flood the layout or repeat the title. SHIRT-NEUTRAL TEXT COLOUR (important, owner rule): every text element — the katakana title, the English cover-lines, the vertical kanji column, the charm-seals and the bottom quote — must stay legible on BOTH a black and a white shirt from the same single print. So render all lettering in a NEUTRAL MID-TONE (mid grey) or the single accent colour, ALWAYS with a thick contrasting keyline/outline (a light outline when the fill is dark, a dark outline when the fill is light). NEVER use pure-black-only text and NEVER pure-white-only text without an outline — pure black vanishes on a black garment and pure white vanishes on a white garment.",
+      "palette_rule": "NO background field — elements sit on a clean flat chroma so the print goes straight onto the shirt fabric. ONE muted, slightly-faded retro accent colour carrying the whole design (dusty crimson is the default; a faded pastel two-tone is an alt) + black ink line art, with a light halftone-dot screen in the shading; strict monochromatic discipline, faded-vintage over clean-saturated. A full high-contrast black-and-white manga-halftone variant (no colour, Ben-Day dot shading, gothic-tribal display lettering) is also valid for darker themes.",
+      "mood_tags": [
+        "аниме",
+        "стрит",
+        "вайфу",
+        "weeb",
+        "журнал",
+        "тренд",
+        "молодёжное",
+        "y2k"
+      ],
+      "constraints": [
+        "SINGLE anime FIGURE как обложечный герой, ДЕТАЛЬНАЯ ретро-аниме прорисовка с мягкими градиентами (не плоский вектор), по character_ref если персонаж известен",
+        "винтаж-подача на САМИХ элементах: халфтон в тенях + приглушённые/выцветшие краски + детальная ретро-манга прорисовка (НЕ через бумажный фон)",
+        "БЕЗ фонового прямоугольника/бумаги/рамки-подложки: только элементы (персонаж + катакана-заголовок + текст + вороны + печати) на ЧИСТОМ плоском хромакее по всей площади — принт садится прямо на ткань футболки",
+        "руки/кисти анатомически верные: ровно 5 пальцев, читаемый жест (при риске сложной кисти — упростить позу)",
+        "ровно ОДИН огромный катакана-заголовок сверху = крупнейший элемент; НИКАКИХ реальных брендов/лого/названий групп",
+        "монохром: один акцентный цвет + чёрный на кремовом (или ч/б халфтон-вариант) — без радуги",
+        "японские акценты (вертикальная колонка, шармы-печати, угловой иероглиф-чоп) — декоративные, вне лица",
+        "ЗАПРЕЩЕНА свастика и символ 卍 (мандзи) в ЛЮБОМ виде — читается как свастика, блокируется на маркетплейсах и оскорбителен; если термин требует 卍 (напр. Банкай 卍解), писать ТОЛЬКО катаканой バンカイ или латиницей BANKAI, символ 卍 не рисовать. Также никакой иной ненавистнической/экстремистской символики",
+        "ВЕСЬ ТЕКСТ легибелен и на ЧЁРНОЙ, и на БЕЛОЙ футболке из одного принта: нейтральный средний тон (серый) ИЛИ акцентный цвет + жирный КОНТРАСТНЫЙ контур; НИКОГДА не чисто-чёрный без контура и не чисто-белый без контура (пропадёт на футболке того же цвета)",
+        "PG для маркетплейса: без откровенного фансервиса",
+        "чистое плоское хромакей-поле по всем краям под вырезку",
+        "ANATOMY: точное число конечностей и пальцев"
+      ]
     }
   ]
 }
