@@ -23,6 +23,12 @@ attachment; `GET /api/job` сообщает `file_url` и `can_cancel`. ZIP до
 Gemini не выполнялось. Backup перед выкладкой:
 `/opt/print-panel/backups/codex_20260722_cancel_preview`.
 
+**Прод:** код отправлен в `plombirnety-cpu/imagesWB` коммитом `595a1cc`, Docker-образ
+пересобран и сервис `print-factory-panel` заменён. Контейнер `healthy`, `/health`
+отвечает `ok`, cancel API доступен. Живая браузерная проверка при 1280×720 подтвердила
+корректную загрузку панели, наличие stop/modal/download-контролов и отсутствие
+ошибок/предупреждений JavaScript. Платная генерация при smoke-проверке не запускалась.
+
 ---
 
 ## Возврат гринскрина и контекстный chroma-предохранитель (2026-07-22, Codex)
