@@ -167,6 +167,27 @@ def test_plan_tasks_without_selected_style_uses_auto_not_anime_style(monkeypatch
     assert "anime_magazine" not in task.tag
 
 
+def test_plan_tasks_free_prompt_bypasses_dossier_and_selected_styles(monkeypatch):
+    def dossier_must_not_run(*args, **kwargs):
+        raise AssertionError("свободный режим не должен искать франшизу")
+
+    monkeypatch.setattr(orchestrator.franchise_scout, "build_dossier", dossier_must_not_run)
+    brief = "Самурайский кот на луне, неоновый дым и надпись NIGHT PAWS"
+    tasks = orchestrator.plan_tasks(
+        styles=["34_anime_magazine_cover"],
+        count=2,
+        theme="эта тема должна игнорироваться",
+        characters="и эти персонажи тоже",
+        free_prompt=brief,
+    )
+
+    assert len(tasks) == 2
+    assert [task.source for task in tasks] == ["free", "free"]
+    assert [task.label for task in tasks] == [brief, brief]
+    assert [task.style_id for task in tasks] == ["auto", "auto"]
+    assert all(task.char_en == "" and task.title_hint == "" for task in tasks)
+
+
 def test_plan_tasks_requires_theme_or_characters(monkeypatch):
     def fake_build_dossier(title, kind="auto"):
         return {"characters": []}

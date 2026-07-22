@@ -12,6 +12,9 @@ job -> прогресс + превью по мере готовности + ZIP.
 from __future__ import annotations
 
 import io
+import hashlib
+import hmac
+import html
 import json
 import multiprocessing
 import queue
@@ -21,11 +24,13 @@ import threading
 import time
 import uuid
 import zipfile
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import parse_qs, quote
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -52,12 +57,160 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="panel-job")
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 
+_AUTH_COOKIE = "print_factory_access"
+_AUTH_TOKEN_MESSAGE = b"print-factory-panel-session-v1"
+_auth_failures: dict[str, deque[float]] = {}
+_auth_failures_lock = threading.Lock()
+
 
 class GenerateRequest(BaseModel):
     styles: list[str] = Field(default_factory=list)
     count: int = 1
     theme: str = ""
     characters: str = ""
+    free_prompt: str = Field(default="", max_length=4000)
+
+
+def _auth_enabled() -> bool:
+    return bool(settings.ACCESS_PASSWORD_SHA256)
+
+
+def _session_token() -> str:
+    """Непарольный cookie-token, детерминированный для текущего password hash."""
+    if not _auth_enabled():
+        return ""
+    key = bytes.fromhex(settings.ACCESS_PASSWORD_SHA256)
+    return hmac.new(key, _AUTH_TOKEN_MESSAGE, hashlib.sha256).hexdigest()
+
+
+def _has_access(request: Request) -> bool:
+    if not _auth_enabled():
+        return True
+    supplied = request.cookies.get(_AUTH_COOKIE, "")
+    return bool(supplied) and hmac.compare_digest(supplied, _session_token())
+
+
+def _client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _failed_login_is_limited(client_key: str, now: float | None = None) -> bool:
+    now = time.time() if now is None else now
+    cutoff = now - settings.AUTH_FAILURE_WINDOW
+    with _auth_failures_lock:
+        attempts = _auth_failures.setdefault(client_key, deque())
+        while attempts and attempts[0] < cutoff:
+            attempts.popleft()
+        return len(attempts) >= settings.AUTH_FAILURE_LIMIT
+
+
+def _record_failed_login(client_key: str, now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    with _auth_failures_lock:
+        _auth_failures.setdefault(client_key, deque()).append(now)
+
+
+def _clear_failed_logins(client_key: str) -> None:
+    with _auth_failures_lock:
+        _auth_failures.pop(client_key, None)
+
+
+def _safe_next(value: str) -> str:
+    value = (value or "/").strip()
+    if not value.startswith("/") or value.startswith("//"):
+        return "/"
+    return value
+
+
+def _login_html(next_path: str = "/", error: str = "") -> str:
+    error_html = f'<div class="error">{html.escape(error)}</div>' if error else ""
+    return f"""<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Вход — Print Factory</title>
+<style>
+*{{box-sizing:border-box}} body{{margin:0;min-height:100vh;display:grid;place-items:center;
+background:#1e1f24;color:#e8e8ec;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif}}
+.card{{width:min(390px,calc(100vw - 32px));background:#26272e;border:1px solid #3a3b45;
+border-radius:14px;padding:28px;box-shadow:0 18px 60px #0006}} h1{{font-size:24px;margin:0 0 6px}}
+h1 span{{color:#0ba34d}} p{{color:#9a9ba6;margin:0 0 22px;font-size:14px}}
+label{{display:block;color:#b9bac3;font-size:13px;margin-bottom:7px}}
+input{{width:100%;border:1px solid #444650;border-radius:9px;padding:12px;background:#2e2f37;
+color:#fff;font:inherit;outline:none}} input:focus{{border-color:#0ba34d}}
+button{{width:100%;margin-top:14px;border:0;border-radius:9px;padding:12px;background:#0ba34d;
+color:#fff;font:inherit;font-weight:650;cursor:pointer}} .error{{margin:0 0 14px;padding:10px;
+border-radius:8px;background:#4a2226;color:#ffb3b8;font-size:13px}}
+.note{{margin-top:16px;color:#777985;font-size:11px;text-align:center}}
+</style></head><body><main class="card"><h1>Print <span>Factory</span></h1>
+<p>Введите пароль для доступа к панели генерации.</p>{error_html}
+<form method="post" action="/login">
+<input type="hidden" name="next" value="{html.escape(_safe_next(next_path), quote=True)}">
+<label for="password">Пароль</label>
+<input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
+<button type="submit">Войти</button></form>
+<div class="note">Доступ ограничен владельцем сервера</div></main></body></html>"""
+
+
+@app.middleware("http")
+async def require_panel_access(request: Request, call_next):
+    if not _auth_enabled() or request.url.path in {"/health", "/login"}:
+        return await call_next(request)
+    if _has_access(request):
+        return await call_next(request)
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "требуется вход"}, status_code=401)
+    next_path = request.url.path
+    if request.url.query:
+        next_path += "?" + request.url.query
+    return RedirectResponse(url=f"/login?next={quote(next_path, safe='/')}", status_code=303)
+
+
+@app.get("/login")
+def login_page(request: Request, next: str = "/"):
+    if not _auth_enabled() or _has_access(request):
+        return RedirectResponse(url=_safe_next(next), status_code=303)
+    return HTMLResponse(_login_html(next))
+
+
+@app.post("/login")
+async def login(request: Request):
+    if not _auth_enabled():
+        return RedirectResponse(url="/", status_code=303)
+    client_key = _client_key(request)
+    if _failed_login_is_limited(client_key):
+        return HTMLResponse(
+            _login_html("/", "Слишком много попыток. Повторите через несколько минут."),
+            status_code=429,
+        )
+    if int(request.headers.get("content-length", "0") or 0) > 4096:
+        raise HTTPException(status_code=413, detail="слишком большой запрос")
+    form = parse_qs((await request.body()).decode("utf-8", errors="replace"))
+    password = form.get("password", [""])[0]
+    next_path = _safe_next(form.get("next", ["/"])[0])
+    supplied_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(supplied_hash, settings.ACCESS_PASSWORD_SHA256):
+        _record_failed_login(client_key)
+        return HTMLResponse(_login_html(next_path, "Неверный пароль"), status_code=401)
+
+    _clear_failed_logins(client_key)
+    response = RedirectResponse(url=next_path, status_code=303)
+    response.set_cookie(
+        _AUTH_COOKIE,
+        _session_token(),
+        max_age=settings.AUTH_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(_AUTH_COOKIE, path="/")
+    return response
 
 
 def _style_bank() -> list[dict]:
@@ -89,8 +242,12 @@ def api_generate(req: GenerateRequest):
         raise HTTPException(status_code=400, detail="count должен быть не меньше 1")
     if req.count > settings.MAX_COUNT:
         raise HTTPException(status_code=400, detail=f"максимум {settings.MAX_COUNT} за один запуск")
-    if not (req.theme or "").strip() and not (req.characters or "").strip():
-        raise HTTPException(status_code=400, detail="укажи тему или персонажей")
+    if (
+        not (req.theme or "").strip()
+        and not (req.characters or "").strip()
+        and not (req.free_prompt or "").strip()
+    ):
+        raise HTTPException(status_code=400, detail="укажи тему, персонажей или свободный запрос")
 
     job_id = uuid.uuid4().hex[:12]
     with _jobs_lock:
@@ -102,7 +259,15 @@ def api_generate(req: GenerateRequest):
         }
         _prune_old_jobs_locked()
 
-    _executor.submit(_run_job, job_id, list(req.styles), req.count, req.theme, req.characters)
+    _executor.submit(
+        _run_job,
+        job_id,
+        list(req.styles),
+        req.count,
+        req.theme,
+        req.characters,
+        req.free_prompt,
+    )
     return {"job_id": job_id}
 
 
@@ -135,12 +300,13 @@ def _job_process_entry(
     count: int,
     theme: str,
     characters: str,
+    free_prompt: str,
     outdir_text: str,
     events,
 ) -> None:
     """Планирует и рендерит job, отправляя родителю только простые события."""
     try:
-        tasks = orchestrator.plan_tasks(styles, count, theme, characters)
+        tasks = orchestrator.plan_tasks(styles, count, theme, characters, free_prompt)
     except Exception as e:  # noqa: BLE001
         events.put({"type": "error", "error": f"план не построился: {e}"})
         return
@@ -180,7 +346,14 @@ def _terminate_job_process(process) -> None:
         process.join(timeout=2)
 
 
-def _run_job(job_id: str, styles: list[str], count: int, theme: str, characters: str) -> None:
+def _run_job(
+    job_id: str,
+    styles: list[str],
+    count: int,
+    theme: str,
+    characters: str,
+    free_prompt: str,
+) -> None:
     with _jobs_lock:
         job = _jobs[job_id]
         if job["cancel_event"].is_set():
@@ -195,7 +368,7 @@ def _run_job(job_id: str, styles: list[str], count: int, theme: str, characters:
     events = context.Queue()
     process = context.Process(
         target=_job_process_entry,
-        args=(styles, count, theme, characters, str(outdir), events),
+        args=(styles, count, theme, characters, free_prompt, str(outdir), events),
         name=f"print-job-{job_id}",
     )
     try:

@@ -7,6 +7,7 @@
 franchise_scout, панель их не дублирует и не переопределяет.
 """
 import os
+import re
 from pathlib import Path
 
 PANEL_DIR = Path(__file__).resolve().parent
@@ -37,3 +38,17 @@ STYLE_BANK_PATH = Path(
 # Сколько завершённых job-ов (done/error) держим в памяти/на диске — старые
 # чистятся при превышении (защита от утечки на долгоживущем процессе).
 JOB_HISTORY_LIMIT = int(os.getenv("PANEL_JOB_HISTORY_LIMIT", "20"))
+
+# Лёгкая защита публичной панели паролем. В env хранится только SHA-256 пароля,
+# сам пароль не попадает ни в исходники, ни в compose. Пустое значение отключает
+# gate для локальной разработки и обратной совместимости.
+ACCESS_PASSWORD_SHA256 = os.getenv("PANEL_ACCESS_PASSWORD_SHA256", "").strip().lower()
+if ACCESS_PASSWORD_SHA256 and not re.fullmatch(r"[0-9a-f]{64}", ACCESS_PASSWORD_SHA256):
+    raise RuntimeError("PANEL_ACCESS_PASSWORD_SHA256 должен быть SHA-256 в hex (64 символа)")
+
+AUTH_COOKIE_SECURE = os.getenv("PANEL_AUTH_COOKIE_SECURE", "off").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+AUTH_COOKIE_MAX_AGE = int(os.getenv("PANEL_AUTH_COOKIE_MAX_AGE", str(30 * 24 * 60 * 60)))
+AUTH_FAILURE_LIMIT = int(os.getenv("PANEL_AUTH_FAILURE_LIMIT", "5"))
+AUTH_FAILURE_WINDOW = int(os.getenv("PANEL_AUTH_FAILURE_WINDOW", "300"))

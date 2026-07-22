@@ -3,6 +3,7 @@
 превью -> ZIP), engine-вызовы (art_director.make_ideas/batch_print.render_design)
 монкипатчатся — НИ ОДНОГО платного вызова."""
 import io
+import hashlib
 import multiprocessing
 import time
 import zipfile
@@ -53,6 +54,48 @@ def test_health():
     assert res.json()["status"] == "ok"
 
 
+def test_password_gate_protects_ui_and_api(monkeypatch):
+    password = "test-panel-password"
+    password_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    monkeypatch.setattr(panel_app.settings, "ACCESS_PASSWORD_SHA256", password_hash)
+    panel_app._auth_failures.clear()
+    client = TestClient(panel_app.app)
+
+    # Docker healthcheck остаётся публичным; интерфейс и API закрыты.
+    assert client.get("/health").status_code == 200
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code == 303
+    assert root.headers["location"].startswith("/login")
+    api = client.get("/api/styles")
+    assert api.status_code == 401
+    assert api.json()["detail"] == "требуется вход"
+    assert "Введите пароль" in client.get("/login").text
+
+    wrong = client.post(
+        "/login",
+        data={"password": "wrong", "next": "https://attacker.example"},
+        follow_redirects=False,
+    )
+    assert wrong.status_code == 401
+    assert "Неверный пароль" in wrong.text
+
+    accepted = client.post(
+        "/login", data={"password": password, "next": "/"}, follow_redirects=False,
+    )
+    assert accepted.status_code == 303
+    assert accepted.headers["location"] == "/"
+    cookie = client.cookies.get(panel_app._AUTH_COOKIE)
+    assert cookie
+    assert cookie not in {password, password_hash}
+    assert "httponly" in accepted.headers["set-cookie"].lower()
+    assert client.get("/").status_code == 200
+    assert client.get("/api/styles").status_code == 200
+
+    logged_out = client.get("/logout", follow_redirects=False)
+    assert logged_out.status_code == 303
+    assert client.get("/", follow_redirects=False).status_code == 303
+
+
 def test_api_styles_reads_real_bank():
     client = TestClient(panel_app.app)
     res = client.get("/api/styles")
@@ -75,6 +118,33 @@ def test_generate_rejects_count_over_limit():
         "styles": [], "count": panel_app.settings.MAX_COUNT + 1, "theme": "тачки", "characters": "",
     })
     assert res.status_code == 400
+
+
+def test_free_prompt_runs_as_separate_auto_mode(monkeypatch):
+    monkeypatch.setattr(orchestrator.art_director, "make_ideas", lambda *a, **kw: _fake_design())
+    monkeypatch.setattr(orchestrator.batch_print, "render_design", _fake_render_design)
+    monkeypatch.setattr(
+        orchestrator.franchise_scout,
+        "build_dossier",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("свободный режим не должен искать франшизу")
+        ),
+    )
+
+    client = TestClient(panel_app.app)
+    res = client.post("/api/generate", json={
+        "styles": ["34_anime_magazine_cover"],
+        "count": 1,
+        "theme": "",
+        "characters": "",
+        "free_prompt": "Космический тигр из электрических дуг",
+    })
+    assert res.status_code == 200
+    job = _wait_job_done(client, res.json()["job_id"])
+    assert job["status"] == "done"
+    assert job["done"] == 1
+    assert job["items"][0]["ok"] is True
+    assert job["items"][0]["tag"].endswith("_auto")
 
 
 def test_full_job_progress_thumbs_and_zip(monkeypatch):
@@ -208,6 +278,9 @@ def test_frontend_contains_cancel_and_individual_preview_controls():
     assert 'id="previewModal"' in html
     assert "openPreview" in html
     assert "/cancel" in html
+    assert 'id="freePrompt"' in html
+    assert 'id="freeBtn"' in html
+    assert "free_prompt" in html
 
 
 def test_unknown_job_404():

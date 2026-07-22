@@ -7,7 +7,9 @@ panel/PLAN.md "Логика оркестрации". app.py вызывает `pl
 job, затем `render_task()` по очереди на каждый элемент плана (в фоновом потоке),
 обновляя прогресс job-стора между вызовами.
 
-Ветки (вход: styles[], count, theme, characters):
+Ветки (вход: styles[], count, theme, characters, free_prompt):
+  0. free_prompt заполнен -> отдельный свободный режим: запрос без поиска
+     франшизы напрямую дорабатывает арт-директор, стиль всегда auto.
   1. characters заполнено -> эти персонажи, добито до count круговой ротацией
      персонажей и стилей.
   2. characters пусто, theme похоже на тайтл (franchise_scout.build_dossier
@@ -89,7 +91,7 @@ class DesignTask:
     label: str           # что передаём в art_director.make_ideas как theme
     style_id: str         # style_pref
     tag: str              # уникальное имя файла (без расширения)
-    source: str            # "characters" | "franchise" | "theme" — для отладки/лога
+    source: str            # "free" | "characters" | "franchise" | "theme"
     # Протяжка из досье franchise_scout (ветка "franchise"): надёжные имя ЛАТИНИЦЕЙ и
     # тайтл персонажа, которыми ПЕРЕЗАПИСЫВАЕМ character_en/title_en в дизайне ПОСЛЕ
     # арт-директора — тот на нишевых/свежих тайтлах не узнаёт персонажа и оставляет
@@ -100,21 +102,34 @@ class DesignTask:
     title_hint: str = ""     # тайтл франшизы из досье (для character_ref, fallback)
 
 
-def plan_tasks(styles: list[str], count: int, theme: str, characters: str) -> list[DesignTask]:
+def plan_tasks(
+    styles: list[str],
+    count: int,
+    theme: str,
+    characters: str,
+    free_prompt: str = "",
+) -> list[DesignTask]:
     """Строит план из `count` задач по правилам PLAN.md. Не делает никаких
     платных вызовов КРОМЕ (возможно) одного franchise_scout.build_dossier,
     когда characters пусто и theme задана (ветка 2/3, см. модульный докстринг)."""
     theme = (theme or "").strip()
     characters = (characters or "").strip()
+    free_prompt = (free_prompt or "").strip()
     count = max(1, int(count))
 
-    style_list = [s for s in (styles or []) if s] or [settings.DEFAULT_STYLE]
+    # Свободный запрос — отдельный режим: чекбоксы намеренно игнорируются, чтобы
+    # арт-директор сам выбрал композицию под весь пользовательский бриф.
+    style_list = (["auto"] if free_prompt else
+                  ([s for s in (styles or []) if s] or [settings.DEFAULT_STYLE]))
 
     names = _split_characters(characters)
     title_hint = ""
     # entries — список (label, char_en): label уходит арт-директору как theme,
     # char_en (name_en из досье) ПЕРЕЗАПИШЕТ character_en в дизайне для character_ref.
-    if names:
+    if free_prompt:
+        entries = [(free_prompt, "")] * count
+        source = "free"
+    elif names:
         entries = [(n, "") for n in _expand_round_robin(names, count)]
         source = "characters"
     else:
@@ -138,7 +153,7 @@ def plan_tasks(styles: list[str], count: int, theme: str, characters: str) -> li
             source = "franchise"
         else:
             if not theme:
-                raise ValueError("нужно указать тему или персонажей")
+                raise ValueError("нужно указать тему, персонажей или свободный запрос")
             entries = [(theme, "")] * count
             source = "theme"
             title_hint = ""
