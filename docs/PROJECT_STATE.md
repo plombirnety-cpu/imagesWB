@@ -34,7 +34,14 @@ sticker-подложку, но разрешают локальные белые 
 multiprocessing deprecation warnings. Все тесты офлайн, платных Gemini-вызовов не
 было. Backup перед серверной синхронизацией:
 `/opt/print-panel/backups/codex_20260722_style34_light_backdrop`; кандидатный образ
-`print-factory-panel:candidate-light-backdrop` собран, production ещё не заменён.
+`print-factory-panel:candidate-light-backdrop` собран и прошёл полную проверку.
+
+**Прод:** коммит `7233734` отправлен в `plombirnety-cpu/imagesWB/main`. Активных
+job перед выкладкой не было. Кандидат помечен `print-factory-panel:latest`, контейнер
+заменён и перешёл в `running healthy`, `/health=ok`. Внутри production подтверждены
+лимит `_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT=0.14`, `DEFAULT_STYLE=auto` и
+структурированный `PROHIBITED_CONTENT`. Платную контрольную генерацию при выкладке
+не запускали; существующие PNG и история job в persistent volume сохранены.
 
 ---
 
