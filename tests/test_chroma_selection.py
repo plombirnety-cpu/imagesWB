@@ -54,5 +54,10 @@ def test_green_skin_and_large_green_effect_still_force_blue():
     assert _parse_chroma("A warrior surrounded by a large emerald energy aura.") == "blue"
 
 
+def test_signature_green_bamboo_muzzle_forces_blue_for_nezuko():
+    prompt = "Nezuko wears her signature green bamboo muzzle over her mouth."
+    assert _parse_chroma(prompt) == "blue"
+
+
 def test_deliberate_blue_choice_is_preserved():
     assert _parse_chroma("A silver-haired warrior.", chroma="blue") == "blue"

@@ -641,10 +641,10 @@ _SMALL_GREEN_DETAIL_RE = re.compile(
 _NOTICEABLE_GREEN_FEATURE_RE = re.compile(
     r"(?:hair|skin|fur|scales?|feathers?|body|clothes?|clothing|outfit|costume|uniform|"
     r"shirt|jacket|coat|cloak|cape|robe|dress|skirt|pants|trousers|shorts|haori|kimono|"
-    r"tunic|armou?r|jersey|suit|sweater|hoodie|hat|mask|wings?|tail|weapon|sword|blade|"
+    r"tunic|armou?r|jersey|suit|sweater|hoodie|hat|mask|muzzle|bamboo|wings?|tail|weapon|sword|blade|"
     r"staff|aura|energy|flames?|lightning|glow|markings?|lettering|typography|text|title|"
     r"wordmark|волос\w*|кож\w*|мех\w*|чешу\w*|одежд\w*|костюм\w*|форм\w*|рубаш\w*|"
-    r"куртк\w*|плащ\w*|брон\w*|маск\w*|крыл\w*|хвост\w*|оруж\w*|меч\w*|клин\w*|"
+    r"куртк\w*|плащ\w*|брон\w*|маск\w*|намордн\w*|бамбук\w*|крыл\w*|хвост\w*|оруж\w*|меч\w*|клин\w*|"
     r"аур\w*|энерг\w*|пламен\w*|молни\w*|свечен\w*|текст\w*|надпис\w*|заголов\w*)",
     re.I,
 )
