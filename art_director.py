@@ -620,6 +620,59 @@ def _magazine_cover_quality_hint(style_pref: str) -> str:
     return _MAGAZINE_COVER_QUALITY_HINT if style_pref == _MAGAZINE_COVER_STYLE_ID else ""
 
 
+# Цвет фона сам регулярно попадает в prose-промпт, хотя SYSTEM просит отдавать
+# prompt "без цвета фона". Поэтому искать голое слово green во всём prompt нельзя:
+# "green chroma-key background" ложно превращало практически каждый green в blue.
+# Маленькие детали (глаза/камни) тоже не оправдывают потерю большой синей массы героя.
+_GREEN_COLOR_RE = r"(?:green|emerald|lime(?:-green)?|olive(?:-green)?|зел[её]н\w*|изумрудн\w*)"
+_GREEN_BACKGROUND_RE = re.compile(
+    rf"(?:{_GREEN_COLOR_RE})\s+(?:(?:clean|flat|perfectly|uniform|bright|solid|plain|pure|"
+    rf"saturated|chosen|selected|chroma(?:-key)?)\s+){{0,6}}(?:background|backdrop|canvas|field)\b"
+    rf"|\b(?:background|backdrop|canvas|chroma(?:-key)?\s+field)\s+"
+    rf"(?:(?:is|in|of|a|clean|flat|perfectly|uniform|bright|solid|plain|pure|saturated)\s+){{0,6}}"
+    rf"(?:{_GREEN_COLOR_RE})",
+    re.I,
+)
+_SMALL_GREEN_DETAIL_RE = re.compile(
+    rf"(?:{_GREEN_COLOR_RE})[^.!?;,\n]{{0,24}}\b(?:eyes?|irises|pupils?|gems?|jewels?|earrings?|beads?)\b"
+    rf"|\b(?:eyes?|irises|pupils?|gems?|jewels?|earrings?|beads?)\b[^.!?;,\n]{{0,24}}(?:{_GREEN_COLOR_RE})",
+    re.I,
+)
+_NOTICEABLE_GREEN_FEATURE_RE = re.compile(
+    r"(?:hair|skin|fur|scales?|feathers?|body|clothes?|clothing|outfit|costume|uniform|"
+    r"shirt|jacket|coat|cloak|cape|robe|dress|skirt|pants|trousers|shorts|haori|kimono|"
+    r"tunic|armou?r|jersey|suit|sweater|hoodie|hat|mask|wings?|tail|weapon|sword|blade|"
+    r"staff|aura|energy|flames?|lightning|glow|markings?|lettering|typography|text|title|"
+    r"wordmark|волос\w*|кож\w*|мех\w*|чешу\w*|одежд\w*|костюм\w*|форм\w*|рубаш\w*|"
+    r"куртк\w*|плащ\w*|брон\w*|маск\w*|крыл\w*|хвост\w*|оруж\w*|меч\w*|клин\w*|"
+    r"аур\w*|энерг\w*|пламен\w*|молни\w*|свечен\w*|текст\w*|надпис\w*|заголов\w*)",
+    re.I,
+)
+
+
+def _has_noticeable_green_subject_feature(prompt: str) -> bool:
+    """True только для заметной зелёной массы САМОГО дизайна, не цвета фона/глаз.
+
+    Проверяем цвет и крупный feature в одной короткой фразе в любом порядке. До
+    проверки вырезаем упоминания зелёного chroma/background: это управляющее описание
+    холста, а не свойство героя. Глаза/зрачки/мелкие камни намеренно отсутствуют в
+    feature-списке — ради них нельзя съедать синие волосы, мех или одежду героя.
+    """
+    subject_prompt = _GREEN_BACKGROUND_RE.sub(" ", str(prompt or ""))
+    subject_prompt = _SMALL_GREEN_DETAIL_RE.sub(" ", subject_prompt)
+    color_then_feature = re.search(
+        rf"(?:{_GREEN_COLOR_RE})[^.!?;\n]{{0,64}}{_NOTICEABLE_GREEN_FEATURE_RE.pattern}",
+        subject_prompt,
+        re.I,
+    )
+    feature_then_color = re.search(
+        rf"{_NOTICEABLE_GREEN_FEATURE_RE.pattern}[^.!?;\n]{{0,64}}(?:{_GREEN_COLOR_RE})",
+        subject_prompt,
+        re.I,
+    )
+    return bool(color_then_feature or feature_then_color)
+
+
 # Анти-портрет для gym-стилей (код-предохранитель против «реф-портрет-глюка», жалоба
 # владельца: ~1 из 4 gym-генераций nano-banana перерисовывала эталон-портрет ЛИЦА
 # персонажа на не-хромакейном фоне вместо стиля). Дописывается в build_prompt для
@@ -753,11 +806,12 @@ def _parse(text: str) -> list:
         chroma = str(x.get("chroma") or "").strip().lower()
         chroma = chroma if chroma in ("green", "blue") else "green"
 
-        # Код-предохранитель: если в промпте/идее встречается "green"/"зелён" (регистро-
-        # независимо) — форсим blue, даже если Claude выбрал green. Не доверяем LLM
-        # вслепую: фон не должен сливаться с зелёными элементами персонажа.
-        has_green = bool(re.search(r"\bgreen\b|зелён|зелен|emerald", prompt, re.I))
-        if chroma == "green" and has_green:
+        # Код-предохранитель форсит blue только при ЗАМЕТНОЙ зелёной массе героя/
+        # принта. Голое слово green искать нельзя: LLM часто пишет в prompt сам
+        # "green chroma-key background", и старый поиск из-за этого превращал почти
+        # любой зелёный фон в синий. Маленький цвет глаз также не должен съедать
+        # большую синюю/циановую часть персонажа (живой кейс Иноске, 2026-07-22).
+        if chroma == "green" and _has_noticeable_green_subject_feature(prompt):
             chroma = "blue"
 
         slogan = re.sub(r"[^A-Za-z0-9 !?'\-]", "", str(x.get("slogan") or "")).strip()[:34]
