@@ -151,6 +151,22 @@ def test_plan_tasks_theme_branch_dossier_network_failure(monkeypatch):
     assert [t.label for t in tasks] == ["тачки", "тачки"]
 
 
+def test_plan_tasks_without_selected_style_uses_auto_not_anime_style(monkeypatch):
+    """Живой job cde0a16ef360: Doctor Doom без выбранного стиля ошибочно получил 34."""
+    monkeypatch.setattr(
+        orchestrator.franchise_scout,
+        "build_dossier",
+        lambda *a, **k: {"characters": []},
+    )
+
+    task = orchestrator.plan_tasks(
+        styles=[], count=1, theme="доктор дум", characters="",
+    )[0]
+
+    assert task.style_id == "auto"
+    assert "anime_magazine" not in task.tag
+
+
 def test_plan_tasks_requires_theme_or_characters(monkeypatch):
     def fake_build_dossier(title, kind="auto"):
         return {"characters": []}
@@ -195,6 +211,37 @@ def test_render_task_success(tmp_path, monkeypatch):
     assert result["ok"] is True
     assert result["error"] is None
     assert result["path"] and Path(result["path"]).exists()
+
+
+def test_render_once_auto_does_not_force_style_34(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_make_ideas(*args, **kwargs):
+        captured["style_pref"] = kwargs.get("style_pref")
+        return _fake_design()
+
+    monkeypatch.setattr(orchestrator.art_director, "make_ideas", fake_make_ideas)
+    monkeypatch.setattr(
+        orchestrator.batch_print,
+        "render_design",
+        lambda design, tag, outdir, **kw: {
+            "ok": True,
+            "green": str(outdir / f"{tag}.png"),
+            "error": None,
+        },
+    )
+    task = orchestrator.DesignTask(
+        index=1,
+        label="доктор дум",
+        style_id="auto",
+        tag="01_doktor-dum_auto",
+        source="theme",
+    )
+
+    result = orchestrator._render_once(task, tmp_path)
+
+    assert result["ok"] is True
+    assert captured["style_pref"] is None
 
 
 def test_render_task_art_director_failure(tmp_path, monkeypatch):

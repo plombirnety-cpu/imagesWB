@@ -73,7 +73,11 @@ _MAGAZINE_PRINT_PROMPT_SUFFIX = (
     "arcs and particles must form the irregular lower die-cut contour, like the approved "
     "Tanjiro print whose flames visually finish the bottom. Keep clean chroma visible "
     "below that effect and in both lower corners. All captions and seals float as "
-    "separate outlined graphic islands inside the same contained silhouette."
+    "separate outlined graphic islands inside the same contained silhouette. NEVER "
+    "place a unified white, cream, beige or paper-coloured sticker backing behind the "
+    "character, typography or effects: light colours are allowed only inside local "
+    "hair, clothes, letters and thin keylines, while the gaps between elements remain "
+    "the bare chroma field."
 )
 
 
@@ -329,6 +333,60 @@ def _magazine_print_layout_quality(
         and metrics["bottom"] >= 0.85
         and metrics["left"] >= 0.80
         and metrics["right"] >= 0.80
+    )
+    return ok, metrics
+
+
+# Живая партия c30a6762c8ea: у Юдзурихи все четыре края были идеальным хромакеем,
+# но внутри контура Gemini нарисовал единую кремовую подложку на 17.4% всего кадра.
+# В превью это выглядело как белый лист/наклейка, хотя GreenKey корректно снял внешний
+# синий фон. У остальных пяти принтов крупнейшая связная светлая область была <=10.2%.
+_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT = 0.14
+
+
+def _magazine_print_backdrop_quality(
+    img_rgb: Image.Image,
+    chroma: str = "green",
+    tol: float = 52.0,
+) -> tuple[bool, dict[str, float]]:
+    """Отсечь большую светлую бумажную подложку внутри фигурного style 34.
+
+    Обычная площадь белого не подходит: у персонажа законно бывают белые волосы,
+    хаори и буквы. Поэтому измеряется КРУПНЕЙШАЯ СВЯЗНАЯ нейтрально-светлая область
+    только внутри foreground-маски (не хромакей). Локальные волосы/одежда проходят;
+    единый cream/white sheet под персонажем, заголовком и эффектами — нет.
+    """
+    rgb = np.array(img_rgb.convert("RGB"))
+    key = chroma_remove._border_key(rgb).astype(np.uint8)
+    keyy = cv2.cvtColor(
+        key.reshape(1, 1, 3), cv2.COLOR_RGB2YCrCb
+    )[0, 0].astype(np.float32)
+    ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
+    dist = np.sqrt(
+        (ycc[:, :, 1] - keyy[1]) ** 2 + (ycc[:, :, 2] - keyy[2]) ** 2
+    )
+    foreground = dist >= tol
+
+    rgb16 = rgb.astype(np.int16)
+    channel_min = rgb16.min(axis=2)
+    channel_spread = rgb16.max(axis=2) - channel_min
+    light_neutral = foreground & (channel_min >= 195) & (channel_spread <= 45)
+
+    count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        light_neutral.astype(np.uint8), connectivity=8
+    )
+    largest_px = int(stats[1:, cv2.CC_STAT_AREA].max()) if count > 1 else 0
+    frame_px = max(1, rgb.shape[0] * rgb.shape[1])
+    foreground_px = max(1, int(foreground.sum()))
+    metrics = {
+        "largest_light_component": largest_px / float(frame_px),
+        "light_fraction": float(light_neutral.mean()),
+        "foreground_fraction": float(foreground.mean()),
+        "largest_of_foreground": largest_px / float(foreground_px),
+    }
+    ok = (
+        metrics["largest_light_component"]
+        <= _MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT
     )
     return ok, metrics
 
@@ -989,6 +1047,9 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
 
         layout_ok = True
         layout_metrics = {}
+        backdrop_ok = True
+        backdrop_metrics = {}
+        style_ok = True
         if magazine_print:
             layout_ok, layout_metrics = _magazine_print_layout_quality(
                 attempt_img,
@@ -998,7 +1059,17 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                   f"(top={layout_metrics['top']:.2f}, bottom={layout_metrics['bottom']:.2f}, "
                   f"left={layout_metrics['left']:.2f}, right={layout_metrics['right']:.2f})",
                   flush=True)
-            if layout_ok and cov > best_layout_cov:
+            backdrop_ok, backdrop_metrics = _magazine_print_backdrop_quality(
+                attempt_img,
+                chroma=design["chroma"],
+            )
+            print(f"{p} style34 light-backdrop: "
+                  f"{'OK' if backdrop_ok else 'oversized cream/white sheet'} "
+                  f"(largest={backdrop_metrics['largest_light_component']:.3f}, "
+                  f"limit={_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT:.2f})",
+                  flush=True)
+            style_ok = layout_ok and backdrop_ok
+            if style_ok and cov > best_layout_cov:
                 best_layout_img, best_layout_cov = attempt_img, cov
 
         ocr_ok = True
@@ -1010,7 +1081,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             ocr_ok = _verify_text(attempt_img, expected_phrases)
             print(f"{p} OCR-контроль спеллинга: {'OK' if ocr_ok else 'провал'} "
                   f"(факт вызова залогирован)", flush=True)
-        if ocr_ok and layout_ok and cov > best_cov_ocr_ok:
+        if ocr_ok and style_ok and cov > best_cov_ocr_ok:
             best_img_ocr_ok, best_cov_ocr_ok = attempt_img, cov
 
         figure_ok, figure_frac = _figure_fills_frame(attempt_img, chroma=design["chroma"])
@@ -1037,13 +1108,13 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         # адекватный масштаб И чистую анатомию, если хоть одна попытка даёт оба сразу
         # (anatomy_ok тривиально True, когда гейт неприменим — фигуративность/флаг —
         # тогда это условие полностью эквивалентно старому "просто figure_ok").
-        figure_anatomy_ok = figure_ok and anatomy_ok and layout_ok
+        figure_anatomy_ok = figure_ok and anatomy_ok and style_ok
         if ocr_ok and figure_anatomy_ok and cov > best_cov_ocr_figure_ok:
             best_img_ocr_figure_ok, best_cov_ocr_figure_ok = attempt_img, cov
         if figure_anatomy_ok and cov > best_cov_figure_ok:
             best_img_figure_ok, best_cov_figure_ok = attempt_img, cov
 
-        if cov >= 0.90 and ocr_ok and figure_ok and anatomy_ok and layout_ok:
+        if cov >= 0.90 and ocr_ok and figure_ok and anatomy_ok and style_ok:
             break
         if attempt < timeout_retries:
             reason = []
@@ -1061,6 +1132,12 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                 reason.append(
                     f"style34 упирается в край (bottom={layout_metrics.get('bottom', 0.0):.2f})"
                 )
+            if not backdrop_ok:
+                reason.append(
+                    "style34 содержит сплошную светлую подложку "
+                    f"({backdrop_metrics.get('largest_light_component', 0.0):.3f} > "
+                    f"{_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT:.2f})"
+                )
             print(f"{p} {' и '.join(reason)} -> retry", flush=True)
 
     result["attempts"] = attempts_used
@@ -1073,11 +1150,12 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         return result
 
     if magazine_print and best_layout_img is None:
-        print(f"{p} !! HARD-reject style34: все попытки упираются в края как "
-              f"прямоугольная обложка — нужен фигурный print contour", flush=True)
+        print(f"{p} !! HARD-reject style34: все попытки либо упираются в края, "
+              f"либо содержат большую светлую подложку — нужен фигурный print contour",
+              flush=True)
         result["error"] = (
-            "стиль 34: прямоугольная/full-bleed композиция без чистого нижнего "
-            "хромакейного поля — нужна перегенерация"
+            "стиль 34: прямоугольная/full-bleed композиция или большая белая/кремовая "
+            "подложка вместо свободного хромакея — нужна перегенерация"
         )
         return result
 
@@ -1180,6 +1258,17 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                     print(f"{p} !! fallback style34 full-bleed: bottom="
                           f"{fb_layout_metrics['bottom']:.2f} — не кандидат", flush=True)
                     continue
+                fb_backdrop_ok, fb_backdrop_metrics = _magazine_print_backdrop_quality(
+                    fb_img,
+                    chroma=design["chroma"],
+                )
+                if not fb_backdrop_ok:
+                    print(f"{p} !! fallback style34 с большой светлой подложкой: "
+                          f"largest="
+                          f"{fb_backdrop_metrics['largest_light_component']:.3f} > "
+                          f"{_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT:.2f} — не кандидат",
+                          flush=True)
+                    continue
             if fb_cov > fb_best_cov:
                 fb_best_img, fb_best_cov = fb_img, fb_cov
 
@@ -1281,14 +1370,21 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             raw_img,
             chroma=design["chroma"],
         )
-        if not final_layout_ok:
+        final_backdrop_ok, final_backdrop_metrics = _magazine_print_backdrop_quality(
+            raw_img,
+            chroma=design["chroma"],
+        )
+        if not final_layout_ok or not final_backdrop_ok:
             print(f"{p} !! HARD-reject style34 final: bottom="
                   f"{final_layout_metrics['bottom']:.2f}, "
                   f"left={final_layout_metrics['left']:.2f}, "
-                  f"right={final_layout_metrics['right']:.2f}", flush=True)
+                  f"right={final_layout_metrics['right']:.2f}, "
+                  f"light_backdrop="
+                  f"{final_backdrop_metrics['largest_light_component']:.3f}",
+                  flush=True)
             result["error"] = (
-                "стиль 34: финальная композиция касается края и выглядит как "
-                "прямоугольная обложка — нужна перегенерация"
+                "стиль 34: финальная композиция касается края или содержит большую "
+                "белую/кремовую подложку — нужна перегенерация"
             )
             return result
 

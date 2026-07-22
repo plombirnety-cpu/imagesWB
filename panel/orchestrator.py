@@ -176,7 +176,12 @@ _RENDER_ATTEMPTS = int(os.getenv("PANEL_RENDER_ATTEMPTS", "2"))
 def _render_once(task: "DesignTask", outdir: Path) -> dict:
     """Одна попытка рендера слота (без ретрая). См. render_task."""
     try:
-        designs = art_director.make_ideas(task.label, 1, fmt="cutout", style_pref=task.style_id)
+        # `auto` означает именно отсутствие принудительного банковского стиля:
+        # арт-директор выбирает композицию по теме, а не получает буквальный id.
+        style_pref = None if task.style_id == "auto" else task.style_id
+        designs = art_director.make_ideas(
+            task.label, 1, fmt="cutout", style_pref=style_pref
+        )
         design = designs[0]
     except Exception as e:  # noqa: BLE001
         return {"tag": task.tag, "ok": False, "path": None, "error": f"арт-директор: {e}"}

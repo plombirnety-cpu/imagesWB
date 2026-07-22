@@ -20,8 +20,10 @@ PORT = int(os.getenv("PANEL_PORT", "8040"))
 OUTPUT_DIR = Path(os.getenv("PANEL_OUTPUT_DIR", str(PANEL_DIR / "panel_out")))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Стиль по умолчанию, если владелец не отметил ни одного чекбокса.
-DEFAULT_STYLE = os.getenv("PANEL_DEFAULT_STYLE", "34_anime_magazine_cover")
+# Если владелец не отметил ни одного чекбокса, стиль выбирает арт-директор по теме.
+# Раньше здесь был принудительный anime style 34: поэтому Doctor Doom без выбора
+# неожиданно уходил в аниме-журнал и чаще ловил IMAGE_OTHER/PROHIBITED_CONTENT.
+DEFAULT_STYLE = os.getenv("PANEL_DEFAULT_STYLE", "auto")
 
 # Предохранитель: сколько генераций разрешаем за один запрос панели (каждая —
 # платный вызов Gemini, см. PLAN.md "Технические примечания").

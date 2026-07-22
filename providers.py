@@ -162,9 +162,9 @@ def _generate_gemini(prompt: str, seed: int = None, model: str = None,
                             return img.convert("RGB")
                 for cand in data.get("candidates", []):
                     finish_reason = str(cand.get("finishReason") or "").strip()
-                    if finish_reason == "IMAGE_OTHER":
-                        # Повтор того же payload после IMAGE_OTHER бессмысленен:
-                        # Gemini прямо просит rephrase. Адаптацию делает batch_print.
+                    if finish_reason in {"IMAGE_OTHER", "PROHIBITED_CONTENT"}:
+                        # Оба ответа требуют ИЗМЕНИТЬ запрос. Повтор того же payload
+                        # бессмысленен; адаптацию промпта/референса делает batch_print.
                         raise GeminiImageRejected(
                             finish_reason,
                             str(cand.get("finishMessage") or ""),

@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Регрессия живой партии 1116ed9302ac: style 34 не должен превращаться в
-прямоугольную журнальную карточку, а IMAGE_OTHER нельзя повторять без изменений.
+"""Регрессии живых партий style 34:
+
+- 1116ed9302ac: принт не должен превращаться в прямоугольную журнальную карточку;
+- c30a6762c8ea: внутри фигурного контура не должно быть огромной белой подложки;
+- IMAGE_OTHER нельзя повторять без изменений.
 
 Все тесты офлайн: синтетические PIL-кадры и мок HTTP Gemini.
 """
@@ -60,6 +63,27 @@ def _synthetic_layout(*, touches_bottom: bool) -> Image.Image:
     return img
 
 
+def _synthetic_light_backdrop(*, oversized: bool) -> Image.Image:
+    """Фигурный raw на хорошем chroma, но с допустимой или огромной cream-плашкой."""
+    img = Image.new("RGB", (400, 600), (0, 177, 64))
+    draw = ImageDraw.Draw(img)
+    if oversized:
+        # Аналог живой Юдзурихи: края свободны, но связная светлая подложка занимает
+        # большую часть внутреннего силуэта и превращает принт в наклейку/лист.
+        draw.rounded_rectangle((45, 55, 355, 535), radius=42, fill=(241, 235, 215))
+        draw.ellipse((125, 125, 275, 315), fill=(225, 95, 155))
+        draw.polygon([(85, 470), (150, 420), (205, 525), (275, 435), (325, 500)],
+                     fill=(125, 45, 150))
+    else:
+        # Белые волосы допустимы: светлая область локальна, а не служит общей
+        # подложкой под персонажем, текстом и эффектами.
+        draw.ellipse((125, 90, 275, 250), fill=(235, 232, 220))
+        draw.rounded_rectangle((100, 225, 300, 465), radius=40, fill=(75, 65, 130))
+        draw.polygon([(70, 455), (135, 410), (190, 530), (250, 425), (330, 490)],
+                     fill=(245, 85, 30))
+    return img
+
+
 def test_style34_prompt_contract_is_diecut_print_not_rectangular_cover():
     hint = art_director._MAGAZINE_COVER_QUALITY_HINT.lower()
     suffix = batch_print._MAGAZINE_PRINT_PROMPT_SUFFIX.lower()
@@ -82,6 +106,18 @@ def test_style34_layout_gate_accepts_tanjiro_shape_and_rejects_full_bleed_bottom
     assert bad_metrics["bottom"] < 0.20
 
 
+def test_style34_backdrop_gate_allows_white_hair_but_rejects_large_cream_sheet():
+    good, good_metrics = batch_print._magazine_print_backdrop_quality(
+        _synthetic_light_backdrop(oversized=False), chroma="green")
+    bad, bad_metrics = batch_print._magazine_print_backdrop_quality(
+        _synthetic_light_backdrop(oversized=True), chroma="green")
+
+    assert good is True, good_metrics
+    assert bad is False, bad_metrics
+    assert good_metrics["largest_light_component"] < 0.14
+    assert bad_metrics["largest_light_component"] > 0.14
+
+
 class _ImageOtherResponse:
     status_code = 200
     text = ""
@@ -92,6 +128,19 @@ class _ImageOtherResponse:
             "content": {},
             "finishReason": "IMAGE_OTHER",
             "finishMessage": "Unable to show the generated image.",
+        }]}
+
+
+class _ProhibitedContentResponse:
+    status_code = 200
+    text = ""
+
+    @staticmethod
+    def json():
+        return {"candidates": [{
+            "content": {},
+            "finishReason": "PROHIBITED_CONTENT",
+            "finishMessage": "Rephrase the request.",
         }]}
 
 
@@ -111,6 +160,25 @@ def test_gemini_image_other_is_structured_and_not_retried_identically(monkeypatc
         providers._generate_gemini("draw a safe portrait", reference=Image.new("RGB", (8, 8)))
 
     assert exc_info.value.finish_reason == "IMAGE_OTHER"
+    assert calls == {"post": 1, "sleep": 0}
+
+
+def test_gemini_prohibited_content_uses_same_adaptive_recovery(monkeypatch):
+    calls = {"post": 0, "sleep": 0}
+
+    def fake_post(*args, **kwargs):
+        calls["post"] += 1
+        return _ProhibitedContentResponse()
+
+    monkeypatch.setattr(providers.config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(providers.requests, "post", fake_post)
+    monkeypatch.setattr(providers.time, "sleep",
+                        lambda *_: calls.__setitem__("sleep", calls["sleep"] + 1))
+
+    with pytest.raises(providers.GeminiImageRejected) as exc_info:
+        providers._generate_gemini("draw Doctor Doom as a calm editorial portrait")
+
+    assert exc_info.value.finish_reason == "PROHIBITED_CONTENT"
     assert calls == {"post": 1, "sleep": 0}
 
 
@@ -163,6 +231,37 @@ def test_render_design_retries_full_bleed_then_keeps_diecut_layout(tmp_path, mon
     assert calls["n"] == 2
     saved = Image.open(result["green"]).convert("RGB")
     assert batch_print._magazine_print_layout_quality(saved, "green")[0] is True
+
+
+def test_render_design_retries_oversized_light_backdrop(tmp_path, monkeypatch):
+    images = [
+        _synthetic_light_backdrop(oversized=True),
+        _synthetic_light_backdrop(oversized=False),
+    ]
+    calls = {"n": 0}
+
+    def fake_generate(*args, **kwargs):
+        image = images[calls["n"]]
+        calls["n"] += 1
+        return image
+
+    monkeypatch.setattr(batch_print.providers, "generate_image", fake_generate)
+    monkeypatch.setattr(batch_print.config, "TEXT_RENDER", "code")
+    monkeypatch.setattr(batch_print, "_verify_anatomy", lambda *a, **k: (True, {}))
+    monkeypatch.setattr(batch_print.character_ref, "get_reference", lambda *a, **k: None)
+
+    result = batch_print.render_design(
+        _style34_design(),
+        "style34-no-sticker-sheet",
+        tmp_path,
+        timeout_retries=1,
+        green_only=True,
+    )
+
+    assert result["ok"] is True
+    assert calls["n"] == 2
+    saved = Image.open(result["green"]).convert("RGB")
+    assert batch_print._magazine_print_backdrop_quality(saved, "green")[0] is True
 
 
 def test_render_design_hard_rejects_full_bleed_style34(tmp_path, monkeypatch):
