@@ -811,8 +811,15 @@ def _parse(text: str) -> list:
         # "green chroma-key background", и старый поиск из-за этого превращал почти
         # любой зелёный фон в синий. Маленький цвет глаз также не должен съедать
         # большую синюю/циановую часть персонажа (живой кейс Иноске, 2026-07-22).
-        if chroma == "green" and _has_noticeable_green_subject_feature(prompt):
+        has_noticeable_green = _has_noticeable_green_subject_feature(prompt)
+        explicitly_green_background = bool(_GREEN_BACKGROUND_RE.search(prompt))
+        if has_noticeable_green:
             chroma = "blue"
+        elif explicitly_green_background:
+            # LLM иногда противоречит само себе: prose требует green background, а
+            # JSON-поле отдаёт blue. Когда крупной зелёной массы дизайна нет, prose
+            # — более конкретное указание и возвращаем green (живые Иноске/Тенген).
+            chroma = "green"
 
         slogan = re.sub(r"[^A-Za-z0-9 !?'\-]", "", str(x.get("slogan") or "")).strip()[:34]
         scolor = str(x.get("slogan_color") or "").strip().lower()

@@ -15,14 +15,16 @@
 **Исправлено:** `_has_noticeable_green_subject_feature` сначала исключает управляющее
 описание green chroma/background и малые детали (глаза, зрачки, украшения), затем
 форсит blue только когда зелёный связан с заметной массой дизайна: волосы, кожа, мех,
-одежда/хаори/броня, оружие, крупный эффект или типографика. На пяти живых паспортах
+одежда/хаори/броня, оружие, крупный эффект или типографика. Если JSON-поле LLM
+противоречит собственному явному `green chroma-key background`, без крупной зелёной
+массы побеждает green-background. На пяти живых паспортах
 новая классификация: Тандзиро=`True` (синий верен из-за зелёного хаори), Тенген,
 Зеницу, Незуко, Иноске=`False` (зелёный фон). Явный выбор `blue` сохраняется.
 
 **Проверка и прод:** первоначальный harness краснел на green-background; после фикса
 `CHROMA_GUARD_PASS`, аудит пяти живых prompt — `LIVE_CHROMA_AUDIT_PASS`, Python compile
 зелёный, совместимый production-набор `test_chroma_selection + chroma_qc + style_bank`
-— **63 passed**. Создан backup
+— **64 passed**. Создан backup
 `/opt/print-panel/backups/codex_20260722_chroma_guard/art_director.py`, образ пересобран,
 контейнер `print-factory-panel` перезапущен и `healthy`, `/health` отвечает `ok`;
 предыдущая партия в persistent volume сохранена. Исправление действует на НОВЫЕ
