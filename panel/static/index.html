@@ -32,6 +32,10 @@
   button.primary{background:var(--accent);border-color:transparent;color:#fff;font-weight:600;width:100%}
   button.primary:hover{filter:brightness(1.08)}
   button.blue{background:var(--accent2);border-color:transparent;color:#fff;width:100%}
+  button.danger{background:#a92c32;border-color:#d9534f;color:#fff;font-weight:600}
+  button.danger:hover{background:#c0343c}
+  .run-actions{display:flex;gap:8px;margin-top:8px}
+  .run-actions button{width:auto;flex:1}
   .grp{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;
     display:flex;flex-direction:column;gap:8px}
   .grp .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
@@ -48,6 +52,8 @@
     padding:16px;align-content:start;overflow-y:auto}
   .card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;overflow:hidden;
     display:flex;flex-direction:column}
+  .card.ok{cursor:zoom-in;transition:transform .12s,border-color .12s}
+  .card.ok:hover,.card.ok:focus{transform:translateY(-2px);border-color:#6d92cf;outline:none}
   .card .th{width:100%;aspect-ratio:1/1;object-fit:contain;background:
       repeating-conic-gradient(#2a2b31 0% 25%, #34353d 0% 50%) 0 0/20px 20px}
   .card .nm{font-size:11px;padding:5px 7px;color:var(--muted);overflow:hidden;
@@ -58,6 +64,19 @@
   .card.pending .th{display:flex;align-items:center;justify-content:center;color:var(--muted);
     font-size:11px}
   .hint{color:var(--muted);text-align:center;padding:60px 30px;font-size:14px;margin:auto}
+  .preview-note{font-size:11px;color:var(--muted);margin-top:7px}
+  .modal{position:fixed;inset:0;background:#08090dd9;z-index:20;display:none;
+    align-items:center;justify-content:center;padding:20px}
+  .modal.open{display:flex}
+  .modal-panel{position:relative;width:min(920px,96vw);max-height:94vh;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .modal-title{font-size:13px;color:var(--muted);padding-right:44px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .modal-image{display:block;max-width:100%;max-height:calc(94vh - 115px);margin:auto;object-fit:contain;
+    background:repeating-conic-gradient(#2a2b31 0% 25%,#34353d 0% 50%) 0 0/20px 20px}
+  .modal-close{position:absolute;right:10px;top:8px;font-size:22px;padding:2px 9px;z-index:1}
+  .modal-nav{display:flex;align-items:center;justify-content:center;gap:8px}
+  .modal-nav button,.modal-nav a{width:auto;min-width:110px;text-align:center;text-decoration:none}
+  .modal-download{font:inherit;border-radius:8px;padding:9px 12px;background:var(--accent2);color:#fff}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#000a;
     padding:8px 16px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:9}
   .toast.show{opacity:1}
@@ -97,12 +116,28 @@
     <div class="progwrap" id="progwrap" style="display:none">
       <div class="progbar"><i id="progbarInner"></i></div>
       <div class="progtext" id="progtext"></div>
-      <button class="blue" id="dlBtn" style="margin-top:8px;display:none">Скачать ZIP</button>
+      <div class="run-actions">
+        <button class="danger" id="stopBtn" style="display:none">Остановить генерацию</button>
+        <button class="blue" id="dlBtn" style="display:none">Скачать ZIP</button>
+      </div>
+      <div class="preview-note" id="previewNote" style="display:none">Нажмите на готовый принт, чтобы открыть его крупно и скачать отдельно.</div>
     </div>
     <div class="grid" id="grid">
       <div class="hint" id="hint">Выбери стили, укажи тему или персонажей и нажми «Генерировать» — превью появятся здесь по мере готовности.</div>
     </div>
   </main>
+</div>
+<div class="modal" id="previewModal" role="dialog" aria-modal="true" aria-label="Предпросмотр принта">
+  <div class="modal-panel">
+    <button class="modal-close" id="previewClose" aria-label="Закрыть">×</button>
+    <div class="modal-title" id="previewTitle"></div>
+    <img class="modal-image" id="previewImage" alt="Предпросмотр принта">
+    <div class="modal-nav">
+      <button id="previewPrev">← Предыдущий</button>
+      <a class="modal-download" id="previewDownload" download>Скачать PNG</a>
+      <button id="previewNext">Следующий →</button>
+    </div>
+  </div>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -111,9 +146,14 @@ const $ = s => document.querySelector(s);
 const stylesEl = $('#styles'), themeEl = $('#theme'), charsEl = $('#characters'),
       countEl = $('#count'), genBtn = $('#genBtn'), formErr = $('#formErr'),
       progwrap = $('#progwrap'), progbarInner = $('#progbarInner'), progtext = $('#progtext'),
-      dlBtn = $('#dlBtn'), grid = $('#grid'), hint = $('#hint');
+      stopBtn = $('#stopBtn'), dlBtn = $('#dlBtn'), previewNote = $('#previewNote'),
+      grid = $('#grid'), hint = $('#hint'), previewModal = $('#previewModal'),
+      previewTitle = $('#previewTitle'), previewImage = $('#previewImage'),
+      previewDownload = $('#previewDownload'), previewPrev = $('#previewPrev'),
+      previewNext = $('#previewNext');
 
 let pollTimer = null, currentJob = null;
+let previewItems = [], previewIndex = 0;
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
@@ -147,12 +187,23 @@ function selectedStyles(){
 function cardFor(item){
   const div = document.createElement('div');
   if(item.ok){
-    div.className = 'card';
+    div.className = 'card ok';
+    div.tabIndex = 0;
+    div.setAttribute('role', 'button');
+    div.setAttribute('aria-label', `Открыть принт ${item.tag}`);
     const img = document.createElement('img');
     img.className = 'th'; img.loading = 'lazy'; img.src = item.thumb_url;
     const nm = document.createElement('div');
     nm.className = 'nm'; nm.textContent = item.tag; nm.title = item.tag;
     div.append(img, nm);
+    const open = () => {
+      const index = previewItems.findIndex(it => it.tag === item.tag);
+      if(index >= 0) openPreview(index);
+    };
+    div.addEventListener('click', open);
+    div.addEventListener('keydown', e => {
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(); }
+    });
   }else{
     div.className = 'card err';
     const th = document.createElement('div');
@@ -165,9 +216,60 @@ function cardFor(item){
 }
 
 function renderItems(items){
+  const activeTag = previewModal.classList.contains('open') && previewItems[previewIndex]
+    ? previewItems[previewIndex].tag : null;
+  previewItems = items.filter(it => it.ok);
   grid.innerHTML = '';
   items.forEach(it => grid.append(cardFor(it)));
+  if(activeTag){
+    const index = previewItems.findIndex(it => it.tag === activeTag);
+    if(index >= 0){ previewIndex = index; updatePreview(); }
+    else closePreview();
+  }
+  previewNote.style.display = previewItems.length ? 'block' : 'none';
 }
+
+function updatePreview(){
+  const item = previewItems[previewIndex];
+  if(!item) return closePreview();
+  previewTitle.textContent = `${previewIndex + 1} / ${previewItems.length} — ${item.tag}`;
+  previewImage.src = item.thumb_url;
+  previewImage.alt = item.tag;
+  previewDownload.href = item.file_url;
+  previewDownload.setAttribute('download', `${item.tag}.png`);
+  previewPrev.disabled = previewItems.length < 2;
+  previewNext.disabled = previewItems.length < 2;
+}
+
+function openPreview(index){
+  previewIndex = index;
+  updatePreview();
+  previewModal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  $('#previewClose').focus();
+}
+
+function closePreview(){
+  previewModal.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function movePreview(delta){
+  if(!previewItems.length) return;
+  previewIndex = (previewIndex + delta + previewItems.length) % previewItems.length;
+  updatePreview();
+}
+
+$('#previewClose').onclick = closePreview;
+previewPrev.onclick = () => movePreview(-1);
+previewNext.onclick = () => movePreview(1);
+previewModal.addEventListener('click', e => { if(e.target === previewModal) closePreview(); });
+document.addEventListener('keydown', e => {
+  if(!previewModal.classList.contains('open')) return;
+  if(e.key === 'Escape') closePreview();
+  if(e.key === 'ArrowLeft') movePreview(-1);
+  if(e.key === 'ArrowRight') movePreview(1);
+});
 
 async function pollJob(jobId){
   try{
@@ -176,33 +278,48 @@ async function pollJob(jobId){
     const job = await res.json();
     const total = job.total || 0;
     const pct = total ? Math.round(100 * job.done / total) : 0;
+    const okCount = (job.items || []).filter(i => i.ok).length;
+    const failCount = (job.items || []).filter(i => !i.ok).length;
     progbarInner.style.width = pct + '%';
-    progtext.textContent = job.status === 'queued'
-      ? 'В очереди…'
-      : `${job.done}/${total} готово (${job.status})`;
+    if(job.status === 'queued') progtext.textContent = 'В очереди…';
+    else if(job.status === 'cancelling') progtext.textContent = `Останавливаю… Готово ${okCount} из ${total}`;
+    else if(job.status === 'cancelled') progtext.textContent = `Остановлено. Готово ${okCount} из ${total}`;
+    else progtext.textContent = `${job.done}/${total} обработано · ${okCount} готово${failCount ? ` · ${failCount} с ошибкой` : ''}`;
     renderItems(job.items || []);
     if(job.items && job.items.length) hint.style.display = 'none';
 
-    if(job.status === 'error'){
-      toast('Ошибка: ' + (job.error || 'неизвестно'));
+    stopBtn.style.display = job.can_cancel ? 'block' : 'none';
+    stopBtn.disabled = job.status === 'cancelling';
+    stopBtn.textContent = job.status === 'cancelling' ? 'Останавливаю…' : 'Остановить генерацию';
+    dlBtn.style.display = okCount && ['done','error','cancelled'].includes(job.status) ? 'block' : 'none';
+    if(okCount) dlBtn.onclick = () => { window.location.href = `/api/download/${jobId}`; };
+
+    if(['done','error','cancelled'].includes(job.status)){
       stopPoll();
       genBtn.disabled = false;
-      return;
-    }
-    if(job.status === 'done'){
-      stopPoll();
-      genBtn.disabled = false;
-      const okCount = (job.items||[]).filter(i=>i.ok).length;
-      if(okCount){
-        dlBtn.style.display = 'block';
-        dlBtn.onclick = () => { window.location.href = `/api/download/${jobId}`; };
-      }
-      toast(`Готово: ${okCount}/${total}`);
+      if(job.status === 'error') toast('Ошибка: ' + (job.error || 'неизвестно'));
+      else if(job.status === 'cancelled') toast(`Остановлено. Сохранено: ${okCount}/${total}`);
+      else toast(`Готово: ${okCount}/${total}`);
     }
   }catch(e){
     // сетевой сбой опроса — не останавливаем, попробуем на следующем тике
   }
 }
+
+stopBtn.onclick = async () => {
+  if(!currentJob || !confirm('Остановить текущую генерацию? Уже готовые принты сохранятся.')) return;
+  stopBtn.disabled = true;
+  stopBtn.textContent = 'Останавливаю…';
+  try{
+    const res = await fetch(`/api/job/${currentJob}/cancel`, {method:'POST'});
+    if(!res.ok) throw new Error('не удалось остановить');
+    await pollJob(currentJob);
+  }catch(e){
+    toast(e.message);
+    stopBtn.disabled = false;
+    stopBtn.textContent = 'Остановить генерацию';
+  }
+};
 
 function stopPoll(){
   if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
@@ -224,7 +341,11 @@ genBtn.onclick = async () => {
   hint.style.display = 'none';
   grid.innerHTML = '';
   progwrap.style.display = 'block';
+  stopBtn.style.display = 'none';
   dlBtn.style.display = 'none';
+  previewNote.style.display = 'none';
+  previewItems = [];
+  closePreview();
   progbarInner.style.width = '0%';
   progtext.textContent = 'Запускаю…';
 
@@ -240,6 +361,7 @@ genBtn.onclick = async () => {
     }
     const {job_id} = await res.json();
     currentJob = job_id;
+    stopBtn.style.display = 'block';
     stopPoll();
     pollTimer = setInterval(() => pollJob(job_id), 1500);
     pollJob(job_id);
