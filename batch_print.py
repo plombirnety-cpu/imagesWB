@@ -59,6 +59,74 @@ _REFERENCE_PREFIX = (
     "as described below. Do not copy the reference pose or background. "
 )
 
+_MAGAZINE_PRINT_STYLE_ID = "34_anime_magazine_cover"
+_MAGAZINE_PRINT_PROMPT_SUFFIX = (
+    " STREETWEAR DIE-CUT COMPOSITION — NOT A RECTANGULAR MAGAZINE COVER: treat the "
+    "magazine typography only as a graphic language, never as a full-bleed page, "
+    "poster, card or closed rectangle. Keep one connected, contained print silhouette "
+    "with a clearly visible 6-8% clean CHROMA MOAT between every artwork/text element "
+    "and all four canvas edges. The bust must taper and END ABOVE THE BOTTOM EDGE; "
+    "never crop the torso, clothes, arms or typography against the bottom/side edges. "
+    "MANDATORY SIGNATURE-EFFECT CRADLE: wrap the shoulders and lower bust in one bold, "
+    "character-specific power effect (flames, lightning, shadow ribbons, ice shards, "
+    "wind, petals, cursed energy or another canonical motif). Its asymmetric tongues, "
+    "arcs and particles must form the irregular lower die-cut contour, like the approved "
+    "Tanjiro print whose flames visually finish the bottom. Keep clean chroma visible "
+    "below that effect and in both lower corners. All captions and seals float as "
+    "separate outlined graphic islands inside the same contained silhouette."
+)
+
+
+def _is_magazine_print_style(design: dict) -> bool:
+    return _MAGAZINE_PRINT_STYLE_ID in {
+        str(design.get("style_id") or "").strip(),
+        str(design.get("style_mix") or "").strip(),
+    }
+
+
+def _recover_image_other(
+    design: dict,
+    prompt: str,
+    reference: Image.Image | None,
+    rejection_count: int,
+) -> tuple[str, Image.Image | None]:
+    """Меняет отклонённый IMAGE_OTHER payload; тот же prompt/референс не повторяем."""
+    if rejection_count <= 1:
+        recovered = (
+            prompt
+            + " Rephrase the scene as a PG-rated, non-violent editorial portrait. "
+              "No combat, injury, blood, threatening action or disturbing imagery. "
+              "Preserve the character identity and requested print layout."
+        )
+        return recovered, None
+
+    character = str(design.get("character_en") or "the named anime character").strip()
+    title = str(design.get("title_en") or "").strip()
+    props = str(design.get("signature_props") or "").strip()
+    kana = str(design.get("kana") or "").strip()
+    name_jp = str(design.get("name_jp") or "").strip()
+    slogan = str(design.get("slogan") or "").strip()
+    chroma = str(design.get("chroma") or "green").strip().lower()
+    identity = f"{character} from {title}" if title else character
+    safe = (
+        f"Create a PG-rated, non-violent editorial portrait of {identity}. "
+        f"Preserve the canon face, hair, clothing and these harmless identity details: {props}. "
+        "The expression is confident and calm in a peaceful fashion-editorial pose, with "
+        "only abstract decorative energy. Render polished retro-anime streetwear art in a "
+        f"vertical 2:3 canvas on a perfectly uniform {chroma} chroma-key background. "
+        f"Use the outlined display text {kana!r}, {name_jp!r} and {slogan!r} exactly once, "
+        "away from the face."
+    )
+    if _is_magazine_print_style(design):
+        safe += _MAGAZINE_PRINT_PROMPT_SUFFIX
+    safe += (
+        f" Use {chroma} only for one perfectly flat, uniform chroma-key field behind "
+        "the contained artwork, reaching all canvas edges without scenery, gradients, "
+        "paper, frames, halos or texture. Keep the artwork palette clearly different "
+        "from the key color for clean removal."
+    )
+    return safe, None
+
 # Блок промпта, форсирующий рисование ПО РЕФЕРЕНСУ ОРИГИНАЛА МЕМА (жалоба владельца
 # 2026-07-11 — интернет-мемы, см. meme_ref.get_reference) — добавляется СПЕРЕДИ
 # художественного промпта, когда для темы нашёлся файл data/meme_refs/<slug>.png.
@@ -221,6 +289,48 @@ def _border_chroma_coverage(img_rgb: Image.Image, tol: float = 52.0,
         return 0.0
     close = int((dist[mask] < tol).sum())
     return close / total
+
+
+def _magazine_print_layout_quality(
+    img_rgb: Image.Image,
+    chroma: str = "green",
+    tol: float = 52.0,
+) -> tuple[bool, dict[str, float]]:
+    """Style 34: хромакей должен отделять принт от КАЖДОГО края, особенно снизу.
+
+    Общий `_border_chroma_coverage` усредняет четыре стороны: живые full-bleed
+    «обложки» имели bottom=0, но aggregate≈0.62-0.72 и проходили hard-min=0.5.
+    Здесь измеряем стороны отдельно на 2% полосе. Эталон Тандзиро даёт 1.0 по всем
+    сторонам; дефектная партия 1116ed9302ac — 0.00-0.14 снизу.
+    """
+    rgb = np.array(img_rgb.convert("RGB"))
+    h, w = rgb.shape[:2]
+    key = chroma_remove._border_key(rgb).astype(np.uint8)
+    keyy = cv2.cvtColor(key.reshape(1, 1, 3), cv2.COLOR_RGB2YCrCb)[0, 0].astype(np.float32)
+    ref_ycc = _CHROMA_REF_YCC.get(chroma, _CHROMA_REF_YCC["green"])
+    color_dist = float(np.sqrt(
+        (keyy[1] - ref_ycc[1]) ** 2 + (keyy[2] - ref_ycc[2]) ** 2))
+    if color_dist >= _CHROMA_COLOR_TOL:
+        metrics = {"top": 0.0, "bottom": 0.0, "left": 0.0, "right": 0.0}
+        return False, metrics
+
+    ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
+    dist = np.sqrt((ycc[:, :, 1] - keyy[1]) ** 2 + (ycc[:, :, 2] - keyy[2]) ** 2)
+    close = dist < tol
+    band = max(1, int(round(min(h, w) * 0.02)))
+    metrics = {
+        "top": float(close[:band, :].mean()),
+        "bottom": float(close[-band:, :].mean()),
+        "left": float(close[:, :band].mean()),
+        "right": float(close[:, -band:].mean()),
+    }
+    ok = (
+        metrics["top"] >= 0.80
+        and metrics["bottom"] >= 0.85
+        and metrics["left"] >= 0.80
+        and metrics["right"] >= 0.80
+    )
+    return ok, metrics
 
 
 # ── QC-гейт масштаба фигуры (урок на мелких Маки/этикетке/Люси — персонаж терялся в
@@ -739,7 +849,11 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     ring_phrase = str(design.get("quote") or design.get("slogan") or "").strip() \
         if ring_medallion else ""
 
+    magazine_print = _is_magazine_print_style(design)
     prompt = art_director.build_prompt(design)
+    if magazine_print:
+        # Code-level контракт после арт-директора: LLM не может забыть фигурный низ.
+        prompt = prompt + _MAGAZINE_PRINT_PROMPT_SUFFIX
     if ring_via_direct and not ring_via_bank:
         # Прямой путь (design НЕ прошёл через банк стилей) — art_director не знает про
         # этот design, значит промпт-инструкцию про пустое кольцо добавляем сами.
@@ -794,6 +908,10 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             print(f"{p} референс для {character_en!r} не найден — генерация по тексту, "
                   f"как раньше", flush=True)
 
+    attempt_prompt = prompt
+    attempt_reference = reference
+    image_other_rejections = 0
+
     # TEXT_RENDER=image (десятый заход): встроенная типографика ожидает конкретные
     # фразы на картинке — OCR-контроль спеллинга (_verify_text) проверяет каждую
     # попытку в ТОМ ЖЕ цикле, что QC-гейт границ. Если design не просит текст
@@ -819,6 +937,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     best_img_ocr_ok, best_cov_ocr_ok = None, -1.0
     best_img_ocr_figure_ok, best_cov_ocr_figure_ok = None, -1.0
     best_img_figure_ok, best_cov_figure_ok = None, -1.0
+    best_layout_img, best_layout_cov = None, -1.0
     # vision-QC анатомии рук (см. _verify_anatomy) — НЕ отдельная тир-лестница, а
     # ДОПОЛНИТЕЛЬНОЕ AND-условие, слитое С СУЩЕСТВУЮЩИМ гейтом масштаба фигуры
     # (best_img_ocr_figure_ok/best_img_figure_ok ниже теперь требуют "фигура нормального
@@ -840,7 +959,24 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         try:
             print(f"{p} генерация... seed={try_seed} chroma={design['chroma']} "
                   f"slogan={design.get('slogan')!r}", flush=True)
-            attempt_img = providers.generate_image(prompt, seed=try_seed, reference=reference)
+            attempt_img = providers.generate_image(
+                attempt_prompt,
+                seed=try_seed,
+                reference=attempt_reference,
+            )
+        except providers.GeminiImageRejected as e:
+            image_other_rejections += 1
+            result["error"] = str(e)
+            attempt_prompt, attempt_reference = _recover_image_other(
+                design,
+                prompt,
+                reference,
+                rejection_count=image_other_rejections,
+            )
+            recovery = "без референса" if image_other_rejections == 1 else "безопасный краткий промпт"
+            print(f"{p} !! {e.finish_reason}: следующий повтор изменён ({recovery})",
+                  flush=True)
+            continue
         except Exception as e:  # noqa: BLE001
             print(f"{p} !! попытка {attempt + 1} упала: {e}", flush=True)
             result["error"] = str(e)
@@ -851,6 +987,20 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         if cov > best_cov:
             best_img, best_cov, best_seed = attempt_img, cov, try_seed
 
+        layout_ok = True
+        layout_metrics = {}
+        if magazine_print:
+            layout_ok, layout_metrics = _magazine_print_layout_quality(
+                attempt_img,
+                chroma=design["chroma"],
+            )
+            print(f"{p} style34 die-cut: {'OK' if layout_ok else 'full-bleed'} "
+                  f"(top={layout_metrics['top']:.2f}, bottom={layout_metrics['bottom']:.2f}, "
+                  f"left={layout_metrics['left']:.2f}, right={layout_metrics['right']:.2f})",
+                  flush=True)
+            if layout_ok and cov > best_layout_cov:
+                best_layout_img, best_layout_cov = attempt_img, cov
+
         ocr_ok = True
         if expected_phrases:
             # OCR-вызов — отдельный факт, НЕ платный image-вызов; НЕ увеличивает
@@ -860,7 +1010,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             ocr_ok = _verify_text(attempt_img, expected_phrases)
             print(f"{p} OCR-контроль спеллинга: {'OK' if ocr_ok else 'провал'} "
                   f"(факт вызова залогирован)", flush=True)
-        if ocr_ok and cov > best_cov_ocr_ok:
+        if ocr_ok and layout_ok and cov > best_cov_ocr_ok:
             best_img_ocr_ok, best_cov_ocr_ok = attempt_img, cov
 
         figure_ok, figure_frac = _figure_fills_frame(attempt_img, chroma=design["chroma"])
@@ -887,13 +1037,13 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         # адекватный масштаб И чистую анатомию, если хоть одна попытка даёт оба сразу
         # (anatomy_ok тривиально True, когда гейт неприменим — фигуративность/флаг —
         # тогда это условие полностью эквивалентно старому "просто figure_ok").
-        figure_anatomy_ok = figure_ok and anatomy_ok
+        figure_anatomy_ok = figure_ok and anatomy_ok and layout_ok
         if ocr_ok and figure_anatomy_ok and cov > best_cov_ocr_figure_ok:
             best_img_ocr_figure_ok, best_cov_ocr_figure_ok = attempt_img, cov
         if figure_anatomy_ok and cov > best_cov_figure_ok:
             best_img_figure_ok, best_cov_figure_ok = attempt_img, cov
 
-        if cov >= 0.90 and ocr_ok and figure_ok and anatomy_ok:
+        if cov >= 0.90 and ocr_ok and figure_ok and anatomy_ok and layout_ok:
             break
         if attempt < timeout_retries:
             reason = []
@@ -907,6 +1057,10 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             if not anatomy_ok:
                 reason.append(f"аномалия анатомии рук "
                               f"({anatomy_info.get('reason') or anatomy_info.get('error') or 'см. лог'})")
+            if not layout_ok:
+                reason.append(
+                    f"style34 упирается в край (bottom={layout_metrics.get('bottom', 0.0):.2f})"
+                )
             print(f"{p} {' и '.join(reason)} -> retry", flush=True)
 
     result["attempts"] = attempts_used
@@ -916,6 +1070,15 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
     if best_img is None:
         print(f"{p} !! ни одна попытка не дала картинку — пропуск", flush=True)
         result["error"] = result["error"] or "нет изображения ни на одной попытке"
+        return result
+
+    if magazine_print and best_layout_img is None:
+        print(f"{p} !! HARD-reject style34: все попытки упираются в края как "
+              f"прямоугольная обложка — нужен фигурный print contour", flush=True)
+        result["error"] = (
+            "стиль 34: прямоугольная/full-bleed композиция без чистого нижнего "
+            "хромакейного поля — нужна перегенерация"
+        )
         return result
 
     # Выбор финального изображения + решение про text-fallback. Приоритет: попытка,
@@ -962,11 +1125,15 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         fallback_design = dict(design)
         fallback_design["type_spec"] = ""
         fallback_prompt = art_director.build_prompt(fallback_design)
+        if magazine_print:
+            fallback_prompt = fallback_prompt + _MAGAZINE_PRINT_PROMPT_SUFFIX
+        fallback_reference = attempt_reference
         # best_cov/best_img на этом месте — лучшая попытка ИЗ ОСНОВНОГО цикла (по
         # цвету рамки хромакея, ДО этой fallback-ветки; см. присвоение внутри цикла
         # выше, строка ~608) — используются как safety-net ниже, если сама fallback-
         # генерация придёт с чужим фоном.
-        main_loop_best_img, main_loop_best_cov = best_img, best_cov
+        main_loop_best_img = best_layout_img if magazine_print else best_img
+        main_loop_best_cov = best_layout_cov if magazine_print else best_cov
 
         fb_best_img, fb_best_cov = None, -1.0  # лучшая fallback-попытка ПО ЦВЕТУ (может
                                                 # содержать текст — safety-net, если ни
@@ -980,8 +1147,21 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             fb_seed = seed + 101 * (1 + timeout_retries + fb_attempt)
             try:
                 attempts_used += 1
-                fb_img = providers.generate_image(fallback_prompt, seed=fb_seed,
-                                                  reference=reference)
+                fb_img = providers.generate_image(
+                    fallback_prompt,
+                    seed=fb_seed,
+                    reference=fallback_reference,
+                )
+            except providers.GeminiImageRejected as e:
+                image_other_rejections += 1
+                fallback_prompt, fallback_reference = _recover_image_other(
+                    fallback_design,
+                    fallback_prompt,
+                    fallback_reference,
+                    rejection_count=image_other_rejections,
+                )
+                print(f"{p} !! fallback {e.finish_reason}: изменяю запрос", flush=True)
+                continue
             except Exception as e:  # noqa: BLE001
                 print(f"{p} !! фолбэк-генерация {fb_attempt + 1}/"
                       f"{_FALLBACK_NO_TEXT_MAX_ATTEMPTS} упала: {e}", flush=True)
@@ -991,6 +1171,15 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             print(f"{p} фолбэк-генерация {fb_attempt + 1}/"
                   f"{_FALLBACK_NO_TEXT_MAX_ATTEMPTS} (без текста) border "
                   f"coverage={fb_cov:.2f}", flush=True)
+            if magazine_print:
+                fb_layout_ok, fb_layout_metrics = _magazine_print_layout_quality(
+                    fb_img,
+                    chroma=design["chroma"],
+                )
+                if not fb_layout_ok:
+                    print(f"{p} !! fallback style34 full-bleed: bottom="
+                          f"{fb_layout_metrics['bottom']:.2f} — не кандидат", flush=True)
+                    continue
             if fb_cov > fb_best_cov:
                 fb_best_img, fb_best_cov = fb_img, fb_cov
 
@@ -1070,19 +1259,38 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         # нашлась (см. figure_anatomy_ok в цикле выше).
         raw_img, best_cov = best_img_figure_ok, best_cov_figure_ok
     else:
-        _, worst_figure_frac = _figure_fills_frame(best_img, chroma=design["chroma"])
+        fallback_best = best_layout_img if magazine_print else best_img
+        _, worst_figure_frac = _figure_fills_frame(fallback_best, chroma=design["chroma"])
         print(f"{p} !! warning: масштаб фигуры и/или анатомия рук не сошлись ни на "
               f"одной попытке (высота bbox={worst_figure_frac:.2f} < "
               f"{config.FIGURE_MIN_FRAC} и/или anatomy_warning, см. отдельный лог "
               f"vision-QC анатомии выше) — используем лучшую по coverage как есть",
               flush=True)
-        raw_img = best_img
+        raw_img = fallback_best
+        if magazine_print:
+            best_cov = best_layout_cov
 
     result["attempts"] = attempts_used
     result["images"] = images_received
     result["coverage"] = best_cov
     result["text_fallback"] = text_fallback
     result["single_text_no_overlay"] = single_text_no_overlay
+
+    if magazine_print:
+        final_layout_ok, final_layout_metrics = _magazine_print_layout_quality(
+            raw_img,
+            chroma=design["chroma"],
+        )
+        if not final_layout_ok:
+            print(f"{p} !! HARD-reject style34 final: bottom="
+                  f"{final_layout_metrics['bottom']:.2f}, "
+                  f"left={final_layout_metrics['left']:.2f}, "
+                  f"right={final_layout_metrics['right']:.2f}", flush=True)
+            result["error"] = (
+                "стиль 34: финальная композиция касается края и выглядит как "
+                "прямоугольная обложка — нужна перегенерация"
+            )
+            return result
 
     # anatomy_warning: гейт реально был применим (фигуративный дизайн И ANATOMY_QC=on)
     # НА ХОТЬ ОДНОЙ попытке, но НИ ОДНА попытка не подтвердилась как анатомически чистая

@@ -51,6 +51,17 @@ log = logging.getLogger("providers")
 _GEN_BASE = "https://gen.pollinations.ai/image/"
 
 
+class GeminiImageRejected(RuntimeError):
+    """Gemini закончил запрос без картинки и требует изменить вход, а не seed."""
+
+    def __init__(self, finish_reason: str, message: str = ""):
+        self.finish_reason = str(finish_reason or "UNKNOWN")
+        self.finish_message = str(message or "").strip()
+        super().__init__(
+            f"Gemini отклонил изображение ({self.finish_reason}); нужен изменённый запрос"
+        )
+
+
 def _pollinations_headers() -> dict:
     h = {"User-Agent": "print-factory-nb/1.0"}
     if config.POLLINATIONS_TOKEN:
@@ -149,7 +160,18 @@ def _generate_gemini(prompt: str, seed: int = None, model: str = None,
                             img = Image.open(io.BytesIO(raw))
                             img.load()
                             return img.convert("RGB")
+                for cand in data.get("candidates", []):
+                    finish_reason = str(cand.get("finishReason") or "").strip()
+                    if finish_reason == "IMAGE_OTHER":
+                        # Повтор того же payload после IMAGE_OTHER бессмысленен:
+                        # Gemini прямо просит rephrase. Адаптацию делает batch_print.
+                        raise GeminiImageRejected(
+                            finish_reason,
+                            str(cand.get("finishMessage") or ""),
+                        )
                 last_err = f"ответ без inlineData: {str(data)[:300]}"
+        except GeminiImageRejected:
+            raise
         except Exception as e:  # noqa: BLE001
             last_err = str(e)
         if attempt == 0:
