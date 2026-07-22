@@ -13,9 +13,9 @@ services:
     env_file:
       - ../.env
     environment:
-      # Панель — только green_only превью, апскейл не нужен (владелец делает его
-      # отдельной программой); текстовый и картиночный провайдер — Gemini (см.
-      # panel/PLAN.md "Деплой").
+      # Рендер сначала создаёт хромакейный PNG, затем встроенный GreenKey выдаёт
+      # прозрачный RGBA. Апскейл выключен: GreenKey работает в sharp-режиме.
+      # Текстовый и картиночный провайдер — Gemini (см. panel/PLAN.md "Деплой").
       UPSCALE: "off"
       IMAGE_PROVIDER: "gemini"
       ART_DIRECTOR_PROVIDER: "gemini"

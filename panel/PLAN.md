@@ -26,8 +26,10 @@
 Для каждого дизайна:
 - `designs = art_director.make_ideas(theme_or_character, n=1, fmt="cutout", style_pref=<выбранный style_id>)`
   (при мультивыборе стилей — раскидываем count по выбранным стилям по кругу).
-- `batch_print.render_design(design, tag, outdir, green_only=True)` — ОДИН PNG на зелёном фоне,
-  БЕЗ вырезки и апскейла (апскейл владелец делает отдельной программой).
+- `batch_print.render_design(design, tag, outdir, green_only=True)` — промежуточный
+  PNG на зелёном/синем хромакее.
+- `greenkey_postprocess.process_file(path, sharp=True)` — автоматическая вырезка
+  актуальным GreenKey в прозрачный RGBA без апскейла; этот файл идёт во все выдачи.
 - Собрать все PNG в ZIP.
 
 ## Выдача
@@ -60,7 +62,8 @@
 - `art_director.make_ideas(theme, n, fmt="cutout", recent_styles=None, style_pref=None) -> list[dict]`
 - `franchise_scout.build_dossier(title, kind="auto") -> dict` (персонажи по убыванию score)
 - `batch_print.render_design(design, tag, outdir, ..., green_only=False) -> dict`
-  (для панели `green_only=True` — один PNG на зелёном, без cutout/upscale)
+  (панель использует `green_only=True` только как промежуточный хромакейный рендер,
+  затем обязательно запускает GreenKey)
 - `providers.generate_image(...)` — уже используется render_design, трогать не нужно.
 
 ## Деплой (devops / финальный шаг)

@@ -40,6 +40,7 @@ if str(_ENGINE_ROOT) not in sys.path:
 import art_director      # noqa: E402
 import batch_print        # noqa: E402
 import franchise_scout    # noqa: E402
+import greenkey_postprocess  # noqa: E402
 
 import settings           # noqa: E402  (panel/settings.py, тот же каталог)
 
@@ -214,7 +215,10 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
 
 def render_task(task: DesignTask, outdir: Path) -> dict:
     """Один дизайн с авто-ретраем (_RENDER_ATTEMPTS попыток): make_ideas(label,
-    style_pref=style_id) -> render_design(..., green_only=True). Возвращает
+    style_pref=style_id) -> render_design(..., green_only=True) -> GreenKey.
+    Ретрай относится только к генерации: если уже оплаченный хромакейный PNG
+    получен, сбой финальной подготовки НЕ запускает новую платную генерацию.
+    Возвращает
     {"tag", "ok", "path", "error"} — НИКОГДА не бросает исключение наружу (ошибка
     одного дизайна не должна ронять весь job, см. app.py._run_job). При провале
     (напр. HARD-reject off-style-кадра) пробует заново — глюк интермиттентный."""
@@ -222,8 +226,25 @@ def render_task(task: DesignTask, outdir: Path) -> dict:
     for attempt in range(1, max(1, _RENDER_ATTEMPTS) + 1):
         res = _render_once(task, outdir)
         if res.get("ok"):
-            return res
+            break
         if attempt < max(1, _RENDER_ATTEMPTS):
             logger.warning(f"[{task.tag}] попытка {attempt} провалилась "
                            f"({res.get('error')}) — авто-ретрай")
-    return res
+    if not res.get("ok"):
+        return res
+
+    try:
+        prepared = greenkey_postprocess.process_file(res["path"], sharp=True)
+    except Exception as e:  # noqa: BLE001 — исходный хромакейный PNG сохранён
+        logger.exception(f"[{task.tag}] GreenKey не подготовил финальный PNG")
+        return {
+            "tag": task.tag,
+            "ok": False,
+            "path": None,
+            "error": f"GreenKey: {e}",
+        }
+
+    logger.info(
+        f"[{task.tag}] GreenKey: {prepared.key} bg={prepared.detected_bg} -> RGBA"
+    )
+    return {"tag": task.tag, "ok": True, "path": str(prepared.path), "error": None}

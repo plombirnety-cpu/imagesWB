@@ -270,3 +270,35 @@ def test_render_task_engine_exception_does_not_propagate(tmp_path, monkeypatch):
     result = orchestrator.render_task(task, tmp_path)  # не должно бросить исключение
     assert result["ok"] is False
     assert "render_design" in result["error"]
+
+
+def test_greenkey_failure_does_not_repeat_paid_generation(tmp_path, monkeypatch):
+    """Постобработка идёт после генерационных ретраев и не тратит второй запрос."""
+    monkeypatch.setattr(orchestrator.art_director, "make_ideas", lambda *a, **kw: _fake_design())
+    calls = {"render": 0}
+
+    def fake_render_design(design, tag, outdir, **kw):
+        calls["render"] += 1
+        path = outdir / f"{tag}.png"
+        Image.new("RGB", (20, 20), (0, 200, 0)).save(path)
+        return {"ok": True, "green": str(path), "error": None}
+
+    def fail_greenkey(*args, **kwargs):
+        raise RuntimeError("postprocess unavailable")
+
+    monkeypatch.setattr(orchestrator.batch_print, "render_design", fake_render_design)
+    monkeypatch.setattr(orchestrator.greenkey_postprocess, "process_file", fail_greenkey)
+
+    task = orchestrator.DesignTask(
+        index=1,
+        label="тачки",
+        style_id="01_baroque_frame",
+        tag="01_tachki",
+        source="theme",
+    )
+    result = orchestrator.render_task(task, tmp_path)
+
+    assert result["ok"] is False
+    assert result["path"] is None
+    assert result["error"] == "GreenKey: postprocess unavailable"
+    assert calls["render"] == 1
