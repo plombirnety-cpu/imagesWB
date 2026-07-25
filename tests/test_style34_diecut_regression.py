@@ -118,8 +118,11 @@ def test_style34_prompt_contract_is_diecut_print_not_rectangular_cover():
         assert "bottom edge" in text
         assert "360" in text
         assert "sticker" in text
+        assert "any colour" in text or "любого цвета" in text
+        assert "between independent elements" in text or "между независимыми элементами" in text
     assert "как форма постера/наклейки" not in art_director._DIECUT_BODY.lower()
     assert "не окружает её со всех сторон" in art_director._DIECUT_BODY.lower()
+    assert "подложку/blob/plate любого цвета" in art_director._DIECUT_BODY.lower()
 
 
 def test_style34_sticker_outline_gate_allows_local_white_but_rejects_closed_rim():
