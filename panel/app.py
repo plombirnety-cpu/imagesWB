@@ -220,7 +220,11 @@ def _style_bank() -> list[dict]:
         logger.error(f"не смог прочитать {settings.STYLE_BANK_PATH}: {e}")
         return []
     return [
-        {"id": s["id"], "name_ru": s.get("name_ru", s["id"])}
+        {
+            "id": s["id"],
+            "name_ru": s.get("name_ru", s["id"]),
+            "theme_optional": bool(s.get("theme_optional", False)),
+        }
         for s in data.get("styles", [])
         if s.get("id")
     ]
@@ -246,8 +250,14 @@ def api_generate(req: GenerateRequest):
         not (req.theme or "").strip()
         and not (req.characters or "").strip()
         and not (req.free_prompt or "").strip()
+        and not orchestrator.allows_theme_free(list(req.styles))
     ):
-        raise HTTPException(status_code=400, detail="укажи тему, персонажей или свободный запрос")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "укажи тему, персонажей, свободный запрос или выбери автономный стиль"
+            ),
+        )
 
     job_id = uuid.uuid4().hex[:12]
     with _jobs_lock:

@@ -102,13 +102,49 @@ def test_api_styles_reads_real_bank():
     assert res.status_code == 200
     styles = res.json()
     assert isinstance(styles, list) and len(styles) > 0
-    assert all({"id", "name_ru"} <= set(s.keys()) for s in styles)
+    assert all({"id", "name_ru", "theme_optional"} <= set(s.keys()) for s in styles)
     assert any(s["id"] == "34_anime_magazine_cover" for s in styles)
+    automotive = next(s for s in styles if s["id"] == "37_auto_racing_editorial")
+    assert automotive["theme_optional"] is True
 
 
 def test_generate_rejects_empty_theme_and_characters():
     client = TestClient(panel_app.app)
     res = client.post("/api/generate", json={"styles": [], "count": 2, "theme": "", "characters": ""})
+    assert res.status_code == 400
+
+
+def test_generate_accepts_empty_theme_for_autonomous_car_style(monkeypatch):
+    submitted = []
+    monkeypatch.setattr(
+        panel_app._executor,
+        "submit",
+        lambda *args, **kwargs: submitted.append((args, kwargs)),
+    )
+    client = TestClient(panel_app.app)
+
+    res = client.post("/api/generate", json={
+        "styles": ["37_auto_racing_editorial"],
+        "count": 3,
+        "theme": "",
+        "characters": "",
+    })
+
+    assert res.status_code == 200
+    assert submitted
+    job_id = res.json()["job_id"]
+    with panel_app._jobs_lock:
+        panel_app._jobs.pop(job_id, None)
+
+
+def test_generate_rejects_empty_theme_for_mixed_autonomous_and_regular_styles():
+    client = TestClient(panel_app.app)
+    res = client.post("/api/generate", json={
+        "styles": ["37_auto_racing_editorial", "34_anime_magazine_cover"],
+        "count": 2,
+        "theme": "",
+        "characters": "",
+    })
     assert res.status_code == 400
 
 

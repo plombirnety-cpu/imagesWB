@@ -384,9 +384,11 @@ def test_system_diecut_threads_style_pref_through():
 def test_magazine_cover_quality_hint_is_style_specific():
     hint = ad._magazine_cover_quality_hint("34_anime_magazine_cover")
     assert "ВЕРТИКАЛЬ 2:3" in hint
-    assert "70-85%" in hint
+    assert "65-78%" in hint
     assert "character_ref" in hint
     assert "green/blue chroma" in hint
+    assert "360-градусное кольцо" in hint
+    assert "светлый контур по внешнему силуэту" in hint
     assert ad._magazine_cover_quality_hint("19_tarot") == ""
 
 

@@ -61,23 +61,28 @@ _REFERENCE_PREFIX = (
 
 _MAGAZINE_PRINT_STYLE_ID = "34_anime_magazine_cover"
 _MAGAZINE_PRINT_PROMPT_SUFFIX = (
-    " STREETWEAR DIE-CUT COMPOSITION — NOT A RECTANGULAR MAGAZINE COVER: treat the "
+    " STREETWEAR OPEN-EDGE PRINT COMPOSITION — NOT A STICKER AND NOT A RECTANGULAR "
+    "MAGAZINE COVER: treat the "
     "magazine typography only as a graphic language, never as a full-bleed page, "
-    "poster, card or closed rectangle. Keep one connected, contained print silhouette "
+    "poster, card, sticker, badge or closed rectangle. Keep one contained print group "
     "with a clearly visible 6-8% clean CHROMA MOAT between every artwork/text element "
     "and all four canvas edges. The bust must taper and END ABOVE THE BOTTOM EDGE; "
     "never crop the torso, clothes, arms or typography against the bottom/side edges. "
     "MANDATORY SIGNATURE-EFFECT CRADLE: wrap the shoulders and lower bust in one bold, "
     "character-specific power effect (flames, lightning, shadow ribbons, ice shards, "
-    "wind, petals, cursed energy or another canonical motif). Its asymmetric tongues, "
-    "arcs and particles must form the irregular lower die-cut contour, like the approved "
-    "Tanjiro print whose flames visually finish the bottom. Keep clean chroma visible "
-    "below that effect and in both lower corners. All captions and seals float as "
-    "separate outlined graphic islands inside the same contained silhouette. NEVER "
+    "wind, petals, cursed energy or another canonical motif). The cradle stays OPEN: "
+    "its asymmetric tongues, arcs and particles support the shoulders and visually "
+    "finish the lower edge like the approved Tanjiro flames, but NEVER continue into "
+    "a 360-degree ring around the body. It must not become a cutline, kiss-cut border, "
+    "halo, badge edge or enclosing outline. Keep clean chroma visible below the effect, "
+    "between its open gaps and in both lower corners. Captions and seals float as "
+    "separate editorial elements; dark local letter outlines are allowed, but no shared "
+    "light outer border may join them to the character. NEVER "
     "place a unified white, cream, beige or paper-coloured sticker backing behind the "
-    "character, typography or effects: light colours are allowed only inside local "
-    "hair, clothes, letters and thin keylines, while the gaps between elements remain "
-    "the bare chroma field."
+    "character, typography or effects, and NEVER draw a white/cream/light contour "
+    "following the outer silhouette of the character or effects. Light colours are "
+    "allowed only INSIDE local hair, clothes and letters; the exterior edge must meet "
+    "the bare chroma directly and the gaps between elements remain bare chroma."
 )
 
 
@@ -342,6 +347,8 @@ def _magazine_print_layout_quality(
 # В превью это выглядело как белый лист/наклейка, хотя GreenKey корректно снял внешний
 # синий фон. У остальных пяти принтов крупнейшая связная светлая область была <=10.2%.
 _MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT = 0.14
+_MAGAZINE_STICKER_OUTLINE_MAX_LIGHT_FRACTION = 0.48
+_MAGAZINE_STICKER_OUTLINE_MAX_CONNECTED_FRACTION = 0.38
 
 
 def _magazine_print_backdrop_quality(
@@ -389,6 +396,97 @@ def _magazine_print_backdrop_quality(
         <= _MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT
     )
     return ok, metrics
+
+
+def _magazine_print_sticker_outline_quality(
+    img_rgb: Image.Image,
+    chroma: str = "green",
+    tol: float = 52.0,
+) -> tuple[bool, dict[str, float]]:
+    """Отсечь замкнутую светлую кайму по внешнему силуэту style 34.
+
+    Площадь такой каймы мала, поэтому gate большой светлой подложки её не видит.
+    Здесь для каждого крупного foreground-компонента берётся тонкая внутренняя
+    оболочка его внешней границы. Sticker-cutout даёт почти сплошную белую оболочку;
+    локальные белые волосы, одежда и буквы занимают лишь часть внешней границы.
+    """
+    rgb = np.array(img_rgb.convert("RGB"))
+    h, w = rgb.shape[:2]
+    frame_px = max(1, h * w)
+    key = chroma_remove._border_key(rgb).astype(np.uint8)
+    keyy = cv2.cvtColor(
+        key.reshape(1, 1, 3), cv2.COLOR_RGB2YCrCb
+    )[0, 0].astype(np.float32)
+    ycc = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
+    dist = np.sqrt(
+        (ycc[:, :, 1] - keyy[1]) ** 2 + (ycc[:, :, 2] - keyy[2]) ** 2
+    )
+    foreground = dist >= tol
+
+    rgb16 = rgb.astype(np.int16)
+    channel_min = rgb16.min(axis=2)
+    channel_spread = rgb16.max(axis=2) - channel_min
+    light_neutral = foreground & (channel_min >= 180) & (channel_spread <= 65)
+
+    count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        foreground.astype(np.uint8), connectivity=8
+    )
+    shell_width = max(2, int(round(min(h, w) * 0.0075)))
+    kernel_size = shell_width * 2 + 1
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
+    )
+
+    max_light_fraction = 0.0
+    max_connected_fraction = 0.0
+    measured_components = 0
+    for label in range(1, count):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        comp_w = int(stats[label, cv2.CC_STAT_WIDTH])
+        comp_h = int(stats[label, cv2.CC_STAT_HEIGHT])
+        # Мелкие отдельные буквы/печати не определяют силуэт принта.
+        if (
+            area < frame_px * 0.015
+            or comp_w < w * 0.15
+            or comp_h < h * 0.18
+        ):
+            continue
+
+        component = labels == label
+        eroded = cv2.erode(
+            component.astype(np.uint8), kernel, iterations=1
+        ).astype(bool)
+        shell = component & ~eroded
+        shell_px = int(shell.sum())
+        if shell_px == 0:
+            continue
+        measured_components += 1
+        light_shell = shell & light_neutral
+        light_fraction = float(light_shell.sum()) / float(shell_px)
+
+        light_count, _light_labels, light_stats, _ = cv2.connectedComponentsWithStats(
+            light_shell.astype(np.uint8), connectivity=8
+        )
+        largest_light_px = (
+            int(light_stats[1:, cv2.CC_STAT_AREA].max())
+            if light_count > 1
+            else 0
+        )
+        connected_fraction = largest_light_px / float(shell_px)
+        max_light_fraction = max(max_light_fraction, light_fraction)
+        max_connected_fraction = max(max_connected_fraction, connected_fraction)
+
+    metrics = {
+        "outer_light_fraction": max_light_fraction,
+        "connected_outer_light_fraction": max_connected_fraction,
+        "measured_components": float(measured_components),
+    }
+    closed_light_rim = (
+        max_light_fraction > _MAGAZINE_STICKER_OUTLINE_MAX_LIGHT_FRACTION
+        and max_connected_fraction
+        > _MAGAZINE_STICKER_OUTLINE_MAX_CONNECTED_FRACTION
+    )
+    return not closed_light_rim, metrics
 
 
 # ── QC-гейт масштаба фигуры (урок на мелких Маки/этикетке/Люси — персонаж терялся в
@@ -1049,6 +1147,8 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         layout_metrics = {}
         backdrop_ok = True
         backdrop_metrics = {}
+        outline_ok = True
+        outline_metrics = {}
         style_ok = True
         if magazine_print:
             layout_ok, layout_metrics = _magazine_print_layout_quality(
@@ -1064,11 +1164,22 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                 chroma=design["chroma"],
             )
             print(f"{p} style34 light-backdrop: "
-                  f"{'OK' if backdrop_ok else 'oversized cream/white sheet'} "
-                  f"(largest={backdrop_metrics['largest_light_component']:.3f}, "
-                  f"limit={_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT:.2f})",
+                   f"{'OK' if backdrop_ok else 'oversized cream/white sheet'} "
+                   f"(largest={backdrop_metrics['largest_light_component']:.3f}, "
+                   f"limit={_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT:.2f})",
+                   flush=True)
+            outline_ok, outline_metrics = _magazine_print_sticker_outline_quality(
+                attempt_img,
+                chroma=design["chroma"],
+            )
+            print(f"{p} style34 sticker-outline: "
+                  f"{'OK' if outline_ok else 'closed light rim'} "
+                  f"(outer={outline_metrics['outer_light_fraction']:.3f}, "
+                  f"connected={outline_metrics['connected_outer_light_fraction']:.3f}, "
+                  f"limits={_MAGAZINE_STICKER_OUTLINE_MAX_LIGHT_FRACTION:.2f}/"
+                  f"{_MAGAZINE_STICKER_OUTLINE_MAX_CONNECTED_FRACTION:.2f})",
                   flush=True)
-            style_ok = layout_ok and backdrop_ok
+            style_ok = layout_ok and backdrop_ok and outline_ok
             if style_ok and cov > best_layout_cov:
                 best_layout_img, best_layout_cov = attempt_img, cov
 
@@ -1151,11 +1262,13 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
 
     if magazine_print and best_layout_img is None:
         print(f"{p} !! HARD-reject style34: все попытки либо упираются в края, "
-              f"либо содержат большую светлую подложку — нужен фигурный print contour",
+              f"содержат большую светлую подложку либо замкнутую sticker-кайму — "
+              f"нужен открытый фигурный print contour",
               flush=True)
         result["error"] = (
             "стиль 34: прямоугольная/full-bleed композиция или большая белая/кремовая "
-            "подложка вместо свободного хромакея — нужна перегенерация"
+            "подложка/замкнутая sticker-кайма вместо свободного хромакея — нужна "
+            "перегенерация"
         )
         return result
 
@@ -1266,7 +1379,21 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                     print(f"{p} !! fallback style34 с большой светлой подложкой: "
                           f"largest="
                           f"{fb_backdrop_metrics['largest_light_component']:.3f} > "
-                          f"{_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT:.2f} — не кандидат",
+                           f"{_MAGAZINE_LIGHT_BACKDROP_MAX_COMPONENT:.2f} — не кандидат",
+                           flush=True)
+                    continue
+                fb_outline_ok, fb_outline_metrics = (
+                    _magazine_print_sticker_outline_quality(
+                        fb_img,
+                        chroma=design["chroma"],
+                    )
+                )
+                if not fb_outline_ok:
+                    print(f"{p} !! fallback style34 с замкнутой sticker-каймой: "
+                          f"outer={fb_outline_metrics['outer_light_fraction']:.3f}, "
+                          f"connected="
+                          f"{fb_outline_metrics['connected_outer_light_fraction']:.3f} "
+                          "— не кандидат",
                           flush=True)
                     continue
             if fb_cov > fb_best_cov:
@@ -1374,17 +1501,27 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             raw_img,
             chroma=design["chroma"],
         )
-        if not final_layout_ok or not final_backdrop_ok:
+        final_outline_ok, final_outline_metrics = (
+            _magazine_print_sticker_outline_quality(
+                raw_img,
+                chroma=design["chroma"],
+            )
+        )
+        if not final_layout_ok or not final_backdrop_ok or not final_outline_ok:
             print(f"{p} !! HARD-reject style34 final: bottom="
                   f"{final_layout_metrics['bottom']:.2f}, "
                   f"left={final_layout_metrics['left']:.2f}, "
                   f"right={final_layout_metrics['right']:.2f}, "
                   f"light_backdrop="
-                  f"{final_backdrop_metrics['largest_light_component']:.3f}",
+                  f"{final_backdrop_metrics['largest_light_component']:.3f}, "
+                  f"sticker_outline="
+                  f"{final_outline_metrics['outer_light_fraction']:.3f}/"
+                  f"{final_outline_metrics['connected_outer_light_fraction']:.3f}",
                   flush=True)
             result["error"] = (
                 "стиль 34: финальная композиция касается края или содержит большую "
-                "белую/кремовую подложку — нужна перегенерация"
+                "белую/кремовую подложку либо замкнутую светлую sticker-кайму — "
+                "нужна перегенерация"
             )
             return result
 

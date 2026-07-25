@@ -151,6 +151,39 @@ def test_plan_tasks_theme_branch_dossier_network_failure(monkeypatch):
     assert [t.label for t in tasks] == ["тачки", "тачки"]
 
 
+def test_plan_tasks_autonomous_car_style_needs_no_theme_or_dossier(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator.franchise_scout,
+        "build_dossier",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("автономный авто-стиль не должен искать франшизу")
+        ),
+    )
+
+    tasks = orchestrator.plan_tasks(
+        styles=["37_auto_racing_editorial"],
+        count=4,
+        theme="",
+        characters="",
+    )
+
+    assert len(tasks) == 4
+    assert all(task.style_id == "37_auto_racing_editorial" for task in tasks)
+    assert all(task.source == "autonomous_style" for task in tasks)
+    assert len({task.label for task in tasks}) == 4
+    assert all("Автономная авто-серия" in task.label for task in tasks)
+
+
+def test_allows_theme_free_requires_only_autonomous_styles():
+    assert orchestrator.allows_theme_free(["37_auto_racing_editorial"]) is True
+    assert orchestrator.allows_theme_free([]) is False
+    assert orchestrator.allows_theme_free(["34_anime_magazine_cover"]) is False
+    assert orchestrator.allows_theme_free([
+        "37_auto_racing_editorial",
+        "34_anime_magazine_cover",
+    ]) is False
+
+
 def test_plan_tasks_without_selected_style_uses_auto_not_anime_style(monkeypatch):
     """Живой job cde0a16ef360: Doctor Doom без выбранного стиля ошибочно получил 34."""
     monkeypatch.setattr(

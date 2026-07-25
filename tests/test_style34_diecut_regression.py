@@ -84,6 +84,30 @@ def _synthetic_light_backdrop(*, oversized: bool) -> Image.Image:
     return img
 
 
+def _synthetic_sticker_outline(*, closed: bool) -> Image.Image:
+    """Персонаж с локальными белыми деталями либо с замкнутой sticker-каймой."""
+    img = Image.new("RGB", (400, 600), (0, 177, 64))
+    draw = ImageDraw.Draw(img)
+    if closed:
+        # Толстый светлый внешний силуэт, внутри которого лежит цветная фигура:
+        # именно так выглядят ошибочные Gojo/Itadori/Higuruma из живой партии.
+        draw.rounded_rectangle((82, 72, 318, 532), radius=92, fill=(248, 244, 232))
+        draw.rounded_rectangle((96, 86, 304, 518), radius=80, fill=(45, 35, 80))
+        draw.ellipse((138, 112, 262, 260), fill=(235, 218, 190))
+        draw.polygon([(112, 430), (165, 382), (200, 500), (244, 390), (288, 446),
+                      (270, 506), (130, 506)], fill=(155, 35, 70))
+    else:
+        # Белые волосы и буквы законны, но внешняя граница фигуры остаётся цветной
+        # и напрямую соприкасается с хромакеем.
+        draw.rounded_rectangle((96, 86, 304, 518), radius=80, fill=(45, 35, 80))
+        draw.ellipse((138, 112, 262, 260), fill=(235, 232, 220))
+        draw.polygon([(82, 442), (152, 380), (198, 520), (248, 392), (322, 455),
+                      (288, 530), (118, 530)], fill=(225, 55, 35))
+        draw.rectangle((55, 250, 75, 278), fill=(245, 242, 230))
+        draw.rectangle((55, 292, 83, 320), fill=(245, 242, 230))
+    return img
+
+
 def test_style34_prompt_contract_is_diecut_print_not_rectangular_cover():
     hint = art_director._MAGAZINE_COVER_QUALITY_HINT.lower()
     suffix = batch_print._MAGAZINE_PRINT_PROMPT_SUFFIX.lower()
@@ -92,6 +116,22 @@ def test_style34_prompt_contract_is_diecut_print_not_rectangular_cover():
         assert "chroma moat" in text
         assert "not a rectangular" in text
         assert "bottom edge" in text
+        assert "360" in text
+        assert "sticker" in text
+    assert "как форма постера/наклейки" not in art_director._DIECUT_BODY.lower()
+    assert "не окружает её со всех сторон" in art_director._DIECUT_BODY.lower()
+
+
+def test_style34_sticker_outline_gate_allows_local_white_but_rejects_closed_rim():
+    good, good_metrics = batch_print._magazine_print_sticker_outline_quality(
+        _synthetic_sticker_outline(closed=False), chroma="green")
+    bad, bad_metrics = batch_print._magazine_print_sticker_outline_quality(
+        _synthetic_sticker_outline(closed=True), chroma="green")
+
+    assert good is True, good_metrics
+    assert bad is False, bad_metrics
+    assert good_metrics["outer_light_fraction"] < 0.48
+    assert bad_metrics["outer_light_fraction"] > 0.70
 
 
 def test_style34_layout_gate_accepts_tanjiro_shape_and_rejects_full_bleed_bottom():
@@ -262,6 +302,39 @@ def test_render_design_retries_oversized_light_backdrop(tmp_path, monkeypatch):
     assert calls["n"] == 2
     saved = Image.open(result["green"]).convert("RGB")
     assert batch_print._magazine_print_backdrop_quality(saved, "green")[0] is True
+
+
+def test_render_design_retries_closed_sticker_outline(tmp_path, monkeypatch):
+    images = [
+        _synthetic_sticker_outline(closed=True),
+        _synthetic_sticker_outline(closed=False),
+    ]
+    calls = {"n": 0}
+
+    def fake_generate(*args, **kwargs):
+        image = images[calls["n"]]
+        calls["n"] += 1
+        return image
+
+    monkeypatch.setattr(batch_print.providers, "generate_image", fake_generate)
+    monkeypatch.setattr(batch_print.config, "TEXT_RENDER", "code")
+    monkeypatch.setattr(batch_print, "_verify_anatomy", lambda *a, **k: (True, {}))
+    monkeypatch.setattr(batch_print.character_ref, "get_reference", lambda *a, **k: None)
+
+    result = batch_print.render_design(
+        _style34_design(),
+        "style34-no-closed-sticker-outline",
+        tmp_path,
+        timeout_retries=1,
+        green_only=True,
+    )
+
+    assert result["ok"] is True
+    assert calls["n"] == 2
+    saved = Image.open(result["green"]).convert("RGB")
+    assert batch_print._magazine_print_sticker_outline_quality(
+        saved, "green"
+    )[0] is True
 
 
 def test_render_design_hard_rejects_full_bleed_style34(tmp_path, monkeypatch):

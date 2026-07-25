@@ -103,6 +103,7 @@
 
     <label class="fld">Тема
       <input type="text" id="theme" placeholder="напр. «поднятие уровня в одиночку», «тачки»">
+      <span class="hint-sm" id="themeHint"></span>
     </label>
 
     <label class="fld">Персонажи (опционально)
@@ -168,6 +169,7 @@ const stylesEl = $('#styles'), themeEl = $('#theme'), charsEl = $('#characters')
 
 let pollTimer = null, currentJob = null;
 let previewItems = [], previewIndex = 0;
+let themeOptionalStyleIds = new Set();
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
@@ -181,13 +183,18 @@ async function loadStyles(){
       return;
     }
     stylesEl.innerHTML = '';
+    themeOptionalStyleIds = new Set(
+      list.filter(s=>s.theme_optional).map(s=>s.id)
+    );
     list.forEach(s=>{
       const lab = document.createElement('label');
       const cb = document.createElement('input');
       cb.type = 'checkbox'; cb.value = s.id;
+      cb.addEventListener('change', updateThemeHint);
       lab.append(cb, document.createTextNode(' ' + (s.name_ru || s.id)));
       stylesEl.append(lab);
     });
+    updateThemeHint();
   }catch(e){
     stylesEl.textContent = 'Ошибка загрузки стилей';
   }
@@ -196,6 +203,21 @@ loadStyles();
 
 function selectedStyles(){
   return [...stylesEl.querySelectorAll('input:checked')].map(cb=>cb.value);
+}
+
+function allowsEmptyTheme(){
+  const selected = selectedStyles();
+  return selected.length > 0 && selected.every(id=>themeOptionalStyleIds.has(id));
+}
+
+function updateThemeHint(){
+  const optional = allowsEmptyTheme();
+  $('#themeHint').textContent = optional
+    ? 'Для выбранного авто-стиля тему можно не вводить — арт-директор сам соберёт разные сюжеты.'
+    : '';
+  themeEl.placeholder = optional
+    ? 'необязательно — автомобиль и смысловой текст выберет арт-директор'
+    : 'напр. «поднятие уровня в одиночку», «тачки»';
 }
 
 function cardFor(item){
@@ -384,8 +406,8 @@ genBtn.onclick = () => {
   const theme = themeEl.value.trim();
   const characters = charsEl.value.trim();
   const count = parseInt(countEl.value, 10) || 1;
-  if(!theme && !characters){
-    formErr.textContent = 'Укажи тему или персонажей.';
+  if(!theme && !characters && !allowsEmptyTheme()){
+    formErr.textContent = 'Укажи тему/персонажей или выбери автономный авто-стиль.';
     return;
   }
   startGeneration({styles:selectedStyles(), count, theme, characters, free_prompt:''}, formErr);
