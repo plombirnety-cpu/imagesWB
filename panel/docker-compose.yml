@@ -23,6 +23,7 @@ services:
       IMAGE_ASPECT_RATIO: "2:3"
       PANEL_PORT: "8040"
       PANEL_OUTPUT_DIR: "/app/panel/panel_out"
+      PANEL_RADAR_DB: "/app/panel/panel_out/trend_radar.sqlite3"
       PANEL_MAX_COUNT: "50"
     volumes:
       # Готовые PNG переживают рестарт контейнера (для job-истории/докачки ZIP).

@@ -23,7 +23,7 @@
   .logout{color:#8ea6cf;font-size:11px;text-decoration:none}
   .logout:hover{text-decoration:underline}
   label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
-  input[type=text], input[type=number], textarea{
+  input[type=text], input[type=number], input[type=datetime-local], select, textarea{
     font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);
     border-radius:8px;padding:8px 10px;width:100%}
   textarea{resize:vertical;min-height:44px}
@@ -84,6 +84,58 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#000a;
     padding:8px 16px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:9}
   .toast.show{opacity:1}
+  .view-tabs{display:flex;gap:8px;padding:10px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line)}
+  .view-tabs button{padding:7px 14px}
+  .view-tabs button.active{background:var(--accent2);border-color:#367bd6;color:#fff}
+  .view{flex:1;display:flex;flex-direction:column;min-height:0}
+  .radar-view{padding:16px;overflow-y:auto;gap:14px}
+  .radar-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+  .radar-head h2{font-size:19px;margin:0 0 5px}
+  .radar-head p{font-size:12px;color:var(--muted);margin:0;max-width:850px;line-height:1.5}
+  .radar-form{display:grid;grid-template-columns:repeat(4,minmax(145px,1fr));gap:10px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .radar-form .wide{grid-column:span 2}
+  .radar-form .full{grid-column:1/-1}
+  .radar-form button{align-self:end}
+  .radar-rule{grid-column:1/-1;color:#f0bd6f;font-size:11px;line-height:1.45;
+    border-left:3px solid #b67820;padding-left:9px}
+  .radar-status{font-size:12px;color:var(--muted);min-height:18px}
+  .radar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+  .trend-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:12px;display:flex;flex-direction:column;gap:9px}
+  .trend-card.approved{border-color:#23864d}
+  .trend-card.rejected{opacity:.55}
+  .trend-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .trend-title{font-weight:650;font-size:16px;overflow-wrap:anywhere}
+  .phase{font-size:10px;font-weight:700;border-radius:999px;padding:4px 7px;
+    background:#3a3b45;white-space:nowrap}
+  .phase.NEW,.phase.RISING{background:#174d34;color:#7ee0a6}
+  .phase.RESURGENCE{background:#4d3b17;color:#ffd277}
+  .phase.UNVERIFIED{background:#4b3030;color:#ffaaaa}
+  .trend-body{display:flex;gap:10px}
+  .trend-thumb{width:86px;height:112px;border-radius:7px;object-fit:cover;background:#17181c}
+  .trend-meta{font-size:11px;color:var(--muted);line-height:1.55;min-width:0}
+  .score-row{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+  .score-box{background:var(--panel2);border-radius:6px;padding:6px;text-align:center}
+  .score-box b{display:block;font-size:15px;color:var(--text)}
+  .score-box span{font-size:9px;color:var(--muted)}
+  .trend-terms{font-size:11px;color:#b9c5d9;min-height:16px}
+  .trend-actions{display:flex;gap:6px;flex-wrap:wrap}
+  .trend-actions button{padding:6px 9px;font-size:11px;flex:1}
+  .trend-actions .approve{background:#185f36;border-color:#23864d}
+  .trend-actions .reject{background:#54262a;border-color:#79343a}
+  .trend-actions .generate{background:var(--accent2);border-color:#367bd6}
+  .trend-source{color:#83aef2;text-decoration:none;font-size:11px}
+  .empty-radar{color:var(--muted);text-align:center;padding:42px 20px;border:1px dashed var(--line);
+    border-radius:10px}
+  @media(max-width:900px){
+    .app{display:block}.side{width:100%;min-width:0;max-height:none}.main{min-height:80vh}
+    .radar-form{grid-template-columns:1fr 1fr}.radar-form .wide{grid-column:span 2}
+  }
+  @media(max-width:580px){
+    .radar-form{grid-template-columns:1fr}.radar-form .wide,.radar-form .full{grid-column:1}
+  }
 </style>
 </head>
 <body>
@@ -127,18 +179,78 @@
   </aside>
 
   <main class="main">
-    <div class="progwrap" id="progwrap" style="display:none">
-      <div class="progbar"><i id="progbarInner"></i></div>
-      <div class="progtext" id="progtext"></div>
-      <div class="run-actions">
-        <button class="danger" id="stopBtn" style="display:none">Остановить генерацию</button>
-        <button class="blue" id="dlBtn" style="display:none">Скачать ZIP</button>
+    <nav class="view-tabs" aria-label="Разделы панели">
+      <button id="generationTab" class="active" type="button">Генерация</button>
+      <button id="radarTab" type="button">Радар мемов</button>
+    </nav>
+    <section class="view" id="generationView">
+      <div class="progwrap" id="progwrap" style="display:none">
+        <div class="progbar"><i id="progbarInner"></i></div>
+        <div class="progtext" id="progtext"></div>
+        <div class="run-actions">
+          <button class="danger" id="stopBtn" style="display:none">Остановить генерацию</button>
+          <button class="blue" id="dlBtn" style="display:none">Скачать ZIP</button>
+        </div>
+        <div class="preview-note" id="previewNote" style="display:none">Готовые принты уже без фона. Нажмите, чтобы открыть крупно и скачать PNG.</div>
       </div>
-      <div class="preview-note" id="previewNote" style="display:none">Готовые принты уже без фона. Нажмите, чтобы открыть крупно и скачать PNG.</div>
-    </div>
-    <div class="grid" id="grid">
-      <div class="hint" id="hint">Выбери стили, укажи тему или персонажей и нажми «Генерировать» — превью появятся здесь по мере готовности.</div>
-    </div>
+      <div class="grid" id="grid">
+        <div class="hint" id="hint">Выбери стили, укажи тему или персонажей и нажми «Генерировать» — превью появятся здесь по мере готовности.</div>
+      </div>
+    </section>
+
+    <section class="view radar-view" id="radarView" style="display:none">
+      <div class="radar-head">
+        <div>
+          <h2>TikTok-first радар мемов</h2>
+          <p>Добавляйте публичные ссылки, дату оригинальной публикации и комментарии. TikTok-ссылки обогащаются официальным oEmbed. Telegram и YouTube служат независимыми подтверждениями. Перед платной генерацией требуется ваше одобрение.</p>
+        </div>
+        <button id="radarRefresh" type="button">Обновить</button>
+      </div>
+
+      <form class="radar-form" id="radarForm">
+        <label class="fld">Источник
+          <select id="radarSource">
+            <option value="tiktok">TikTok</option>
+            <option value="telegram">Telegram</option>
+            <option value="youtube">YouTube</option>
+          </select>
+        </label>
+        <label class="fld wide">Публичная HTTPS-ссылка
+          <input id="radarUrl" type="text" required placeholder="https://www.tiktok.com/@author/video/...">
+        </label>
+        <label class="fld">Мем / новое слово
+          <input id="radarTerm" type="text" required maxlength="120" placeholder="например: Воздухан">
+        </label>
+        <label class="fld">Автор
+          <input id="radarAuthor" type="text" maxlength="120" placeholder="@author">
+        </label>
+        <label class="fld">Дата публикации
+          <input id="radarPublished" type="datetime-local">
+        </label>
+        <label class="fld">Просмотры
+          <input id="radarViews" type="number" min="0" value="0">
+        </label>
+        <label class="fld">Лайки
+          <input id="radarLikes" type="number" min="0" value="0">
+        </label>
+        <label class="fld">Репосты
+          <input id="radarShares" type="number" min="0" value="0">
+        </label>
+        <label class="fld full">Подпись к ролику
+          <textarea id="radarCaption" maxlength="4000" placeholder="Текст ролика, хэштеги, контекст"></textarea>
+        </label>
+        <label class="fld full">Комментарии — по одному на строку
+          <textarea id="radarComments" rows="6" maxlength="100000" placeholder="@user1: что за воздухан?&#10;@user2: мне срочно нужен воздухан&#10;просто комментарий без автора"></textarea>
+        </label>
+        <div class="radar-rule">Первое появление в нашей базе не считается рождением мема. Без даты исходной публикации и второго независимого сигнала статус останется «НЕ ПРОВЕРЕНО». Старый мем не станет «НОВЫМ» из-за повторов в комментариях; при новом всплеске он получит отдельный статус «ВОЗВРАТ».</div>
+        <button class="primary" id="radarSubmit" type="submit">Добавить сигнал</button>
+        <div class="radar-status" id="radarFormStatus"></div>
+      </form>
+
+      <div class="radar-grid" id="radarGrid">
+        <div class="empty-radar">Сигналов пока нет. Добавьте первую TikTok-ссылку.</div>
+      </div>
+    </section>
   </main>
 </div>
 <div class="modal" id="previewModal" role="dialog" aria-modal="true" aria-label="Предпросмотр принта">
@@ -165,7 +277,10 @@ const stylesEl = $('#styles'), themeEl = $('#theme'), charsEl = $('#characters')
       grid = $('#grid'), hint = $('#hint'), previewModal = $('#previewModal'),
       previewTitle = $('#previewTitle'), previewImage = $('#previewImage'),
       previewDownload = $('#previewDownload'), previewPrev = $('#previewPrev'),
-      previewNext = $('#previewNext');
+      previewNext = $('#previewNext'), generationTab = $('#generationTab'),
+      radarTab = $('#radarTab'), generationView = $('#generationView'),
+      radarView = $('#radarView'), radarGrid = $('#radarGrid'),
+      radarForm = $('#radarForm'), radarFormStatus = $('#radarFormStatus');
 
 let pollTimer = null, currentJob = null;
 let previewItems = [], previewIndex = 0;
@@ -173,6 +288,17 @@ let themeOptionalStyleIds = new Set();
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
+
+function switchView(view){
+  const radar = view === 'radar';
+  generationView.style.display = radar ? 'none' : 'flex';
+  radarView.style.display = radar ? 'flex' : 'none';
+  generationTab.classList.toggle('active', !radar);
+  radarTab.classList.toggle('active', radar);
+  if(radar) loadRadar();
+}
+generationTab.onclick = () => switchView('generation');
+radarTab.onclick = () => switchView('radar');
 
 async function loadStyles(){
   try{
@@ -362,7 +488,7 @@ function stopPoll(){
   if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
 }
 
-async function startGeneration(payload, errorEl){
+function prepareGenerationUi(){
   formErr.textContent = '';
   freeErr.textContent = '';
   genBtn.disabled = true;
@@ -377,7 +503,18 @@ async function startGeneration(payload, errorEl){
   closePreview();
   progbarInner.style.width = '0%';
   progtext.textContent = 'Запускаю…';
+}
 
+function attachGenerationJob(jobId){
+  currentJob = jobId;
+  stopBtn.style.display = 'block';
+  stopPoll();
+  pollTimer = setInterval(() => pollJob(jobId), 1500);
+  pollJob(jobId);
+}
+
+async function startGeneration(payload, errorEl){
+  prepareGenerationUi();
   try{
     const res = await fetch('/api/generate', {
       method: 'POST',
@@ -389,11 +526,7 @@ async function startGeneration(payload, errorEl){
       throw new Error(err.detail || 'ошибка запуска');
     }
     const {job_id} = await res.json();
-    currentJob = job_id;
-    stopBtn.style.display = 'block';
-    stopPoll();
-    pollTimer = setInterval(() => pollJob(job_id), 1500);
-    pollJob(job_id);
+    attachGenerationJob(job_id);
   }catch(e){
     errorEl.textContent = e.message;
     genBtn.disabled = false;
@@ -422,6 +555,208 @@ freeBtn.onclick = () => {
   }
   startGeneration({styles:[], count, theme:'', characters:'', free_prompt:freePrompt}, freeErr);
 };
+
+const phaseLabels = {
+  UNVERIFIED:'НЕ ПРОВЕРЕНО', NEW:'НОВЫЙ', RISING:'РАСТЁТ',
+  MATURE:'ЗРЕЛЫЙ', DECLINING:'ЗАТУХАЕТ', RESURGENCE:'ВОЗВРАТ',
+};
+
+function scoreBox(label, value){
+  const box = document.createElement('div');
+  box.className = 'score-box';
+  const number = document.createElement('b');
+  number.textContent = Math.round(Number(value) || 0);
+  const caption = document.createElement('span');
+  caption.textContent = label;
+  box.append(number, caption);
+  return box;
+}
+
+function trendCard(trend){
+  const card = document.createElement('article');
+  card.className = 'trend-card' + (trend.approved ? ' approved' : '') +
+    (trend.rejected ? ' rejected' : '');
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'trend-title-row';
+  const title = document.createElement('div');
+  title.className = 'trend-title';
+  title.textContent = trend.display_name;
+  const phase = document.createElement('span');
+  phase.className = `phase ${trend.lifecycle}`;
+  phase.textContent = phaseLabels[trend.lifecycle] || trend.lifecycle;
+  titleRow.append(title, phase);
+
+  const body = document.createElement('div');
+  body.className = 'trend-body';
+  const first = (trend.observations || [])[0] || {};
+  if(first.thumbnail_url && first.thumbnail_url.startsWith('https://')){
+    const thumb = document.createElement('img');
+    thumb.className = 'trend-thumb';
+    thumb.loading = 'lazy';
+    thumb.referrerPolicy = 'no-referrer';
+    thumb.src = first.thumbnail_url;
+    thumb.alt = trend.display_name;
+    body.append(thumb);
+  }
+  const meta = document.createElement('div');
+  meta.className = 'trend-meta';
+  const age = trend.age_days == null ? 'не подтверждён' : `${trend.age_days} дн.`;
+  meta.append(
+    document.createTextNode(`Возраст: ${age}`), document.createElement('br'),
+    document.createTextNode(`Сигналов: ${trend.observation_count} · источников: ${trend.source_count}`),
+    document.createElement('br'),
+    document.createTextNode(`Первый раз в радаре: ${formatDate(trend.radar_first_seen_at)}`)
+  );
+  if(first.source_url){
+    meta.append(document.createElement('br'));
+    const source = document.createElement('a');
+    source.className = 'trend-source';
+    source.href = first.source_url;
+    source.target = '_blank';
+    source.rel = 'noopener noreferrer';
+    source.textContent = `Открыть ${first.source_type || 'источник'} ↗`;
+    meta.append(source);
+  }
+  body.append(meta);
+
+  const scores = document.createElement('div');
+  scores.className = 'score-row';
+  scores.append(
+    scoreBox('ИТОГО', trend.score),
+    scoreBox('ВСПЛЕСК', trend.burst_score),
+    scoreBox('ОХВАТ', trend.spread_score),
+    scoreBox('НОВИЗНА', trend.novelty_score),
+  );
+
+  const terms = document.createElement('div');
+  terms.className = 'trend-terms';
+  const emerging = (trend.emerging_terms || []).slice(0, 5);
+  terms.textContent = emerging.length
+    ? 'Повторы в комментариях: ' + emerging.map(item => `${item.term} ×${item.mentions_6h}`).join(', ')
+    : 'Повторяющихся новых слов в комментариях пока нет.';
+
+  const actions = document.createElement('div');
+  actions.className = 'trend-actions';
+  const approve = document.createElement('button');
+  approve.type = 'button'; approve.className = 'approve';
+  approve.textContent = trend.approved ? '✓ Одобрено' : 'Одобрить';
+  approve.disabled = trend.approved;
+  approve.onclick = () => decideTrend(trend.id, 'approve');
+  const reject = document.createElement('button');
+  reject.type = 'button'; reject.className = 'reject';
+  reject.textContent = trend.rejected ? 'Отклонено' : 'Отклонить';
+  reject.disabled = trend.rejected;
+  reject.onclick = () => decideTrend(trend.id, 'reject');
+  const generate = document.createElement('button');
+  generate.type = 'button'; generate.className = 'generate';
+  generate.textContent = 'В генерацию';
+  generate.disabled = !trend.approved;
+  generate.title = trend.approved ? '' : 'Сначала одобрите тренд';
+  generate.onclick = () => generateTrend(trend.id, trend.display_name);
+  actions.append(approve, reject, generate);
+
+  card.append(titleRow, body, scores, terms, actions);
+  return card;
+}
+
+function formatDate(value){
+  if(!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');
+}
+
+async function loadRadar(){
+  radarGrid.innerHTML = '<div class="empty-radar">Загружаю сигналы…</div>';
+  try{
+    const res = await fetch('/api/radar/trends?limit=100');
+    if(!res.ok) throw new Error('Не удалось загрузить радар');
+    const trends = await res.json();
+    radarGrid.innerHTML = '';
+    if(!trends.length){
+      radarGrid.innerHTML = '<div class="empty-radar">Сигналов пока нет. Добавьте первую TikTok-ссылку.</div>';
+      return;
+    }
+    trends.forEach(trend => radarGrid.append(trendCard(trend)));
+  }catch(e){
+    radarGrid.innerHTML = '';
+    const error = document.createElement('div');
+    error.className = 'empty-radar';
+    error.textContent = e.message;
+    radarGrid.append(error);
+  }
+}
+
+$('#radarRefresh').onclick = loadRadar;
+
+radarForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = $('#radarSubmit');
+  button.disabled = true;
+  radarFormStatus.textContent = 'Сохраняю сигнал…';
+  const localDate = $('#radarPublished').value;
+  const payload = {
+    source_type: $('#radarSource').value,
+    source_url: $('#radarUrl').value.trim(),
+    term: $('#radarTerm').value.trim(),
+    author: $('#radarAuthor').value.trim(),
+    published_at: localDate ? new Date(localDate).toISOString() : null,
+    views: Number($('#radarViews').value) || 0,
+    likes: Number($('#radarLikes').value) || 0,
+    shares: Number($('#radarShares').value) || 0,
+    caption: $('#radarCaption').value.trim(),
+    comments: $('#radarComments').value,
+  };
+  try{
+    const res = await fetch('/api/radar/signals', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload),
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.detail || 'Не удалось добавить сигнал');
+    radarFormStatus.textContent = data.duplicate
+      ? 'Эта ссылка уже была в радаре — дубль не создан.'
+      : 'Сигнал добавлен. TikTok-данные обогащаются в фоне.';
+    $('#radarUrl').value = '';
+    $('#radarCaption').value = '';
+    $('#radarComments').value = '';
+    await loadRadar();
+  }catch(e){
+    radarFormStatus.textContent = e.message;
+  }finally{
+    button.disabled = false;
+  }
+});
+
+async function decideTrend(trendId, decision){
+  try{
+    const res = await fetch(`/api/radar/trends/${trendId}/${decision}`, {method:'POST'});
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.detail || 'Не удалось сохранить решение');
+    toast(decision === 'approve' ? 'Тренд одобрен' : 'Тренд отклонён');
+    await loadRadar();
+  }catch(e){ toast(e.message); }
+}
+
+async function generateTrend(trendId, name){
+  const rawCount = prompt(`Сколько вариантов принта создать для «${name}»?`, '3');
+  if(rawCount === null) return;
+  const count = Math.max(1, Math.min(6, Number.parseInt(rawCount, 10) || 3));
+  switchView('generation');
+  prepareGenerationUi();
+  try{
+    const res = await fetch(`/api/radar/trends/${trendId}/generate`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({count}),
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.detail || 'Не удалось запустить генерацию');
+    attachGenerationJob(data.job_id);
+  }catch(e){
+    formErr.textContent = e.message;
+    genBtn.disabled = false;
+    freeBtn.disabled = false;
+    progwrap.style.display = 'none';
+  }
+}
 </script>
 </body>
 </html>

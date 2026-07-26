@@ -26,6 +26,7 @@ import uuid
 import zipfile
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
@@ -44,6 +45,7 @@ if str(ENGINE_ROOT) not in sys.path:
 
 import settings        # noqa: E402  (panel/settings.py)
 import orchestrator    # noqa: E402  (panel/orchestrator.py)
+import trend_radar     # noqa: E402  (panel/trend_radar.py)
 
 STATIC_DIR = PANEL_DIR / "static"
 
@@ -57,6 +59,12 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="panel-job")
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 
+# Внешний TikTok oEmbed выполняется отдельно от платной генерации. Один worker
+# ограничивает нагрузку и сохраняет порядок; состояние каждого задания живёт в
+# SQLite, поэтому повторный запрос безопасен и не дублирует сигнал.
+_radar_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="radar-ingest")
+_radar_store = trend_radar.TrendRadarStore(settings.RADAR_DB_PATH)
+
 _AUTH_COOKIE = "print_factory_access"
 _AUTH_TOKEN_MESSAGE = b"print-factory-panel-session-v1"
 _auth_failures: dict[str, deque[float]] = {}
@@ -69,6 +77,23 @@ class GenerateRequest(BaseModel):
     theme: str = ""
     characters: str = ""
     free_prompt: str = Field(default="", max_length=4000)
+
+
+class RadarSignalRequest(BaseModel):
+    term: str = Field(min_length=2, max_length=120)
+    source_type: str = Field(default="tiktok", pattern="^(tiktok|telegram|youtube)$")
+    source_url: str = Field(min_length=8, max_length=2048)
+    author: str = Field(default="", max_length=120)
+    caption: str = Field(default="", max_length=4000)
+    comments: str = Field(default="", max_length=100_000)
+    published_at: datetime | None = None
+    views: int = Field(default=0, ge=0)
+    likes: int = Field(default=0, ge=0)
+    shares: int = Field(default=0, ge=0)
+
+
+class RadarGenerateRequest(BaseModel):
+    count: int = Field(default=3, ge=1, le=6)
 
 
 def _auth_enabled() -> bool:
@@ -259,10 +284,26 @@ def api_generate(req: GenerateRequest):
             ),
         )
 
+    return _enqueue_generation(
+        list(req.styles),
+        req.count,
+        req.theme,
+        req.characters,
+        req.free_prompt,
+    )
+
+
+def _enqueue_generation(
+    styles: list[str],
+    count: int,
+    theme: str,
+    characters: str,
+    free_prompt: str,
+) -> dict:
     job_id = uuid.uuid4().hex[:12]
     with _jobs_lock:
         _jobs[job_id] = {
-            "status": "queued", "done": 0, "total": req.count,
+            "status": "queued", "done": 0, "total": count,
             "items": [], "paths": {}, "outdir": None, "error": None,
             "cancel_event": threading.Event(),
             "created": time.time(),
@@ -272,13 +313,86 @@ def api_generate(req: GenerateRequest):
     _executor.submit(
         _run_job,
         job_id,
-        list(req.styles),
-        req.count,
-        req.theme,
-        req.characters,
-        req.free_prompt,
+        list(styles),
+        count,
+        theme,
+        characters,
+        free_prompt,
     )
     return {"job_id": job_id}
+
+
+@app.post("/api/radar/signals", status_code=202)
+def api_radar_signal(req: RadarSignalRequest):
+    try:
+        result = _radar_store.ingest_signal(
+            trend_radar.SignalInput(
+                term=req.term,
+                source_type=req.source_type,
+                source_url=req.source_url,
+                author=req.author,
+                caption=req.caption,
+                comments=req.comments,
+                published_at=req.published_at,
+                views=req.views,
+                likes=req.likes,
+                shares=req.shares,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result["duplicate"] and result["job_status"] == "pending":
+        _radar_executor.submit(_radar_store.run_ingest_job, result["job_id"])
+    result["trend"] = _radar_store.get_trend(result["trend_id"])
+    return result
+
+
+@app.get("/api/radar/jobs/{job_id}")
+def api_radar_job(job_id: str):
+    job = _radar_store.job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="задание радара не найдено")
+    return job
+
+
+@app.get("/api/radar/trends")
+def api_radar_trends(limit: int = 50):
+    return _radar_store.list_trends(limit=limit)
+
+
+@app.get("/api/radar/trends/{trend_id}")
+def api_radar_trend(trend_id: str):
+    trend = _radar_store.get_trend(trend_id)
+    if trend is None:
+        raise HTTPException(status_code=404, detail="тренд не найден")
+    return trend
+
+
+@app.post("/api/radar/trends/{trend_id}/approve")
+def api_radar_approve(trend_id: str):
+    try:
+        return _radar_store.set_decision(trend_id, "approve")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="тренд не найден") from exc
+
+
+@app.post("/api/radar/trends/{trend_id}/reject")
+def api_radar_reject(trend_id: str):
+    try:
+        return _radar_store.set_decision(trend_id, "reject")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="тренд не найден") from exc
+
+
+@app.post("/api/radar/trends/{trend_id}/generate")
+def api_radar_generate(trend_id: str, req: RadarGenerateRequest):
+    try:
+        prompt = _radar_store.generation_prompt(trend_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="тренд не найден") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _enqueue_generation([], req.count, "", "", prompt)
 
 
 def _prune_old_jobs_locked() -> None:

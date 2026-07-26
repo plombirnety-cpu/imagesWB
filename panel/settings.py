@@ -21,6 +21,12 @@ PORT = int(os.getenv("PANEL_PORT", "8040"))
 OUTPUT_DIR = Path(os.getenv("PANEL_OUTPUT_DIR", str(PANEL_DIR / "panel_out")))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# SQLite радара хранится в том же постоянном volume, что и готовые PNG. Отдельный
+# путь нужен тестам и возможному будущему выносу БД на самостоятельный диск.
+RADAR_DB_PATH = Path(
+    os.getenv("PANEL_RADAR_DB", str(OUTPUT_DIR / "trend_radar.sqlite3"))
+)
+
 # Если владелец не отметил ни одного чекбокса, стиль выбирает арт-директор по теме.
 # Раньше здесь был принудительный anime style 34: поэтому Doctor Doom без выбора
 # неожиданно уходил в аниме-журнал и чаще ловил IMAGE_OTHER/PROHIBITED_CONTENT.
