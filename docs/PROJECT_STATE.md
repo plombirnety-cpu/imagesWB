@@ -39,6 +39,23 @@ Mercedes 190E, близкой сетке и похожему тексту. Об�
   отказов из-за отсутствующих `rembg`/Linux multiprocessing-условий. Финальная
   полная проверка выполняется в Linux Docker-кандидате.
 
+### Production-deploy
+
+- Код исправления: commit `74fdb08`, отправлен в `origin/main`.
+- Linux Docker-кандидат `print-factory-panel:74fdb08`: **381 passed**,
+  4 предупреждения `multiprocessing/fork`, 0 падений.
+- Production-образ:
+  `sha256:61e721013b099949096a09537c2e4df113f46054c93311530b1ea57779b640ca`.
+- Контейнер `print-factory-panel`: `running healthy`.
+- Smoke: `/health` → 200; `/` → 303 на `/login`; `/api/styles` без сессии
+  → 401.
+- Внутри production подтверждено: запрос `мерседес`, count=4 создаёт четыре
+  уникальных брифа — 300 SL Gullwing, C111-II, 190 E Evolution II и 500 E;
+  во всех четырёх присутствует `NEUTRAL DUAL-CONTRAST TYPE`.
+- Постоянный mount `panel_panel_out` сохранён; `trend_radar.sqlite3` на месте.
+- Откат: image `print-factory-panel:backup-pre-auto-var-e87b1b5` и каталог
+  `/opt/print-panel-backup-pre-auto-var-e87b1b5`.
+
 ## 2026-07-26 — MVP TikTok-first радара мемов
 
 ### Результат

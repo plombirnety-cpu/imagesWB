@@ -17,6 +17,11 @@
   - текст только в universal neutral dual-contrast: neutral silver/greige,
     charcoal inner stroke + warm-ivory outer keyline; цвет кузова только в
     мелких акцентах.
+  - Исправление выложено из commit `74fdb08`; Linux-кандидат прошёл 381/381,
+    production healthy на image
+    `sha256:61e721013b099949096a09537c2e4df113f46054c93311530b1ea57779b640ca`.
+  - Откат: image `print-factory-panel:backup-pre-auto-var-e87b1b5`, каталог
+    `/opt/print-panel-backup-pre-auto-var-e87b1b5`.
 - Для аниме-принтов ключевое требование — цельная фигурная композиция с
   эффектами и открытым контуром, не прямоугольная журнальная обложка и не
   стикер.
