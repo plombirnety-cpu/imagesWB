@@ -120,6 +120,7 @@ class SignalInput:
     views: int = 0
     likes: int = 0
     shares: int = 0
+    comments_count: int = 0
 
 
 def parse_comment_lines(raw: str) -> list[tuple[str, str]]:
@@ -179,6 +180,7 @@ class TrendRadarStore:
                     score REAL NOT NULL DEFAULT 0,
                     novelty_score REAL NOT NULL DEFAULT 0,
                     burst_score REAL NOT NULL DEFAULT 0,
+                    velocity_score REAL NOT NULL DEFAULT 0,
                     spread_score REAL NOT NULL DEFAULT 0,
                     merch_score REAL NOT NULL DEFAULT 0,
                     approved INTEGER NOT NULL DEFAULT 0,
@@ -197,6 +199,7 @@ class TrendRadarStore:
                     views INTEGER NOT NULL DEFAULT 0,
                     likes INTEGER NOT NULL DEFAULT 0,
                     shares INTEGER NOT NULL DEFAULT 0,
+                    comments_count INTEGER NOT NULL DEFAULT 0,
                     thumbnail_url TEXT NOT NULL DEFAULT '',
                     metadata_json TEXT NOT NULL DEFAULT '{}'
                 );
@@ -215,6 +218,19 @@ class TrendRadarStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_comments_trend_time
                     ON comments(trend_id, observed_at);
+                CREATE TABLE IF NOT EXISTS metric_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+                    trend_id TEXT NOT NULL REFERENCES trends(id) ON DELETE CASCADE,
+                    captured_at TEXT NOT NULL,
+                    views INTEGER NOT NULL DEFAULT 0,
+                    likes INTEGER NOT NULL DEFAULT 0,
+                    shares INTEGER NOT NULL DEFAULT 0,
+                    comments_count INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(observation_id, captured_at)
+                );
+                CREATE INDEX IF NOT EXISTS idx_metric_snapshots_trend_time
+                    ON metric_snapshots(trend_id, captured_at);
                 CREATE TABLE IF NOT EXISTS ingest_jobs (
                     id TEXT PRIMARY KEY,
                     trend_id TEXT NOT NULL REFERENCES trends(id) ON DELETE CASCADE,
@@ -227,6 +243,108 @@ class TrendRadarStore:
                 );
                 """
             )
+            # SQLite migrations for production databases created by radar MVP v1.
+            trend_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(trends)")
+            }
+            if "velocity_score" not in trend_columns:
+                db.execute(
+                    "ALTER TABLE trends ADD COLUMN velocity_score REAL NOT NULL DEFAULT 0"
+                )
+            observation_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(observations)")
+            }
+            if "comments_count" not in observation_columns:
+                db.execute(
+                    "ALTER TABLE observations ADD COLUMN comments_count "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            # Existing observations become the first point in their time series.
+            db.execute(
+                """
+                INSERT OR IGNORE INTO metric_snapshots (
+                    observation_id, trend_id, captured_at,
+                    views, likes, shares, comments_count
+                )
+                SELECT id, trend_id, observed_at, views, likes, shares, comments_count
+                FROM observations
+                """
+            )
+
+    @staticmethod
+    def _insert_comments(
+        db: sqlite3.Connection,
+        observation_id: str,
+        trend_id: str,
+        comments: list[tuple[str, str]],
+        observed_at: str,
+    ) -> int:
+        inserted = 0
+        for author, text in comments:
+            normalized = normalize_comment(text)
+            if not normalized:
+                continue
+            fingerprint = hashlib.sha256(
+                normalized.encode("utf-8")
+            ).hexdigest()[:24]
+            cursor = db.execute(
+                """
+                INSERT OR IGNORE INTO comments (
+                    observation_id, trend_id, author, text, normalized_text,
+                    observed_at, fingerprint
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    observation_id, trend_id, author, text, normalized,
+                    observed_at, fingerprint,
+                ),
+            )
+            inserted += max(0, cursor.rowcount)
+        return inserted
+
+    @staticmethod
+    def _record_metric_snapshot(
+        db: sqlite3.Connection,
+        *,
+        observation_id: str,
+        trend_id: str,
+        captured_at: datetime,
+        views: int,
+        likes: int,
+        shares: int,
+        comments_count: int,
+        metrics_changed: bool,
+    ) -> bool:
+        last = db.execute(
+            """
+            SELECT captured_at FROM metric_snapshots
+            WHERE observation_id = ?
+            ORDER BY captured_at DESC LIMIT 1
+            """,
+            (observation_id,),
+        ).fetchone()
+        last_at = _parse_datetime(last["captured_at"]) if last else None
+        # Exact repeats from a double-click remain idempotent. An unchanged
+        # measurement is still valuable after five minutes: it proves zero growth.
+        if (
+            not metrics_changed
+            and last_at is not None
+            and captured_at - last_at < timedelta(minutes=5)
+        ):
+            return False
+        cursor = db.execute(
+            """
+            INSERT OR IGNORE INTO metric_snapshots (
+                observation_id, trend_id, captured_at,
+                views, likes, shares, comments_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                observation_id, trend_id, _iso(captured_at),
+                views, likes, shares, comments_count,
+            ),
+        )
+        return cursor.rowcount > 0
 
     def ingest_signal(
         self,
@@ -245,7 +363,9 @@ class TrendRadarStore:
         published = _parse_datetime(signal.published_at)
         if published and published > now + timedelta(minutes=5):
             raise ValueError("дата публикации не может быть в будущем")
-        for metric in (signal.views, signal.likes, signal.shares):
+        for metric in (
+            signal.views, signal.likes, signal.shares, signal.comments_count,
+        ):
             if int(metric or 0) < 0:
                 raise ValueError("метрики не могут быть отрицательными")
 
@@ -256,23 +376,117 @@ class TrendRadarStore:
 
         with self._connect() as db:
             existing_observation = db.execute(
-                "SELECT trend_id, id FROM observations WHERE source_url = ?",
+                "SELECT * FROM observations WHERE source_url = ?",
                 (source_url,),
             ).fetchone()
             if existing_observation:
                 existing_trend = existing_observation["trend_id"]
+                existing_id = existing_observation["id"]
+                new_comments = self._insert_comments(
+                    db, existing_id, existing_trend, comments, now_text,
+                )
+                stored_comment_count = db.execute(
+                    "SELECT COUNT(*) AS count FROM comments WHERE observation_id = ?",
+                    (existing_id,),
+                ).fetchone()["count"]
+                metrics_before = (
+                    int(existing_observation["views"] or 0),
+                    int(existing_observation["likes"] or 0),
+                    int(existing_observation["shares"] or 0),
+                    int(existing_observation["comments_count"] or 0),
+                )
+                metrics_after = (
+                    max(metrics_before[0], int(signal.views or 0)),
+                    max(metrics_before[1], int(signal.likes or 0)),
+                    max(metrics_before[2], int(signal.shares or 0)),
+                    max(
+                        metrics_before[3],
+                        int(signal.comments_count or 0),
+                        int(stored_comment_count or 0),
+                    ),
+                )
+                metrics_changed = metrics_after != metrics_before
+                author = (
+                    (signal.author or "").strip()[:120]
+                    or existing_observation["author"]
+                )
+                caption = (
+                    (signal.caption or "").strip()[:4000]
+                    or existing_observation["caption"]
+                )
+                existing_published = _parse_datetime(
+                    existing_observation["published_at"]
+                )
+                effective_published = existing_published
+                if published and (
+                    effective_published is None or published < effective_published
+                ):
+                    effective_published = published
+                metadata_changed = (
+                    author != existing_observation["author"]
+                    or caption != existing_observation["caption"]
+                    or effective_published != existing_published
+                )
+                db.execute(
+                    """
+                    UPDATE observations
+                    SET author = ?, caption = ?, published_at = ?,
+                        views = ?, likes = ?, shares = ?, comments_count = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        author, caption,
+                        _iso(effective_published) if effective_published else None,
+                        *metrics_after, existing_id,
+                    ),
+                )
+                trend_row = db.execute(
+                    "SELECT earliest_published_at FROM trends WHERE id = ?",
+                    (existing_trend,),
+                ).fetchone()
+                trend_earliest = _parse_datetime(
+                    trend_row["earliest_published_at"]
+                )
+                if published and (
+                    trend_earliest is None or published < trend_earliest
+                ):
+                    db.execute(
+                        "UPDATE trends SET earliest_published_at = ? WHERE id = ?",
+                        (_iso(published), existing_trend),
+                    )
+                db.execute(
+                    "UPDATE trends SET last_seen_at = ?, rejected = 0 WHERE id = ?",
+                    (now_text, existing_trend),
+                )
+                measurement_recorded = self._record_metric_snapshot(
+                    db,
+                    observation_id=existing_id,
+                    trend_id=existing_trend,
+                    captured_at=now,
+                    views=metrics_after[0],
+                    likes=metrics_after[1],
+                    shares=metrics_after[2],
+                    comments_count=metrics_after[3],
+                    metrics_changed=metrics_changed,
+                )
                 job = db.execute(
                     "SELECT id, status FROM ingest_jobs WHERE observation_id = ? "
                     "ORDER BY created_at DESC LIMIT 1",
-                    (existing_observation["id"],),
+                    (existing_id,),
                 ).fetchone()
                 self.recalculate(existing_trend, now=now, db=db)
                 return {
                     "trend_id": existing_trend,
-                    "observation_id": existing_observation["id"],
+                    "observation_id": existing_id,
                     "job_id": job["id"] if job else None,
                     "job_status": job["status"] if job else "succeeded",
                     "duplicate": True,
+                    "updated": bool(
+                        metrics_changed or metadata_changed
+                        or new_comments or measurement_recorded
+                    ),
+                    "new_comments": new_comments,
+                    "measurement_recorded": measurement_recorded,
                 }
 
             trend = db.execute(
@@ -309,7 +523,8 @@ class TrendRadarStore:
                 INSERT INTO observations (
                     id, trend_id, source_type, source_url, author, caption,
                     observed_at, published_at, views, likes, shares
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    , comments_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observation_id, trend_id, source_type, source_url,
@@ -318,27 +533,23 @@ class TrendRadarStore:
                     now_text, _iso(published) if published else None,
                     int(signal.views or 0), int(signal.likes or 0),
                     int(signal.shares or 0),
+                    max(int(signal.comments_count or 0), len(comments)),
                 ),
             )
-            for author, text in comments:
-                normalized = normalize_comment(text)
-                if not normalized:
-                    continue
-                fingerprint = hashlib.sha256(
-                    normalized.encode("utf-8")
-                ).hexdigest()[:24]
-                db.execute(
-                    """
-                    INSERT OR IGNORE INTO comments (
-                        observation_id, trend_id, author, text, normalized_text,
-                        observed_at, fingerprint
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        observation_id, trend_id, author, text, normalized,
-                        now_text, fingerprint,
-                    ),
-                )
+            new_comments = self._insert_comments(
+                db, observation_id, trend_id, comments, now_text,
+            )
+            self._record_metric_snapshot(
+                db,
+                observation_id=observation_id,
+                trend_id=trend_id,
+                captured_at=now,
+                views=int(signal.views or 0),
+                likes=int(signal.likes or 0),
+                shares=int(signal.shares or 0),
+                comments_count=max(int(signal.comments_count or 0), new_comments),
+                metrics_changed=True,
+            )
             status = "pending" if source_type == "tiktok" else "succeeded"
             db.execute(
                 """
@@ -356,6 +567,9 @@ class TrendRadarStore:
             "job_id": job_id,
             "job_status": status,
             "duplicate": False,
+            "updated": True,
+            "new_comments": new_comments,
+            "measurement_recorded": True,
         }
 
     def _comment_term_stats(
@@ -423,6 +637,81 @@ class TrendRadarStore:
         stats.sort(key=lambda item: (item["score"], item["mentions_6h"]), reverse=True)
         return stats[:8]
 
+    def _velocity_stats(
+        self,
+        trend_id: str,
+        now: datetime,
+        db: sqlite3.Connection,
+    ) -> dict:
+        rows = db.execute(
+            """
+            SELECT observation_id, captured_at, views, likes, shares, comments_count
+            FROM metric_snapshots
+            WHERE trend_id = ? AND captured_at >= ?
+            ORDER BY observation_id, captured_at
+            """,
+            (trend_id, _iso(now - timedelta(days=7))),
+        ).fetchall()
+        grouped: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for row in rows:
+            grouped[row["observation_id"]].append(row)
+
+        views_per_hour = 0.0
+        likes_per_hour = 0.0
+        shares_per_hour = 0.0
+        comments_per_hour = 0.0
+        growing_observations = 0
+        total_first_views = 0
+        total_last_views = 0
+        for snapshots in grouped.values():
+            if len(snapshots) < 2:
+                continue
+            first, last = snapshots[0], snapshots[-1]
+            first_at = _parse_datetime(first["captured_at"])
+            last_at = _parse_datetime(last["captured_at"])
+            if first_at is None or last_at is None:
+                continue
+            hours = (last_at - first_at).total_seconds() / 3600
+            # Счётчики источника могут уточниться сразу после первого запроса.
+            # Сохраняем такой снимок, но не принимаем поправку короче пяти минут
+            # за реальную скорость распространения мема.
+            if hours < (5 / 60):
+                continue
+            deltas = {
+                name: max(0, int(last[name] or 0) - int(first[name] or 0))
+                for name in ("views", "likes", "shares", "comments_count")
+            }
+            views_per_hour += deltas["views"] / hours
+            likes_per_hour += deltas["likes"] / hours
+            shares_per_hour += deltas["shares"] / hours
+            comments_per_hour += deltas["comments_count"] / hours
+            total_first_views += max(0, int(first["views"] or 0))
+            total_last_views += max(0, int(last["views"] or 0))
+            if any(deltas.values()):
+                growing_observations += 1
+
+        growth_ratio = (
+            (total_last_views + 1) / (total_first_views + 1)
+            if total_first_views or total_last_views else 1.0
+        )
+        score = min(
+            100.0,
+            14 * math.log1p(views_per_hour / 100)
+            + 8 * math.log1p(likes_per_hour / 25)
+            + 12 * math.log1p(shares_per_hour)
+            + 9 * math.log1p(comments_per_hour)
+            + min(20.0, max(0.0, growth_ratio - 1.0) * 10),
+        )
+        return {
+            "views_per_hour": round(views_per_hour, 1),
+            "likes_per_hour": round(likes_per_hour, 1),
+            "shares_per_hour": round(shares_per_hour, 1),
+            "comments_per_hour": round(comments_per_hour, 1),
+            "view_growth_ratio": round(growth_ratio, 2),
+            "growing_observations": growing_observations,
+            "score": round(score, 1),
+        }
+
     def recalculate(
         self,
         trend_id: str,
@@ -444,6 +733,8 @@ class TrendRadarStore:
                 (trend_id,),
             ).fetchall()
             terms = self._comment_term_stats(trend_id, now, connection)
+            velocity = self._velocity_stats(trend_id, now, connection)
+            velocity_score = velocity["score"]
 
             earliest = _parse_datetime(trend["earliest_published_at"])
             last_seen = _parse_datetime(trend["last_seen_at"]) or now
@@ -453,26 +744,32 @@ class TrendRadarStore:
             )
             sources = {r["source_type"] for r in observations}
             authors = {r["author"].casefold() for r in observations if r["author"]}
-            recent_48h = sum(
-                1 for r in observations
-                if (_parse_datetime(r["observed_at"]) or now) >= now - timedelta(hours=48)
-            )
-            previous = sum(
-                1 for r in observations
-                if now - timedelta(days=14)
-                <= (_parse_datetime(r["observed_at"]) or now)
-                < now - timedelta(hours=48)
-            )
+            recent_48h = connection.execute(
+                """
+                SELECT COUNT(DISTINCT observation_id) AS count
+                FROM metric_snapshots
+                WHERE trend_id = ? AND captured_at >= ?
+                """,
+                (trend_id, _iso(now - timedelta(hours=48))),
+            ).fetchone()["count"]
+            previous = connection.execute(
+                """
+                SELECT COUNT(DISTINCT observation_id) AS count
+                FROM metric_snapshots
+                WHERE trend_id = ? AND captured_at >= ? AND captured_at < ?
+                """,
+                (
+                    trend_id,
+                    _iso(now - timedelta(days=14)),
+                    _iso(now - timedelta(hours=48)),
+                ),
+            ).fetchone()["count"]
             max_term_burst = max((item["score"] for item in terms), default=0.0)
-            engagement = sum(
-                math.log1p(max(0, int(r["views"] or 0)))
-                + 2 * math.log1p(max(0, int(r["shares"] or 0)))
-                for r in observations
-            )
             burst_score = min(
                 100.0,
-                max_term_burst * 0.65
-                + min(35.0, 12 * recent_48h + engagement),
+                max_term_burst * 0.42
+                + velocity_score * 0.48
+                + min(10.0, 4 * recent_48h),
             )
             spread_score = min(
                 100.0,
@@ -495,12 +792,23 @@ class TrendRadarStore:
             elif age_days <= 7:
                 lifecycle = (
                     "RISING"
-                    if len(observations) >= 3 and burst_score >= 55
+                    if (
+                        velocity_score >= 55
+                        or (len(observations) >= 3 and burst_score >= 55)
+                    )
                     else "NEW"
                 )
-            elif age_days <= 21 and recent_48h >= 2 and burst_score >= 45:
+            elif age_days <= 21 and (
+                velocity_score >= 50
+                or (recent_48h >= 2 and burst_score >= 45)
+            ):
                 lifecycle = "RISING"
-            elif age_days > 21 and recent_48h >= 3 and burst_score >= 70 and recent_48h > previous:
+            elif (
+                age_days > 21
+                and recent_48h >= 2
+                and velocity_score >= 70
+                and recent_48h > previous
+            ):
                 lifecycle = "RESURGENCE"
             elif (now - last_seen) > timedelta(days=7) or (
                 previous >= 3 and recent_48h == 0
@@ -526,12 +834,14 @@ class TrendRadarStore:
                 """
                 UPDATE trends
                 SET lifecycle = ?, score = ?, novelty_score = ?,
-                    burst_score = ?, spread_score = ?, merch_score = ?
+                    burst_score = ?, velocity_score = ?,
+                    spread_score = ?, merch_score = ?
                 WHERE id = ?
                 """,
                 (
                     lifecycle, round(score, 1), round(novelty_score, 1),
-                    round(burst_score, 1), round(spread_score, 1),
+                    round(burst_score, 1), round(velocity_score, 1),
+                    round(spread_score, 1),
                     round(merch_score, 1), trend_id,
                 ),
             )
@@ -542,6 +852,7 @@ class TrendRadarStore:
                 "score": round(score, 1),
                 "age_days": round(age_days, 1) if age_days is not None else None,
                 "emerging_terms": terms,
+                "velocity": velocity,
             }
         finally:
             if owns_connection:
@@ -661,7 +972,8 @@ class TrendRadarStore:
             dict(row) for row in db.execute(
                 """
                 SELECT id, source_type, source_url, author, caption, observed_at,
-                       published_at, views, likes, shares, thumbnail_url
+                       published_at, views, likes, shares, comments_count,
+                       thumbnail_url
                 FROM observations WHERE trend_id = ?
                 ORDER BY observed_at DESC
                 """,
@@ -674,6 +986,11 @@ class TrendRadarStore:
         result["observation_count"] = len(observations)
         result["source_count"] = len({item["source_type"] for item in observations})
         result["observations"] = observations
+        result["measurement_count"] = db.execute(
+            "SELECT COUNT(*) AS count FROM metric_snapshots WHERE trend_id = ?",
+            (trend_id,),
+        ).fetchone()["count"]
+        result["velocity"] = self._velocity_stats(trend_id, utcnow(), db)
         earliest = _parse_datetime(result["earliest_published_at"])
         result["age_days"] = (
             round(max(0.0, (utcnow() - earliest).total_seconds() / 86400), 1)

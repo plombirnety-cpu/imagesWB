@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import sqlite3
 
 import pytest
 
@@ -25,6 +26,10 @@ def _signal(
     published=None,
     comments="",
     caption="",
+    views=0,
+    likes=0,
+    shares=0,
+    comments_count=0,
 ):
     return trend_radar.SignalInput(
         term=term,
@@ -34,6 +39,10 @@ def _signal(
         published_at=published,
         comments=comments,
         caption=caption,
+        views=views,
+        likes=likes,
+        shares=shares,
+        comments_count=comments_count,
     )
 
 
@@ -47,6 +56,73 @@ def test_source_url_validation_blocks_wrong_hosts_and_non_https():
         trend_radar.validate_source_url(
             "tiktok", "https://www.tiktok.com.attacker.example/video/1",
         )
+
+
+def test_schema_migrates_v1_database_and_seeds_first_measurement(tmp_path):
+    db_path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(db_path) as db:
+        db.executescript(
+            """
+            CREATE TABLE trends (
+                id TEXT PRIMARY KEY, canonical_key TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL, created_at TEXT NOT NULL,
+                radar_first_seen_at TEXT NOT NULL, earliest_published_at TEXT,
+                last_seen_at TEXT NOT NULL, lifecycle TEXT NOT NULL DEFAULT 'UNVERIFIED',
+                score REAL NOT NULL DEFAULT 0, novelty_score REAL NOT NULL DEFAULT 0,
+                burst_score REAL NOT NULL DEFAULT 0, spread_score REAL NOT NULL DEFAULT 0,
+                merch_score REAL NOT NULL DEFAULT 0, approved INTEGER NOT NULL DEFAULT 0,
+                rejected INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE observations (
+                id TEXT PRIMARY KEY, trend_id TEXT NOT NULL REFERENCES trends(id),
+                source_type TEXT NOT NULL, source_url TEXT NOT NULL UNIQUE,
+                author TEXT NOT NULL DEFAULT '', caption TEXT NOT NULL DEFAULT '',
+                observed_at TEXT NOT NULL, published_at TEXT,
+                views INTEGER NOT NULL DEFAULT 0, likes INTEGER NOT NULL DEFAULT 0,
+                shares INTEGER NOT NULL DEFAULT 0, thumbnail_url TEXT NOT NULL DEFAULT '',
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                observation_id TEXT NOT NULL REFERENCES observations(id),
+                trend_id TEXT NOT NULL REFERENCES trends(id), author TEXT NOT NULL DEFAULT '',
+                text TEXT NOT NULL, normalized_text TEXT NOT NULL, observed_at TEXT NOT NULL,
+                fingerprint TEXT NOT NULL, UNIQUE(observation_id, author, fingerprint)
+            );
+            CREATE TABLE ingest_jobs (
+                id TEXT PRIMARY KEY, trend_id TEXT NOT NULL REFERENCES trends(id),
+                observation_id TEXT NOT NULL REFERENCES observations(id),
+                status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+                error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            """
+        )
+        now_text = NOW.isoformat().replace("+00:00", "Z")
+        db.execute(
+            """
+            INSERT INTO trends (
+                id, canonical_key, display_name, created_at, radar_first_seen_at,
+                last_seen_at
+            ) VALUES ('trend1', 'мем', 'Мем', ?, ?, ?)
+            """,
+            (now_text, now_text, now_text),
+        )
+        db.execute(
+            """
+            INSERT INTO observations (
+                id, trend_id, source_type, source_url, observed_at, views, likes, shares
+            ) VALUES ('obs1', 'trend1', 'tiktok',
+                      'https://www.tiktok.com/@a/video/1', ?, 123, 12, 3)
+            """,
+            (now_text,),
+        )
+
+    migrated = trend_radar.TrendRadarStore(db_path)
+    trend = migrated.get_trend("trend1")
+
+    assert trend["velocity_score"] == 0
+    assert trend["observations"][0]["comments_count"] == 0
+    assert trend["measurement_count"] == 1
 
 
 def test_single_signal_without_origin_date_is_unverified(store):
@@ -167,12 +243,103 @@ def test_oembed_job_is_idempotent_and_enriches_signal(store):
     assert observation["thumbnail_url"].startswith("https://")
 
 
-def test_duplicate_url_does_not_create_duplicate_observation(store):
-    first = store.ingest_signal(_signal(), now=NOW)
-    second = store.ingest_signal(_signal(), now=NOW + timedelta(minutes=1))
+def test_repeated_url_updates_metrics_without_duplicate_observation(store):
+    first = store.ingest_signal(
+        _signal(views=1_000, likes=100, shares=5, comments_count=20),
+        now=NOW,
+    )
+    second = store.ingest_signal(
+        _signal(
+            views=5_000,
+            likes=600,
+            shares=45,
+            comments_count=120,
+            comments="@fresh1: появился шлёпозавр\n@fresh2: опять шлёпозавр",
+        ),
+        now=NOW + timedelta(hours=2),
+    )
+
     assert second["duplicate"] is True
+    assert second["updated"] is True
+    assert second["new_comments"] == 2
     assert second["trend_id"] == first["trend_id"]
-    assert store.get_trend(first["trend_id"])["observation_count"] == 1
+    trend = store.get_trend(first["trend_id"])
+    assert trend["observation_count"] == 1
+    assert trend["measurement_count"] == 2
+    assert trend["observations"][0]["views"] == 5_000
+    assert trend["velocity"]["views_per_hour"] == 2_000
+    assert trend["velocity"]["shares_per_hour"] == 20
+    assert trend["velocity_score"] > 0
+    assert any(item["term"] == "шлепозавр" for item in trend["emerging_terms"])
+
+
+def test_repeated_lower_counters_never_create_negative_velocity(store):
+    first = store.ingest_signal(
+        _signal(views=5_000, likes=500, shares=50, comments_count=100),
+        now=NOW,
+    )
+    store.ingest_signal(
+        _signal(views=4_000, likes=450, shares=40, comments_count=90),
+        now=NOW + timedelta(hours=2),
+    )
+
+    trend = store.get_trend(first["trend_id"])
+    assert trend["observations"][0]["views"] == 5_000
+    assert trend["velocity"]["views_per_hour"] == 0
+    assert trend["velocity"]["shares_per_hour"] == 0
+
+
+def test_near_immediate_counter_revision_is_not_treated_as_velocity(store):
+    first = store.ingest_signal(
+        _signal(views=1_000, likes=100, shares=10, comments_count=20),
+        now=NOW,
+    )
+    store.ingest_signal(
+        _signal(views=5_000, likes=500, shares=50, comments_count=100),
+        now=NOW + timedelta(minutes=2),
+    )
+
+    trend = store.get_trend(first["trend_id"])
+    assert trend["measurement_count"] == 2
+    assert trend["velocity"]["views_per_hour"] == 0
+    assert trend["velocity_score"] == 0
+
+
+def test_old_meme_with_new_metric_spike_is_resurgence_not_rising(store):
+    published = NOW - timedelta(days=60)
+    first = store.ingest_signal(
+        _signal(
+            term="Старый мем",
+            published=published,
+            views=100_000,
+            shares=1_000,
+        ),
+        now=NOW,
+    )
+    store.ingest_signal(
+        _signal(
+            term="Старый мем",
+            url="https://youtu.be/old-meme-proof",
+            source="youtube",
+            author="@archive",
+            published=published + timedelta(days=1),
+            views=50_000,
+            shares=500,
+        ),
+        now=NOW,
+    )
+    store.ingest_signal(
+        _signal(
+            term="Старый мем",
+            views=500_000,
+            shares=12_000,
+        ),
+        now=NOW + timedelta(hours=2),
+    )
+
+    trend = store.get_trend(first["trend_id"])
+    assert trend["velocity_score"] >= 70
+    assert trend["lifecycle"] == "RESURGENCE"
 
 
 def test_generation_requires_owner_approval(store):

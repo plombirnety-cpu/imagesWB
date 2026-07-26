@@ -40,6 +40,7 @@ def _payload(**overrides):
         "comments": "@u1: нужен воздухан\n@u2: что за воздухан",
         "views": 1000,
         "likes": 100,
+        "comments_count": 20,
     }
     payload.update(overrides)
     return payload
@@ -80,8 +81,41 @@ def test_duplicate_signal_is_idempotent(radar_client):
 
     assert first.status_code == second.status_code == 202
     assert second.json()["duplicate"] is True
+    assert second.json()["updated"] is False
     assert len(radar_executor.calls) == 1
     assert client.get("/api/radar/trends").json()[0]["observation_count"] == 1
+
+
+def test_batch_endpoint_imports_new_signals_and_updates_existing(radar_client):
+    client, _, radar_executor = radar_client
+    client.post("/api/radar/signals", json=_payload())
+
+    response = client.post(
+        "/api/radar/signals/batch",
+        json={
+            "signals": [
+                _payload(views=9_000, likes=800, shares=120, comments_count=300),
+                _payload(
+                    term="Шлёпозавр",
+                    source_url="https://www.tiktok.com/@other/video/456",
+                    author="@other",
+                    views=2_000,
+                ),
+            ],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["received"] == 2
+    assert payload["created"] == 1
+    assert payload["updated"] == 1
+    assert payload["errors"] == []
+    assert len(radar_executor.calls) == 2
+    trends = client.get("/api/radar/trends").json()
+    assert {trend["display_name"] for trend in trends} == {"Воздухан", "Шлёпозавр"}
+    vozdukhan = next(trend for trend in trends if trend["display_name"] == "Воздухан")
+    assert vozdukhan["observations"][0]["views"] == 9_000
 
 
 def test_owner_must_approve_before_generation(radar_client, monkeypatch):

@@ -101,6 +101,12 @@
   .radar-rule{grid-column:1/-1;color:#f0bd6f;font-size:11px;line-height:1.45;
     border-left:3px solid #b67820;padding-left:9px}
   .radar-status{font-size:12px;color:var(--muted);min-height:18px}
+  .radar-batch{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px}
+  .radar-batch summary{cursor:pointer;font-size:13px;color:#9fc4ff}
+  .radar-batch p{font-size:11px;color:var(--muted);line-height:1.45;margin:10px 0 7px}
+  .radar-batch textarea{width:100%;min-height:150px}
+  .radar-batch-actions{display:flex;align-items:center;gap:10px;margin-top:8px}
   .radar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
   .trend-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
     padding:12px;display:flex;flex-direction:column;gap:9px}
@@ -116,7 +122,7 @@
   .trend-body{display:flex;gap:10px}
   .trend-thumb{width:86px;height:112px;border-radius:7px;object-fit:cover;background:#17181c}
   .trend-meta{font-size:11px;color:var(--muted);line-height:1.55;min-width:0}
-  .score-row{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+  .score-row{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
   .score-box{background:var(--panel2);border-radius:6px;padding:6px;text-align:center}
   .score-box b{display:block;font-size:15px;color:var(--text)}
   .score-box span{font-size:9px;color:var(--muted)}
@@ -202,7 +208,7 @@
       <div class="radar-head">
         <div>
           <h2>TikTok-first радар мемов</h2>
-          <p>Добавляйте публичные ссылки, дату оригинальной публикации и комментарии. TikTok-ссылки обогащаются официальным oEmbed. Telegram и YouTube служат независимыми подтверждениями. Перед платной генерацией требуется ваше одобрение.</p>
+          <p>Добавляйте публичные ссылки, дату оригинальной публикации и комментарии. Повторная отправка той же ссылки сохраняет новый замер и считает реальную скорость роста. TikTok-ссылки обогащаются официальным oEmbed. Telegram и YouTube служат независимыми подтверждениями. Перед платной генерацией требуется ваше одобрение.</p>
         </div>
         <button id="radarRefresh" type="button">Обновить</button>
       </div>
@@ -236,6 +242,9 @@
         <label class="fld">Репосты
           <input id="radarShares" type="number" min="0" value="0">
         </label>
+        <label class="fld">Всего комментариев
+          <input id="radarCommentCount" type="number" min="0" value="0">
+        </label>
         <label class="fld full">Подпись к ролику
           <textarea id="radarCaption" maxlength="4000" placeholder="Текст ролика, хэштеги, контекст"></textarea>
         </label>
@@ -246,6 +255,19 @@
         <button class="primary" id="radarSubmit" type="submit">Добавить сигнал</button>
         <div class="radar-status" id="radarFormStatus"></div>
       </form>
+
+      <details class="radar-batch">
+        <summary>Пакетный импорт JSON — до 100 сигналов или повторных замеров</summary>
+        <p>Вставьте JSON-массив объектов с теми же полями: term, source_type,
+          source_url, published_at, views, likes, shares, comments_count, caption
+          и comments. Повторная ссылка обновит метрики, а не создаст дубль.</p>
+        <textarea id="radarBatchJson" spellcheck="false"
+          placeholder='[{"term":"Воздухан","source_type":"tiktok","source_url":"https://www.tiktok.com/@author/video/123","views":120000,"shares":3400}]'></textarea>
+        <div class="radar-batch-actions">
+          <button id="radarBatchSubmit" type="button">Импортировать пакет</button>
+          <div class="radar-status" id="radarBatchStatus"></div>
+        </div>
+      </details>
 
       <div class="radar-grid" id="radarGrid">
         <div class="empty-radar">Сигналов пока нет. Добавьте первую TikTok-ссылку.</div>
@@ -606,6 +628,8 @@ function trendCard(trend){
     document.createTextNode(`Возраст: ${age}`), document.createElement('br'),
     document.createTextNode(`Сигналов: ${trend.observation_count} · источников: ${trend.source_count}`),
     document.createElement('br'),
+    document.createTextNode(`Замеров: ${trend.measurement_count || 0}`),
+    document.createElement('br'),
     document.createTextNode(`Первый раз в радаре: ${formatDate(trend.radar_first_seen_at)}`)
   );
   if(first.source_url){
@@ -625,6 +649,7 @@ function trendCard(trend){
   scores.append(
     scoreBox('ИТОГО', trend.score),
     scoreBox('ВСПЛЕСК', trend.burst_score),
+    scoreBox('СКОРОСТЬ', trend.velocity_score),
     scoreBox('ОХВАТ', trend.spread_score),
     scoreBox('НОВИЗНА', trend.novelty_score),
   );
@@ -704,6 +729,7 @@ radarForm.addEventListener('submit', async event => {
     views: Number($('#radarViews').value) || 0,
     likes: Number($('#radarLikes').value) || 0,
     shares: Number($('#radarShares').value) || 0,
+    comments_count: Number($('#radarCommentCount').value) || 0,
     caption: $('#radarCaption').value.trim(),
     comments: $('#radarComments').value,
   };
@@ -714,7 +740,9 @@ radarForm.addEventListener('submit', async event => {
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.detail || 'Не удалось добавить сигнал');
     radarFormStatus.textContent = data.duplicate
-      ? 'Эта ссылка уже была в радаре — дубль не создан.'
+      ? (data.updated
+        ? `Повторный замер сохранён; новых комментариев: ${data.new_comments || 0}.`
+        : 'Данные совпадают с недавним замером — повтор не записан.')
       : 'Сигнал добавлен. TikTok-данные обогащаются в фоне.';
     $('#radarUrl').value = '';
     $('#radarCaption').value = '';
@@ -726,6 +754,38 @@ radarForm.addEventListener('submit', async event => {
     button.disabled = false;
   }
 });
+
+$('#radarBatchSubmit').onclick = async () => {
+  const button = $('#radarBatchSubmit');
+  const status = $('#radarBatchStatus');
+  let signals;
+  try{
+    const parsed = JSON.parse($('#radarBatchJson').value);
+    signals = Array.isArray(parsed) ? parsed : parsed.signals;
+    if(!Array.isArray(signals) || !signals.length) throw new Error('Нужен непустой JSON-массив');
+    if(signals.length > 100) throw new Error('За один раз можно импортировать не более 100 сигналов');
+  }catch(e){
+    status.textContent = `Ошибка JSON: ${e.message}`;
+    return;
+  }
+  button.disabled = true;
+  status.textContent = `Импортирую ${signals.length}…`;
+  try{
+    const res = await fetch('/api/radar/signals/batch', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({signals}),
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.detail || 'Пакетный импорт не выполнен');
+    status.textContent = `Создано: ${data.created}; обновлено: ${data.updated}; без изменений: ${data.unchanged}; ошибок: ${data.errors.length}.`;
+    await loadRadar();
+  }catch(e){
+    status.textContent = e.message;
+  }finally{
+    button.disabled = false;
+  }
+};
 
 async function decideTrend(trendId, decision){
   try{

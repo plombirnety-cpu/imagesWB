@@ -90,6 +90,11 @@ class RadarSignalRequest(BaseModel):
     views: int = Field(default=0, ge=0)
     likes: int = Field(default=0, ge=0)
     shares: int = Field(default=0, ge=0)
+    comments_count: int = Field(default=0, ge=0)
+
+
+class RadarBatchRequest(BaseModel):
+    signals: list[RadarSignalRequest] = Field(min_length=1, max_length=100)
 
 
 class RadarGenerateRequest(BaseModel):
@@ -322,29 +327,54 @@ def _enqueue_generation(
     return {"job_id": job_id}
 
 
+def _ingest_radar_request(req: RadarSignalRequest) -> dict:
+    result = _radar_store.ingest_signal(
+        trend_radar.SignalInput(
+            term=req.term,
+            source_type=req.source_type,
+            source_url=req.source_url,
+            author=req.author,
+            caption=req.caption,
+            comments=req.comments,
+            published_at=req.published_at,
+            views=req.views,
+            likes=req.likes,
+            shares=req.shares,
+            comments_count=req.comments_count,
+        )
+    )
+    if not result["duplicate"] and result["job_status"] == "pending":
+        _radar_executor.submit(_radar_store.run_ingest_job, result["job_id"])
+    return result
+
+
 @app.post("/api/radar/signals", status_code=202)
 def api_radar_signal(req: RadarSignalRequest):
     try:
-        result = _radar_store.ingest_signal(
-            trend_radar.SignalInput(
-                term=req.term,
-                source_type=req.source_type,
-                source_url=req.source_url,
-                author=req.author,
-                caption=req.caption,
-                comments=req.comments,
-                published_at=req.published_at,
-                views=req.views,
-                likes=req.likes,
-                shares=req.shares,
-            )
-        )
+        result = _ingest_radar_request(req)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not result["duplicate"] and result["job_status"] == "pending":
-        _radar_executor.submit(_radar_store.run_ingest_job, result["job_id"])
     result["trend"] = _radar_store.get_trend(result["trend_id"])
     return result
+
+
+@app.post("/api/radar/signals/batch", status_code=202)
+def api_radar_signals_batch(req: RadarBatchRequest):
+    results = []
+    errors = []
+    for index, signal in enumerate(req.signals):
+        try:
+            results.append(_ingest_radar_request(signal))
+        except ValueError as exc:
+            errors.append({"index": index, "error": str(exc)})
+    return {
+        "received": len(req.signals),
+        "created": sum(not item["duplicate"] for item in results),
+        "updated": sum(item["duplicate"] and item["updated"] for item in results),
+        "unchanged": sum(item["duplicate"] and not item["updated"] for item in results),
+        "errors": errors,
+        "results": results,
+    }
 
 
 @app.get("/api/radar/jobs/{job_id}")
