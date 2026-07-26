@@ -174,6 +174,38 @@ def test_plan_tasks_autonomous_car_style_needs_no_theme_or_dossier(monkeypatch):
     assert all("Автономная авто-серия" in task.label for task in tasks)
 
 
+def test_plan_tasks_car_brand_expands_to_distinct_models_and_art_directions():
+    tasks = orchestrator.plan_tasks(
+        styles=["37_auto_racing_editorial"],
+        count=4,
+        theme="",
+        characters="мерседес",
+    )
+
+    assert len(tasks) == 4
+    assert all(task.source == "automotive_subject" for task in tasks)
+    assert len({task.label for task in tasks}) == 4
+    assert all("Mercedes-Benz" in task.label for task in tasks)
+    assert all("NEUTRAL DUAL-CONTRAST TYPE" in task.label for task in tasks)
+    assert len({
+        task.label.split("COMPOSITION FAMILY: ", 1)[1].split(".", 1)[0]
+        for task in tasks
+    }) == 4
+
+
+def test_plan_tasks_unknown_car_subject_still_gets_unique_slot_briefs():
+    tasks = orchestrator.plan_tasks(
+        styles=["37_auto_racing_editorial"],
+        count=4,
+        theme="",
+        characters="неизвестная марка",
+    )
+
+    assert len({task.label for task in tasks}) == 4
+    assert all("неизвестная марка" in task.label for task in tasks)
+    assert all("не повторяй модель" in task.label.lower() for task in tasks)
+
+
 def test_allows_theme_free_requires_only_autonomous_styles():
     assert orchestrator.allows_theme_free(["37_auto_racing_editorial"]) is True
     assert orchestrator.allows_theme_free([]) is False

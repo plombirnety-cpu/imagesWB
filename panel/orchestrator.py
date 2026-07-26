@@ -81,6 +81,243 @@ _AUTONOMOUS_STYLE_BRIEFS = {
     ],
 }
 
+_AUTOMOTIVE_STYLE_ID = "37_auto_racing_editorial"
+
+# A brand-only request used to be repeated verbatim for every slot.  Each
+# independent image call consequently converged on the same best-known model
+# (for Mercedes this was almost always the 190E).  For the most common marques
+# we assign a concrete, real hero model before calling the art director.
+_AUTOMOTIVE_BRAND_CATALOGS = {
+    "mercedes": (
+        "Mercedes-Benz 300 SL Gullwing (W198)",
+        "Mercedes-Benz C111-II",
+        "Mercedes-Benz 190 E 2.5-16 Evolution II (W201)",
+        "Mercedes-Benz 500 E (W124)",
+        "Mercedes-Benz CLK GTR",
+        "Mercedes-Benz SLR McLaren",
+        "Mercedes-Benz SLS AMG Black Series",
+        "Mercedes-AMG GT Black Series",
+        "Mercedes-Benz 280 SL Pagoda (W113)",
+        "Mercedes-Benz 450 SEL 6.9 (W116)",
+        "Mercedes-Benz 560 SEC (C126)",
+        "Mercedes-Benz S 600 Coupe (C140)",
+        "Mercedes-Benz SL 73 AMG (R129)",
+        "Mercedes-Benz E 55 AMG (W210)",
+        "Mercedes-Benz C 63 AMG Black Series (C204)",
+        "Mercedes-Benz CLS 55 AMG (C219)",
+        "Mercedes-Benz S 65 AMG (W221)",
+        "Mercedes-Benz G 63 AMG 6x6",
+        "Mercedes-AMG ONE",
+        "Mercedes-Benz Sauber C9",
+    ),
+    "bmw": (
+        "BMW 2002 Turbo",
+        "BMW 3.0 CSL (E9)",
+        "BMW M1 (E26)",
+        "BMW M3 (E30)",
+        "BMW M5 (E34)",
+        "BMW M5 (E39)",
+        "BMW M3 CSL (E46)",
+        "BMW Z8 (E52)",
+        "BMW M3 GTR (E46)",
+        "BMW 850CSi (E31)",
+        "BMW M Coupe (E36/8)",
+        "BMW M5 Touring (E61)",
+        "BMW 1 Series M Coupe (E82)",
+        "BMW M4 GTS (F82)",
+        "BMW M2 CS (F87)",
+        "BMW M5 CS (F90)",
+    ),
+    "porsche": (
+        "Porsche 356 Speedster",
+        "Porsche 911 Carrera RS 2.7",
+        "Porsche 911 Turbo 3.3 (930)",
+        "Porsche 959",
+        "Porsche 911 GT1 Straßenversion",
+        "Porsche Carrera GT",
+        "Porsche 918 Spyder",
+        "Porsche 911 GT3 RS (997)",
+        "Porsche 911 R (991)",
+        "Porsche 935/78 Moby Dick",
+        "Porsche 917K",
+        "Porsche 944 Turbo",
+    ),
+    "ferrari": (
+        "Ferrari 250 GTO",
+        "Ferrari 365 GTB/4 Daytona",
+        "Ferrari 288 GTO",
+        "Ferrari Testarossa",
+        "Ferrari F40",
+        "Ferrari F50",
+        "Ferrari Enzo",
+        "Ferrari LaFerrari",
+        "Ferrari 458 Speciale",
+        "Ferrari 812 Competizione",
+        "Ferrari F12tdf",
+        "Ferrari SF90 XX Stradale",
+    ),
+    "audi": (
+        "Audi Sport quattro S1 E2",
+        "Audi 90 quattro IMSA GTO",
+        "Audi V8 quattro DTM",
+        "Audi RS2 Avant",
+        "Audi TT quattro Sport",
+        "Audi RS4 (B5)",
+        "Audi R8 V10 plus",
+        "Audi R8 LMP",
+        "Audi RS6 Avant (C6)",
+        "Audi RS3 LMS",
+    ),
+    "toyota": (
+        "Toyota 2000GT",
+        "Toyota Celica GT-Four ST185",
+        "Toyota Supra Turbo A (A70)",
+        "Toyota Supra RZ (A80)",
+        "Toyota AE86 Sprinter Trueno",
+        "Toyota MR2 GT-S (SW20)",
+        "Toyota GT-One TS020",
+        "Toyota GR Yaris",
+        "Toyota GR Supra",
+        "Toyota Century V12",
+    ),
+    "nissan": (
+        "Nissan Skyline 2000 GT-R (Hakosuka)",
+        "Nissan Skyline GT-R (R32)",
+        "Nissan Skyline GT-R V-Spec (R33)",
+        "Nissan Skyline GT-R V-Spec II (R34)",
+        "Nissan GT-R Nismo (R35)",
+        "Nissan Fairlady Z 432",
+        "Nissan 300ZX Twin Turbo (Z32)",
+        "Nissan Silvia K's (S13)",
+        "Nissan Silvia Spec-R (S15)",
+        "Nissan R390 GT1",
+    ),
+    "ford": (
+        "Ford GT40 Mk II",
+        "Ford Escort RS1600",
+        "Ford RS200",
+        "Ford Sierra RS500 Cosworth",
+        "Ford Mustang Boss 302",
+        "Ford Mustang Shelby GT500",
+        "Ford Capri RS3100",
+        "Ford GT",
+        "Ford Focus RS WRC",
+        "Ford Falcon XY GTHO",
+    ),
+}
+
+_AUTOMOTIVE_BRAND_ALIASES = {
+    "mercedes": "mercedes",
+    "mercedes benz": "mercedes",
+    "мерседес": "mercedes",
+    "мерседес бенц": "mercedes",
+    "bmw": "bmw",
+    "бмв": "bmw",
+    "porsche": "porsche",
+    "порше": "porsche",
+    "ferrari": "ferrari",
+    "феррари": "ferrari",
+    "audi": "audi",
+    "ауди": "audi",
+    "toyota": "toyota",
+    "тойота": "toyota",
+    "nissan": "nissan",
+    "ниссан": "nissan",
+    "ford": "ford",
+    "форд": "ford",
+}
+
+_AUTOMOTIVE_COMPOSITION_FAMILIES = (
+    "ASYMMETRIC MUSEUM GRID — car low and wide, model wordmark high left, sparse facts on the opposite edge",
+    "OVERSIZED VERTICAL WORDMARK — tall letters behind the car, compact facts in a narrow side rail",
+    "DIAGONAL SPEED AXIS — low three-quarter car crossing italic display type, timing marks following the same angle",
+    "ENGINEERING BLUEPRINT — clean exploded callouts and monospaced facts around one intact hero car, no panel background",
+    "HERITAGE EMBLEM — restrained arched title, small origin line and one open crest-like line motif",
+    "TRACK-LINE ARC — one circuit or route line frames the car while the main title remains horizontal",
+    "SWISS EDITORIAL — generous negative space, offset car, geometric type blocks with no enclosing rectangle",
+    "WIDE PANORAMIC LOCKUP — side-profile car anchors the lower half, broad letterspaced title above it",
+)
+
+_AUTOMOTIVE_TEXT_DIRECTIONS = (
+    "heritage: write an original 2-5 word line about legacy, not an advertisement",
+    "engineering: write an original 2-5 word line about precision or mechanical intent",
+    "endurance: write an original 2-5 word line about distance, resilience or night racing",
+    "motion: write an original 2-5 word line about controlled speed, without generic 'born to race' clichés",
+    "origin: write an original 2-5 word line tied to country, city or design culture",
+    "touring: write an original 2-5 word line about road-and-track duality",
+    "icon: write an original 2-5 word line explaining why this silhouette matters",
+    "driver feeling: write an original 2-5 word line about analogue connection or restraint",
+)
+
+_AUTOMOTIVE_UNKNOWN_MODEL_AXES = (
+    "a heritage road or racing icon from the 1950s-1970s",
+    "a homologation, rally or touring model from the 1980s-1990s",
+    "a performance sedan or coupe from the 1990s-2000s",
+    "a modern halo, GT or supercar from the 2010s-2020s",
+    "an endurance prototype or GT competition model",
+    "a lightweight roadster or compact sports coupe",
+    "a rare estate, shooting brake or performance wagon",
+    "a technically important flagship rather than the marque's most obvious default",
+)
+
+_AUTOMOTIVE_NEUTRAL_TYPE_CONTRACT = (
+    "NEUTRAL DUAL-CONTRAST TYPE: all main and supporting lettering must use neutral "
+    "silver/mid-grey or warm greige fills with a thin charcoal inner stroke AND a "
+    "thin warm-ivory outer keyline, so it stays readable on both black and white "
+    "T-shirts. Never use the car body colour or a saturated brand colour for the "
+    "main lettering; body colour is allowed only in tiny marks."
+)
+
+
+def _normalize_automotive_subject(value: str) -> str:
+    return re.sub(r"[^a-zа-яё0-9]+", " ", value.lower()).strip()
+
+
+def _automotive_slot_briefs(subjects: list[str], count: int) -> list[str]:
+    """Assign a different concrete model, layout and text voice to every car slot."""
+    expanded = _expand_round_robin(subjects, count)
+    occurrences: dict[str, int] = {}
+    result: list[str] = []
+    for slot, subject in enumerate(expanded):
+        normalized = _normalize_automotive_subject(subject)
+        occurrence = occurrences.get(normalized, 0)
+        occurrences[normalized] = occurrence + 1
+        brand_key = _AUTOMOTIVE_BRAND_ALIASES.get(normalized)
+        catalog = _AUTOMOTIVE_BRAND_CATALOGS.get(brand_key or "")
+
+        if catalog:
+            hero = catalog[occurrence % len(catalog)]
+            model_direction = (
+                f"CONCRETE HERO MODEL: {hero}. Depict exactly this model; do not "
+                "substitute the marque's more famous default model."
+            )
+        elif re.search(r"\d", normalized):
+            model_direction = (
+                f"CONCRETE HERO MODEL REQUESTED BY USER: {subject}. Keep this exact "
+                "model; vary the art direction rather than replacing it."
+            )
+        else:
+            axis = _AUTOMOTIVE_UNKNOWN_MODEL_AXES[occurrence % len(_AUTOMOTIVE_UNKNOWN_MODEL_AXES)]
+            model_direction = (
+                f"AUTOMOTIVE MARQUE/SUBJECT: {subject}. Choose one real, correctly "
+                f"named model matching this assigned lane: {axis}; не повторяй модель "
+                "из другого слота этой пачки и не своди запрос к самой известной модели."
+            )
+
+        composition = _AUTOMOTIVE_COMPOSITION_FAMILIES[
+            slot % len(_AUTOMOTIVE_COMPOSITION_FAMILIES)
+        ]
+        text_direction = _AUTOMOTIVE_TEXT_DIRECTIONS[
+            slot % len(_AUTOMOTIVE_TEXT_DIRECTIONS)
+        ]
+        result.append(
+            f"{model_direction} COMPOSITION FAMILY: {composition}. "
+            f"TEXT DIRECTION: {text_direction}; use a different headline, wording, "
+            "font character and fact arrangement from every other slot. "
+            f"{_AUTOMOTIVE_NEUTRAL_TYPE_CONTRACT}"
+        )
+    return result
+
 
 def allows_theme_free(styles: list[str]) -> bool:
     """Пустая тема допустима, только если ВСЕ выбранные стили автономны."""
@@ -90,7 +327,19 @@ def allows_theme_free(styles: list[str]) -> bool:
 
 def _autonomous_briefs(style_id: str, count: int) -> list[str]:
     briefs = _AUTONOMOUS_STYLE_BRIEFS[style_id]
-    return _expand_round_robin(briefs, count)
+    expanded = _expand_round_robin(briefs, count)
+    if style_id != _AUTOMOTIVE_STYLE_ID:
+        return expanded
+    return [
+        (
+            f"{brief} COMPOSITION FAMILY: "
+            f"{_AUTOMOTIVE_COMPOSITION_FAMILIES[index % len(_AUTOMOTIVE_COMPOSITION_FAMILIES)]}. "
+            f"TEXT DIRECTION: "
+            f"{_AUTOMOTIVE_TEXT_DIRECTIONS[index % len(_AUTOMOTIVE_TEXT_DIRECTIONS)]}. "
+            f"{_AUTOMOTIVE_NEUTRAL_TYPE_CONTRACT}"
+        )
+        for index, brief in enumerate(expanded)
+    ]
 
 
 # ── slug для имён файлов ─────────────────────────────────────────────────────
@@ -175,6 +424,9 @@ def plan_tasks(
     if free_prompt:
         entries = [(free_prompt, "")] * count
         source = "free"
+    elif names and style_list == [_AUTOMOTIVE_STYLE_ID]:
+        entries = [(brief, "") for brief in _automotive_slot_briefs(names, count)]
+        source = "automotive_subject"
     elif names:
         entries = [(n, "") for n in _expand_round_robin(names, count)]
         source = "characters"

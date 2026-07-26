@@ -39,6 +39,9 @@ def test_automotive_quality_hint_is_style_specific():
     assert "смысловую" in hint
     assert "type_spec" in hint
     assert "прямоугольной фотографии" in hint
+    assert "neutral dual-contrast type" in hint
+    assert "charcoal inner stroke" in hint
+    assert "warm-ivory outer keyline" in hint
     assert ad._automotive_editorial_quality_hint("34_anime_magazine_cover") == ""
 
 
@@ -85,3 +88,15 @@ def test_build_prompt_reinforces_car_print_not_photo_or_sticker():
     assert "not a rectangular photograph" in prompt
     assert "never put a white sticker outline" in prompt
     assert "solid, perfectly uniform bright green chroma-key" in prompt
+
+
+def test_automotive_style_requires_universal_neutral_lettering():
+    style = _style()
+    text_treatment = style["text_treatment"].lower()
+    constraints = " ".join(style["constraints"]).lower()
+
+    assert "neutral silver" in text_treatment
+    assert "charcoal inner stroke" in text_treatment
+    assert "warm-ivory outer keyline" in text_treatment
+    assert "body colour" in text_treatment
+    assert "двойной контрастный контур" in constraints
