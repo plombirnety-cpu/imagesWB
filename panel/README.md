@@ -168,7 +168,7 @@ docker compose -f panel/docker-compose.yml up -d --build
 | `PANEL_RADAR_DISCOVERY_TERMS_PER_RUN` | `4` | сколько приоритетных тем проверять в TikTok за проход |
 | `PANEL_RADAR_POSTS_PER_TERM` | `5` | сколько TikTok-роликов брать на тему |
 | `PANEL_RADAR_COMMENTS_POSTS_PER_RUN` | `1` | для скольких лучших роликов получать комментарии за проход |
-| `PANEL_RADAR_REQUEST_TIMEOUT` | `30` | сетевой таймаут источников в секундах |
+| `PANEL_RADAR_REQUEST_TIMEOUT` | `30` | обычный сетевой таймаут; синхронный TikTok scrape автоматически ждёт минимум 75 секунд |
 | `BRIGHTDATA_API_TOKEN` | пусто | секрет API TikTok discovery/comments; хранить только в `.env` сервера |
 | `PANEL_DEFAULT_STYLE` | `auto` | автовыбор арт-директором, если чекбоксы не отмечены |
 | `PANEL_MAX_COUNT` | `50` | предохранитель — макс. дизайнов за один запуск |

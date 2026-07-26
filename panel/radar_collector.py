@@ -212,17 +212,19 @@ class BrightDataClient:
     def _call(self, method: str, url: str, **kwargs):
         headers = dict(kwargs.pop("headers", {}))
         headers["Authorization"] = f"Bearer {self.token}"
+        request_timeout = int(kwargs.pop("request_timeout", self.timeout))
+        attempts = max(1, int(kwargs.pop("attempts", 3)))
         last_error: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(attempts):
             try:
                 response = self._request(
-                    method, url, headers=headers, timeout=self.timeout, **kwargs,
+                    method, url, headers=headers, timeout=request_timeout, **kwargs,
                 )
                 response.raise_for_status()
                 return response
             except requests.RequestException as exc:
                 last_error = exc
-                if attempt < 2:
+                if attempt < attempts - 1:
                     self._sleep(1.5 * (2**attempt))
         assert last_error is not None
         raise last_error
@@ -265,8 +267,12 @@ class BrightDataClient:
                 "dataset_id": _POSTS_DATASET,
                 "type": "discover_new",
                 "discover_by": "keyword",
+                "format": "json",
+                "include_errors": "true",
             },
             json={"input": [{"search_keyword": keyword, "num_of_posts": int(limit)}]},
+            request_timeout=max(75, self.timeout),
+            attempts=1,
         )
         return self._records(response)
 
@@ -276,8 +282,14 @@ class BrightDataClient:
         response = self._call(
             "POST",
             _SCRAPE_URL,
-            params={"dataset_id": _COMMENTS_DATASET},
+            params={
+                "dataset_id": _COMMENTS_DATASET,
+                "format": "json",
+                "include_errors": "true",
+            },
             json={"input": [{"url": post_url}]},
+            request_timeout=max(75, self.timeout),
+            attempts=1,
         )
         return self._records(response)
 

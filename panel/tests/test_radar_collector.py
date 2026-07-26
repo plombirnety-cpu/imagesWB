@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from concurrent.futures import Future
 
+import pytest
+import requests
+
 import radar_collector
 import trend_radar
 
@@ -143,6 +146,26 @@ def test_bright_data_discovery_request_and_tiktok_url_shape():
     assert calls[0][2]["json"]["input"][0]["search_keyword"] == "воздухан"
     assert client.post_url(records[0]) == "https://www.tiktok.com/@hero/video/9"
     assert calls[0][2]["headers"]["Authorization"] == "Bearer secret"
+
+
+def test_bright_data_sync_scrape_waits_full_contract_without_short_retries():
+    timeouts = []
+
+    def slow_request(method, url, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        raise requests.ReadTimeout("provider still preparing the synchronous result")
+
+    client = radar_collector.BrightDataClient(
+        "secret",
+        timeout=30,
+        request=slow_request,
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(requests.ReadTimeout):
+        client.discover("движуха", 5)
+
+    assert timeouts == [75]
 
 
 def test_collector_stores_seeds_tiktok_metrics_and_comments(tmp_path):
