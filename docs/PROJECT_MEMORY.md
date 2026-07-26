@@ -8,6 +8,13 @@
   обрывались раньше допустимой минуты ответа. Scrape posts/comments теперь
   выполняется один раз с минимум 75 секундами; progress/download сохраняют
   обычные retry. Регрессионный тест требует ровно `[75]`, а не `[30,30,30]`.
+- Исправление выложено из commit `5ea8646`; production healthy на image
+  `sha256:7d3a564cc4a0674bd0fa180c9cc4e13800fda34cc90bb43785bc5b5abdcf4e36`.
+  Первый живой проход `43646d6841784eca` завершился `succeeded`: 21 seed,
+  20 TikTok-сигналов и 222 комментария. Один comments snapshot превысил окно
+  опроса, но обход продолжился и комментарии были получены со следующего ролика.
+  Откат: image `print-factory-panel:backup-pre-brightdata-timeout-5ea8646`,
+  каталог `/opt/print-panel-backup-pre-brightdata-timeout-5ea8646`.
 - Радар теперь автоматический:
   - сам запускается после старта и далее каждые 3 часа;
   - бесплатно собирает RU Google Trends и открытый мемный каталог/каналы
@@ -15,7 +22,7 @@
   - сохраняет темы в `radar_seeds`, историю фоновых проходов в
     `collector_runs`, не допускает наложения запусков;
   - TikTok discovery, метрики и комментарии реализованы через Bright Data;
-  - для живого TikTok-поиска в production нужен одноразовый секрет
+  - живой TikTok-поиск в production настроен через секрет
     `BRIGHTDATA_API_TOKEN`; ключ не хранится в БД/UI/git;
   - повторения новых слов считаются по TikTok-комментариям с уникальными
     авторами, а не по общей частотности слов в Telegram-постах;
@@ -28,8 +35,7 @@
 - Автоматический радар выложен из commit `a14e909`; production healthy на image
   `sha256:ce5aca4d5986b0e860ebde60057f62512272a47bfbe18e850100feed9a309590`.
   Первый production-проход сам собрал 21 seed и завершился `succeeded`.
-  `BRIGHTDATA_API_TOKEN` на сервере ещё не задан, поэтому живой TikTok discovery
-  ждёт одноразовой настройки. Откат: image
+  Исторический образ до подключения TikTok сохранён для отката: image
   `print-factory-panel:backup-pre-auto-radar-a14e909`, каталог
   `/opt/print-panel-backup-pre-auto-radar-a14e909`.
 - Радар мемов теперь должен воспринимать повтор той же ссылки как повторный замер,

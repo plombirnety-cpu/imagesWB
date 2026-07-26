@@ -16,6 +16,22 @@
 - В запрос явно добавлены `format=json` и `include_errors=true`.
 - Регрессионный тест сначала падал на `[30, 30, 30]`, после исправления проходит
   на `[75]`; профильный набор collector/store/API: **27 passed**.
+- Исправление выложено из commit `5ea8646`; Linux-кандидат прошёл
+  **27 passed**. Production работает на image
+  `sha256:7d3a564cc4a0674bd0fa180c9cc4e13800fda34cc90bb43785bc5b5abdcf4e36`,
+  контейнер `running healthy`, `/health` → 200.
+- Первый полный проход с настроенным Bright Data:
+  `43646d6841784eca`, `succeeded`, 21 seed, 20 созданных TikTok-сигналов,
+  20 наблюдений, 222 сохранённых комментария.
+  Построены тренды «Движуха», «пацан рад», «Вихорьков» и
+  «Одна повесть умопомрачительной другой»; известные темы классифицированы как
+  `MATURE`, а не как ложный ранний рост.
+- Один комментарийный snapshot не успел завершиться за окно опроса, но collector
+  продолжил обход, получил комментарии со следующего ролика и штатно завершил
+  проход. Это частичная ошибка обогащения, не отказ TikTok discovery.
+- Откат: image
+  `print-factory-panel:backup-pre-brightdata-timeout-5ea8646`, каталог
+  `/opt/print-panel-backup-pre-brightdata-timeout-5ea8646`.
 
 ## 2026-07-26 — автоматический радар мемов
 
@@ -68,9 +84,9 @@
 
 ### Требование к production
 
-- До добавления `BRIGHTDATA_API_TOKEN` панель автоматически собирает и показывает
-  темы Google/Telegram, но не может сама искать TikTok-ролики и комментарии.
-  Это одноразовая настройка провайдера, а не ежедневный ручной ввод ссылок.
+- `BRIGHTDATA_API_TOKEN` настроен только в защищённом production `.env`.
+  Панель сама ищет TikTok-ролики и комментарии; ежедневный ручной ввод ссылок
+  не требуется.
 
 ### Production-deploy
 
@@ -90,8 +106,8 @@
   вход сохранён, защищённый API без cookie → 401.
 - Живая постоянная SQLite-база мигрирована: `radar_seeds=21`, последний
   автоматический запуск `succeeded`, volume `panel_panel_out` сохранён.
-- На сервере `BRIGHTDATA_API_TOKEN` пока отсутствует: Google/Telegram работают,
-  TikTok discovery/comments ожидают одноразовый ключ.
+- На сервере `BRIGHTDATA_API_TOKEN` настроен вне Git; живой TikTok
+  discovery/comments подтверждён production-проходом `43646d6841784eca`.
 - Откат: image `print-factory-panel:backup-pre-auto-radar-a14e909` и каталог
   `/opt/print-panel-backup-pre-auto-radar-a14e909`.
 
