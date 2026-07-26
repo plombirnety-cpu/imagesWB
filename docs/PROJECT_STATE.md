@@ -55,6 +55,29 @@
   темы Google/Telegram, но не может сама искать TikTok-ролики и комментарии.
   Это одноразовая настройка провайдера, а не ежедневный ручной ввод ссылок.
 
+### Production-deploy
+
+- Код этапа: commit `a14e909`, отправлен в `origin/main`.
+- Linux-кандидат `print-factory-panel:a14e909`:
+  - профильный collector/store/API: **26 passed**;
+  - чистый набор панели с отключёнными в тестовом контейнере API-ключами:
+    **67 passed**;
+  - расширенный набор движка и панели: **391 passed**, три таймаута старых
+    multiprocessing-тестов из-за подхваченного production Gemini-ключа; отдельный
+    чистый прогон тех же panel-тестов прошёл полностью.
+- Временный живой smoke-контейнер за первый проход сам собрал 21 тему,
+  `collector_runs.status=succeeded`, ошибок источников нет.
+- Production-образ:
+  `sha256:ce5aca4d5986b0e860ebde60057f62512272a47bfbe18e850100feed9a309590`.
+- Контейнер `print-factory-panel`: `running healthy`; `/health` → 200, парольный
+  вход сохранён, защищённый API без cookie → 401.
+- Живая постоянная SQLite-база мигрирована: `radar_seeds=21`, последний
+  автоматический запуск `succeeded`, volume `panel_panel_out` сохранён.
+- На сервере `BRIGHTDATA_API_TOKEN` пока отсутствует: Google/Telegram работают,
+  TikTok discovery/comments ожидают одноразовый ключ.
+- Откат: image `print-factory-panel:backup-pre-auto-radar-a14e909` и каталог
+  `/opt/print-panel-backup-pre-auto-radar-a14e909`.
+
 ## 2026-07-26 — радар: повторные замеры, скорость роста и пакетный импорт
 
 ### Исправленная модель данных
