@@ -60,6 +60,24 @@ HTTPS-ссылки на allowlist доменов TikTok/Telegram/YouTube; HTML �
 платформы. Следующий этап — подключаемые легальные сборщики/импортеры и
 периодический мониторинг уже известных источников.
 
+### Production-deploy
+
+- Код MVP: commit `7ee87c3`, отправлен в `origin/main`.
+- Linux Docker-кандидат `print-factory-panel:7ee87c3`: **378 passed**,
+  4 предупреждения `multiprocessing/fork`, 0 падений.
+- Production-образ: image
+  `sha256:936a7a9d96f2620d4bfb4e9cd53b092fade8f2f7fee6f313984625213d563121`.
+- Контейнер `print-factory-panel`: `running healthy`.
+- Smoke: `/health` → 200; `/` → 303 на `/login`;
+  `/api/radar/trends` без сессии → 401.
+- `trend_radar.sqlite3` создан внутри mount
+  `panel_panel_out -> /app/panel/panel_out`.
+- Откат сохранён:
+  - образ `print-factory-panel:backup-pre-radar-1ce2d82`;
+  - каталог `/opt/print-panel-backup-pre-radar-20260726-1ce2d82`.
+- Рабочий каталог сервера остаётся стандартным `/opt/print-panel`; `.env`
+  перенесён отдельно и не попал в Git/архив.
+
 ## Антистикерный QC style 34 + автономный авто-стиль 37 (2026-07-26, Codex)
 
 **Живой дефект style 34:** партия «Магическая битва» от 2026-07-24 снова дала
