@@ -101,6 +101,26 @@
   .radar-rule{grid-column:1/-1;color:#f0bd6f;font-size:11px;line-height:1.45;
     border-left:3px solid #b67820;padding-left:9px}
   .radar-status{font-size:12px;color:var(--muted);min-height:18px}
+  .collector-panel{display:grid;grid-template-columns:minmax(280px,1.4fr) minmax(260px,1fr);
+    gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .collector-title{font-size:15px;font-weight:700;margin-bottom:6px}
+  .collector-state{font-size:12px;color:var(--muted);line-height:1.5}
+  .collector-state strong{color:var(--text)}
+  .collector-providers{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  .provider-pill{font-size:10px;border-radius:999px;padding:5px 8px;background:#3a3b45;color:#b8bac5}
+  .provider-pill.ok{background:#174d34;color:#7ee0a6}
+  .provider-pill.warn{background:#4d3b17;color:#ffd277}
+  .collector-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+  .collector-actions button{background:var(--accent2);border-color:#367bd6}
+  .collector-note{font-size:11px;color:var(--muted);line-height:1.45}
+  .seed-panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+  .seed-title{font-size:12px;color:var(--muted);margin-bottom:8px}
+  .seed-list{display:flex;gap:6px;flex-wrap:wrap}
+  .seed-chip{font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+    padding:5px 8px;color:#cbd2df}
+  .diagnostics{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .diagnostics>summary{cursor:pointer;font-size:12px;color:#8f96a5}
+  .diagnostics .radar-form{margin-top:12px}
   .radar-batch{background:var(--panel);border:1px solid var(--line);border-radius:10px;
     padding:10px 12px}
   .radar-batch summary{cursor:pointer;font-size:13px;color:#9fc4ff}
@@ -137,6 +157,7 @@
     border-radius:10px}
   @media(max-width:900px){
     .app{display:block}.side{width:100%;min-width:0;max-height:none}.main{min-height:80vh}
+    .collector-panel{grid-template-columns:1fr}
     .radar-form{grid-template-columns:1fr 1fr}.radar-form .wide{grid-column:span 2}
   }
   @media(max-width:580px){
@@ -207,13 +228,32 @@
     <section class="view radar-view" id="radarView" style="display:none">
       <div class="radar-head">
         <div>
-          <h2>TikTok-first радар мемов</h2>
-          <p>Добавляйте публичные ссылки, дату оригинальной публикации и комментарии. Повторная отправка той же ссылки сохраняет новый замер и считает реальную скорость роста. TikTok-ссылки обогащаются официальным oEmbed. Telegram и YouTube служат независимыми подтверждениями. Перед платной генерацией требуется ваше одобрение.</p>
+          <h2>Автоматический радар мемов</h2>
+          <p>Система сама собирает свежие темы, ищет TikTok-ролики, отслеживает рост и повторяющиеся слова в комментариях. Вам остаётся проверить кандидата, одобрить его и отправить в генерацию принтов.</p>
         </div>
         <button id="radarRefresh" type="button">Обновить</button>
       </div>
 
-      <form class="radar-form" id="radarForm">
+      <div class="collector-panel">
+        <div>
+          <div class="collector-title" id="collectorTitle">Проверяю состояние автопоиска…</div>
+          <div class="collector-state" id="collectorState"></div>
+          <div class="collector-providers" id="collectorProviders"></div>
+        </div>
+        <div class="collector-actions">
+          <button id="collectorRun" type="button">Проверить тренды сейчас</button>
+          <div class="collector-note" id="collectorNote">Ручные ссылки для обычной работы не нужны.</div>
+        </div>
+      </div>
+
+      <div class="seed-panel">
+        <div class="seed-title">Что система сейчас проверяет</div>
+        <div class="seed-list" id="seedList"><span class="seed-chip">Загрузка…</span></div>
+      </div>
+
+      <details class="diagnostics">
+        <summary>Диагностика и резервный ручной ввод</summary>
+        <form class="radar-form" id="radarForm">
         <label class="fld">Источник
           <select id="radarSource">
             <option value="tiktok">TikTok</option>
@@ -254,23 +294,24 @@
         <div class="radar-rule">Первое появление в нашей базе не считается рождением мема. Без даты исходной публикации и второго независимого сигнала статус останется «НЕ ПРОВЕРЕНО». Старый мем не станет «НОВЫМ» из-за повторов в комментариях; при новом всплеске он получит отдельный статус «ВОЗВРАТ».</div>
         <button class="primary" id="radarSubmit" type="submit">Добавить сигнал</button>
         <div class="radar-status" id="radarFormStatus"></div>
-      </form>
+        </form>
 
-      <details class="radar-batch">
-        <summary>Пакетный импорт JSON — до 100 сигналов или повторных замеров</summary>
-        <p>Вставьте JSON-массив объектов с теми же полями: term, source_type,
-          source_url, published_at, views, likes, shares, comments_count, caption
-          и comments. Повторная ссылка обновит метрики, а не создаст дубль.</p>
-        <textarea id="radarBatchJson" spellcheck="false"
-          placeholder='[{"term":"Воздухан","source_type":"tiktok","source_url":"https://www.tiktok.com/@author/video/123","views":120000,"shares":3400}]'></textarea>
-        <div class="radar-batch-actions">
-          <button id="radarBatchSubmit" type="button">Импортировать пакет</button>
-          <div class="radar-status" id="radarBatchStatus"></div>
-        </div>
+        <details class="radar-batch">
+          <summary>Пакетный импорт JSON — до 100 сигналов или повторных замеров</summary>
+          <p>Вставьте JSON-массив объектов с теми же полями: term, source_type,
+            source_url, published_at, views, likes, shares, comments_count, caption
+            и comments. Повторная ссылка обновит метрики, а не создаст дубль.</p>
+          <textarea id="radarBatchJson" spellcheck="false"
+            placeholder='[{"term":"Воздухан","source_type":"tiktok","source_url":"https://www.tiktok.com/@author/video/123","views":120000,"shares":3400}]'></textarea>
+          <div class="radar-batch-actions">
+            <button id="radarBatchSubmit" type="button">Импортировать пакет</button>
+            <div class="radar-status" id="radarBatchStatus"></div>
+          </div>
+        </details>
       </details>
 
       <div class="radar-grid" id="radarGrid">
-        <div class="empty-radar">Сигналов пока нет. Добавьте первую TikTok-ссылку.</div>
+        <div class="empty-radar">Автопоиск ещё не нашёл подтверждённых TikTok-сигналов.</div>
       </div>
     </section>
   </main>
@@ -305,6 +346,7 @@ const stylesEl = $('#styles'), themeEl = $('#theme'), charsEl = $('#characters')
       radarForm = $('#radarForm'), radarFormStatus = $('#radarFormStatus');
 
 let pollTimer = null, currentJob = null;
+let radarPollTimer = null;
 let previewItems = [], previewIndex = 0;
 let themeOptionalStyleIds = new Set();
 
@@ -317,7 +359,14 @@ function switchView(view){
   radarView.style.display = radar ? 'flex' : 'none';
   generationTab.classList.toggle('active', !radar);
   radarTab.classList.toggle('active', radar);
-  if(radar) loadRadar();
+  if(radar){
+    loadRadar();
+    clearInterval(radarPollTimer);
+    radarPollTimer = setInterval(loadCollectorStatus, 12000);
+  }else{
+    clearInterval(radarPollTimer);
+    radarPollTimer = null;
+  }
 }
 generationTab.onclick = () => switchView('generation');
 radarTab.onclick = () => switchView('radar');
@@ -691,7 +740,81 @@ function formatDate(value){
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');
 }
 
+function providerPill(label, ok, warning=''){
+  const pill = document.createElement('span');
+  pill.className = `provider-pill ${ok ? 'ok' : 'warn'}`;
+  pill.textContent = ok ? `✓ ${label}` : `! ${label}${warning ? ': ' + warning : ''}`;
+  return pill;
+}
+
+async function loadCollectorStatus(){
+  const title = $('#collectorTitle'), state = $('#collectorState'),
+        providers = $('#collectorProviders'), button = $('#collectorRun'),
+        note = $('#collectorNote');
+  try{
+    const res = await fetch('/api/radar/collector/status');
+    if(!res.ok) throw new Error('Статус автопоиска недоступен');
+    const data = await res.json();
+    const run = data.latest_run;
+    title.textContent = data.running ? 'Автопоиск выполняется…'
+      : (data.enabled ? 'Автопоиск включён' : 'Автопоиск выключен');
+    const parts = [];
+    if(run) parts.push(`Последняя проверка: ${formatDate(run.finished_at || run.started_at || run.created_at)}`);
+    if(run?.status === 'succeeded'){
+      parts.push(`тем: ${run.seeds_found}; новых TikTok-сигналов: ${run.signals_created}; обновлено: ${run.signals_updated}`);
+    }else if(run?.status === 'failed'){
+      parts.push(`ошибка: ${run.error || 'неизвестная ошибка'}`);
+    }
+    if(data.next_run_at) parts.push(`следующая: ${formatDate(data.next_run_at)}`);
+    state.textContent = parts.join(' · ') || 'Первый автоматический запуск ещё не выполнялся.';
+    providers.innerHTML = '';
+    const p = data.providers;
+    providers.append(
+      providerPill(`Google Trends ${p.google_trends.geo}`, p.google_trends.configured),
+      providerPill(`Telegram (${p.telegram.channels})`, p.telegram.configured, 'добавьте каналы один раз'),
+      providerPill('TikTok', p.tiktok.configured, 'нужен ключ провайдера'),
+    );
+    button.disabled = data.running || !data.enabled;
+    note.textContent = p.tiktok.configured
+      ? 'Система сама ищет ролики и комментарии. Ручные ссылки не нужны.'
+      : 'Бесплатные темы уже собираются. Для реального TikTok-поиска нужен один ключ Bright Data в настройках сервера.';
+  }catch(e){
+    title.textContent = 'Не удалось проверить автопоиск';
+    state.textContent = e.message;
+    providers.innerHTML = '';
+    button.disabled = false;
+  }
+}
+
+async function loadRadarSeeds(){
+  const list = $('#seedList');
+  try{
+    const res = await fetch('/api/radar/seeds?limit=24');
+    if(!res.ok) throw new Error();
+    const seeds = await res.json();
+    list.innerHTML = '';
+    if(!seeds.length){
+      const empty = document.createElement('span');
+      empty.className = 'seed-chip';
+      empty.textContent = 'Темы появятся после первой проверки';
+      list.append(empty);
+      return;
+    }
+    seeds.forEach(seed=>{
+      const chip = document.createElement('span');
+      chip.className = 'seed-chip';
+      chip.textContent = `${seed.display_name} · ${seed.source_type}`;
+      chip.title = `Замечено раз: ${seed.seen_count}`;
+      list.append(chip);
+    });
+  }catch(e){
+    list.innerHTML = '<span class="seed-chip">Не удалось загрузить темы</span>';
+  }
+}
+
 async function loadRadar(){
+  loadCollectorStatus();
+  loadRadarSeeds();
   radarGrid.innerHTML = '<div class="empty-radar">Загружаю сигналы…</div>';
   try{
     const res = await fetch('/api/radar/trends?limit=100');
@@ -699,7 +822,7 @@ async function loadRadar(){
     const trends = await res.json();
     radarGrid.innerHTML = '';
     if(!trends.length){
-      radarGrid.innerHTML = '<div class="empty-radar">Сигналов пока нет. Добавьте первую TikTok-ссылку.</div>';
+      radarGrid.innerHTML = '<div class="empty-radar">Автопоиск ещё не нашёл подтверждённых TikTok-сигналов. Нажмите «Проверить тренды сейчас» или дождитесь планового запуска.</div>';
       return;
     }
     trends.forEach(trend => radarGrid.append(trendCard(trend)));
@@ -713,6 +836,26 @@ async function loadRadar(){
 }
 
 $('#radarRefresh').onclick = loadRadar;
+$('#collectorRun').onclick = async () => {
+  const button = $('#collectorRun');
+  button.disabled = true;
+  $('#collectorNote').textContent = 'Запускаю проверку в фоне…';
+  try{
+    const res = await fetch('/api/radar/collector/run', {method:'POST'});
+    const data = await res.json().catch(()=>({}));
+    if(res.status === 409){
+      $('#collectorNote').textContent = 'Проверка уже выполняется.';
+    }else if(!res.ok){
+      throw new Error(data.detail || 'Не удалось запустить проверку');
+    }else{
+      $('#collectorNote').textContent = 'Проверка запущена. Экран обновится автоматически.';
+    }
+    await loadCollectorStatus();
+  }catch(e){
+    $('#collectorNote').textContent = e.message;
+    button.disabled = false;
+  }
+};
 
 radarForm.addEventListener('submit', async event => {
   event.preventDefault();

@@ -75,6 +75,12 @@ RGBA PNG алгоритмом актуального GreenKey (`sharp=True`, б�
   (запускает генерацию в фоне)
 - `POST /api/radar/signals` — принять публичную TikTok/Telegram/YouTube-ссылку,
   дату, метрики и комментарии; TikTok oEmbed запускается в отдельном фоне
+- `GET  /api/radar/collector/status` — состояние автоматического поиска,
+  источников, последнего и следующего запуска
+- `POST /api/radar/collector/run` — поставить внеплановый автоматический проход
+  в однопоточную очередь; при уже идущем проходе возвращает `409`
+- `GET  /api/radar/seeds` — темы, автоматически найденные Google/Telegram и
+  ожидающие/проходящие TikTok-проверку
 - `GET  /api/radar/jobs/{job_id}` — статус фонового обогащения сигнала
 - `GET  /api/radar/trends` — карточки радара
 - `GET  /api/radar/trends/{trend_id}` — одна карточка с наблюдениями
@@ -154,6 +160,16 @@ docker compose -f panel/docker-compose.yml up -d --build
 | `PANEL_PORT` | `8040` | порт uvicorn (локальный запуск; в Docker порт фиксирован в `EXPOSE`/`ports`) |
 | `PANEL_OUTPUT_DIR` | `panel/panel_out` | куда пишутся готовые PNG по job_id |
 | `PANEL_RADAR_DB` | `<PANEL_OUTPUT_DIR>/trend_radar.sqlite3` | постоянная SQLite-база сигналов, комментариев, решений и фоновых заданий радара |
+| `PANEL_RADAR_AUTO_ENABLED` | `on` | включает фоновый автоматический поиск |
+| `PANEL_RADAR_COLLECTION_INTERVAL` | `10800` | интервал проходов в секундах, минимум 900 |
+| `PANEL_RADAR_INITIAL_DELAY` | `20` | задержка первого прохода после запуска панели |
+| `PANEL_RADAR_GOOGLE_TRENDS_GEO` | `RU` | регион официального Google Trends RSS |
+| `PANEL_RADAR_TELEGRAM_CHANNELS` | `memachh,memsearch,meme_forum,BrandAnalytics` | публичные Telegram-каналы через запятую |
+| `PANEL_RADAR_DISCOVERY_TERMS_PER_RUN` | `4` | сколько приоритетных тем проверять в TikTok за проход |
+| `PANEL_RADAR_POSTS_PER_TERM` | `5` | сколько TikTok-роликов брать на тему |
+| `PANEL_RADAR_COMMENTS_POSTS_PER_RUN` | `1` | для скольких лучших роликов получать комментарии за проход |
+| `PANEL_RADAR_REQUEST_TIMEOUT` | `30` | сетевой таймаут источников в секундах |
+| `BRIGHTDATA_API_TOKEN` | пусто | секрет API TikTok discovery/comments; хранить только в `.env` сервера |
 | `PANEL_DEFAULT_STYLE` | `auto` | автовыбор арт-директором, если чекбоксы не отмечены |
 | `PANEL_MAX_COUNT` | `50` | предохранитель — макс. дизайнов за один запуск |
 | `PANEL_STYLE_BANK` | `../docs/STYLE_BANK.json` | путь к банку стилей |
@@ -168,6 +184,11 @@ docker compose -f panel/docker-compose.yml up -d --build
 в корне): `GEMINI_API_KEY`, `IMAGE_PROVIDER`, `ART_DIRECTOR_PROVIDER`, `UPSCALE`
 и т.д. В контейнере панели по умолчанию (`docker-compose.yml`): `UPSCALE=off`,
 `IMAGE_PROVIDER=gemini`, `ART_DIRECTOR_PROVIDER=gemini`.
+
+Автопоиск без `BRIGHTDATA_API_TOKEN` всё равно собирает темы Google/Telegram и
+показывает их в панели, но не может найти и измерить сами TikTok-ролики. После
+одноразового добавления токена в корневой `.env` ссылки, метрики и комментарии
+собираются автоматически; оператору остаётся только одобрять кандидатов.
 
 ## Оговорки / TODO для деплоя
 

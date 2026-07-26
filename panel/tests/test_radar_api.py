@@ -21,14 +21,39 @@ class _InlineExecutor:
         return future
 
 
+class _CollectorStub:
+    def __init__(self):
+        self.run_calls = []
+
+    def status(self):
+        return {
+            "enabled": True,
+            "running": False,
+            "next_run_at": None,
+            "interval_seconds": 10800,
+            "providers": {
+                "google_trends": {"configured": True, "geo": "RU"},
+                "telegram": {"configured": False, "channels": 0},
+                "tiktok": {"configured": False, "provider": "Bright Data"},
+            },
+            "latest_run": None,
+        }
+
+    def queue_run(self, trigger):
+        self.run_calls.append(trigger)
+        return {"queued": True, "run_id": "automatic123"}
+
+
 @pytest.fixture
 def radar_client(tmp_path, monkeypatch):
     store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
     radar_executor = _InlineExecutor()
+    collector = _CollectorStub()
     monkeypatch.setattr(panel_app, "_radar_store", store)
     monkeypatch.setattr(panel_app, "_radar_executor", radar_executor)
+    monkeypatch.setattr(panel_app, "_radar_collector", collector)
     monkeypatch.setattr(panel_app.settings, "ACCESS_PASSWORD_SHA256", "")
-    return TestClient(panel_app.app), store, radar_executor
+    return TestClient(panel_app.app), store, radar_executor, collector
 
 
 def _payload(**overrides):
@@ -47,7 +72,7 @@ def _payload(**overrides):
 
 
 def test_signal_endpoint_persists_card_and_queues_oembed(radar_client):
-    client, _, radar_executor = radar_client
+    client, _, radar_executor, _ = radar_client
 
     response = client.post("/api/radar/signals", json=_payload())
 
@@ -62,7 +87,7 @@ def test_signal_endpoint_persists_card_and_queues_oembed(radar_client):
 
 
 def test_signal_endpoint_rejects_spoofed_tiktok_host(radar_client):
-    client, _, radar_executor = radar_client
+    client, _, radar_executor, _ = radar_client
 
     response = client.post(
         "/api/radar/signals",
@@ -74,7 +99,7 @@ def test_signal_endpoint_rejects_spoofed_tiktok_host(radar_client):
 
 
 def test_duplicate_signal_is_idempotent(radar_client):
-    client, _, radar_executor = radar_client
+    client, _, radar_executor, _ = radar_client
 
     first = client.post("/api/radar/signals", json=_payload())
     second = client.post("/api/radar/signals", json=_payload())
@@ -87,7 +112,7 @@ def test_duplicate_signal_is_idempotent(radar_client):
 
 
 def test_batch_endpoint_imports_new_signals_and_updates_existing(radar_client):
-    client, _, radar_executor = radar_client
+    client, _, radar_executor, _ = radar_client
     client.post("/api/radar/signals", json=_payload())
 
     response = client.post(
@@ -119,7 +144,7 @@ def test_batch_endpoint_imports_new_signals_and_updates_existing(radar_client):
 
 
 def test_owner_must_approve_before_generation(radar_client, monkeypatch):
-    client, _, _ = radar_client
+    client, _, _, _ = radar_client
     trend_id = client.post("/api/radar/signals", json=_payload()).json()["trend_id"]
     generation_executor = _InlineExecutor()
     monkeypatch.setattr(panel_app, "_executor", generation_executor)
@@ -143,7 +168,7 @@ def test_owner_must_approve_before_generation(radar_client, monkeypatch):
 
 
 def test_reject_disables_previous_approval(radar_client):
-    client, _, _ = radar_client
+    client, _, _, _ = radar_client
     trend_id = client.post("/api/radar/signals", json=_payload()).json()["trend_id"]
 
     client.post(f"/api/radar/trends/{trend_id}/approve")
@@ -152,3 +177,19 @@ def test_reject_disables_previous_approval(radar_client):
     assert rejected.status_code == 200
     assert rejected.json()["approved"] is False
     assert rejected.json()["rejected"] is True
+
+
+def test_automatic_collector_status_and_manual_trigger(radar_client):
+    client, store, _, collector = radar_client
+    store.upsert_seed("Новый звук", "google_trends")
+
+    status = client.get("/api/radar/collector/status")
+    seeds = client.get("/api/radar/seeds")
+    started = client.post("/api/radar/collector/run")
+
+    assert status.status_code == 200
+    assert status.json()["providers"]["google_trends"]["configured"] is True
+    assert seeds.json()[0]["display_name"] == "Новый звук"
+    assert started.status_code == 202
+    assert started.json()["run_id"] == "automatic123"
+    assert collector.run_calls == ["owner"]

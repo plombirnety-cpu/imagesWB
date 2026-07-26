@@ -241,6 +241,31 @@ class TrendRadarStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS radar_seeds (
+                    canonical_key TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_url TEXT NOT NULL DEFAULT '',
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    seen_count INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_radar_seeds_last_seen
+                    ON radar_seeds(last_seen_at DESC);
+                CREATE TABLE IF NOT EXISTS collector_runs (
+                    id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    trigger_type TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    seeds_found INTEGER NOT NULL DEFAULT 0,
+                    signals_created INTEGER NOT NULL DEFAULT 0,
+                    signals_updated INTEGER NOT NULL DEFAULT 0,
+                    error TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_collector_runs_created
+                    ON collector_runs(created_at DESC);
                 """
             )
             # SQLite migrations for production databases created by radar MVP v1.
@@ -270,6 +295,176 @@ class TrendRadarStore:
                 FROM observations
                 """
             )
+
+    def upsert_seed(
+        self,
+        term: str,
+        source_type: str,
+        source_url: str = "",
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        """Сохраняет автоматически найденную тему и возвращает True для новой."""
+        now_text = _iso(now or utcnow())
+        display_name = " ".join((term or "").strip().split())[:120]
+        key = canonical_key(display_name)
+        if len(display_name) < 2 or not key:
+            return False
+        with self._connect() as db:
+            existing = db.execute(
+                "SELECT canonical_key FROM radar_seeds WHERE canonical_key = ?",
+                (key,),
+            ).fetchone()
+            db.execute(
+                """
+                INSERT INTO radar_seeds (
+                    canonical_key, display_name, source_type, source_url,
+                    first_seen_at, last_seen_at, seen_count
+                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT(canonical_key) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    source_type = excluded.source_type,
+                    source_url = CASE
+                        WHEN excluded.source_url <> '' THEN excluded.source_url
+                        ELSE radar_seeds.source_url
+                    END,
+                    last_seen_at = excluded.last_seen_at,
+                    seen_count = radar_seeds.seen_count + 1
+                """,
+                (
+                    key, display_name, source_type[:32], source_url[:2048],
+                    now_text, now_text,
+                ),
+            )
+        return existing is None
+
+    def list_seeds(self, limit: int = 30) -> list[dict]:
+        limit = max(1, min(200, int(limit)))
+        with self._connect() as db:
+            return [
+                dict(row) for row in db.execute(
+                    """
+                    SELECT canonical_key, display_name, source_type, source_url,
+                           first_seen_at, last_seen_at, seen_count
+                    FROM radar_seeds
+                    ORDER BY last_seen_at DESC, seen_count DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            ]
+
+    def discovery_terms(self, limit: int = 4) -> list[str]:
+        """Свежие автосемена с подмешиванием уже растущих сигналов."""
+        limit = max(1, min(20, int(limit)))
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT display_name FROM (
+                    SELECT display_name, last_seen_at,
+                           seen_count + CASE source_type
+                               WHEN 'telegram_memes' THEN 100
+                               WHEN 'telegram' THEN 60
+                               ELSE 0
+                           END AS weight
+                    FROM radar_seeds
+                    WHERE last_seen_at >= ?
+                    UNION ALL
+                    SELECT display_name, last_seen_at, CAST(score AS INTEGER) AS weight
+                    FROM trends
+                    WHERE rejected = 0 AND lifecycle IN ('NEW', 'RISING', 'RESURGENCE')
+                )
+                ORDER BY weight DESC, last_seen_at DESC
+                LIMIT ?
+                """,
+                (_iso(utcnow() - timedelta(days=7)), limit * 3),
+            ).fetchall()
+        result: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            key = canonical_key(row["display_name"])
+            if key and key not in seen:
+                seen.add(key)
+                result.append(row["display_name"])
+            if len(result) >= limit:
+                break
+        return result
+
+    def create_collector_run(
+        self,
+        trigger_type: str,
+        *,
+        now: datetime | None = None,
+    ) -> str:
+        run_id = uuid.uuid4().hex[:16]
+        with self._connect() as db:
+            db.execute(
+                """
+                INSERT INTO collector_runs (
+                    id, status, trigger_type, created_at
+                ) VALUES (?, 'pending', ?, ?)
+                """,
+                (run_id, trigger_type[:32], _iso(now or utcnow())),
+            )
+        return run_id
+
+    def update_collector_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        seeds_found: int | None = None,
+        signals_created: int | None = None,
+        signals_updated: int | None = None,
+        error: str | None = None,
+        now: datetime | None = None,
+    ) -> None:
+        if status not in {"pending", "running", "succeeded", "failed"}:
+            raise ValueError("неизвестный статус запуска радара")
+        now_text = _iso(now or utcnow())
+        with self._connect() as db:
+            current = db.execute(
+                "SELECT * FROM collector_runs WHERE id = ?", (run_id,),
+            ).fetchone()
+            if current is None:
+                raise KeyError(run_id)
+            started_at = current["started_at"]
+            finished_at = current["finished_at"]
+            if status == "running" and not started_at:
+                started_at = now_text
+            if status in {"succeeded", "failed"}:
+                finished_at = now_text
+            db.execute(
+                """
+                UPDATE collector_runs
+                SET status = ?, started_at = ?, finished_at = ?,
+                    seeds_found = ?, signals_created = ?, signals_updated = ?,
+                    error = ?
+                WHERE id = ?
+                """,
+                (
+                    status, started_at, finished_at,
+                    current["seeds_found"] if seeds_found is None else seeds_found,
+                    current["signals_created"] if signals_created is None else signals_created,
+                    current["signals_updated"] if signals_updated is None else signals_updated,
+                    current["error"] if error is None else error[:4000],
+                    run_id,
+                ),
+            )
+
+    def collector_run(self, run_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM collector_runs WHERE id = ?", (run_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def latest_collector_run(self) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM collector_runs ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def _insert_comments(

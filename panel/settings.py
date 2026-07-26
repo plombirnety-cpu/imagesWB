@@ -27,6 +27,46 @@ RADAR_DB_PATH = Path(
     os.getenv("PANEL_RADAR_DB", str(OUTPUT_DIR / "trend_radar.sqlite3"))
 )
 
+
+def _env_bool(name: str, default: str = "off") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_csv(name: str, default: str = "") -> tuple[str, ...]:
+    return tuple(
+        item.strip().lstrip("@")
+        for item in os.getenv(name, default).split(",")
+        if item.strip()
+    )
+
+
+# Автоматический радар. Бесплатные Google Trends и публичные Telegram-каналы
+# дают темы-кандидаты; Bright Data выполняет discovery TikTok и чтение комментариев.
+# Токен хранится только в env сервера и никогда не записывается в SQLite.
+RADAR_AUTO_ENABLED = _env_bool("PANEL_RADAR_AUTO_ENABLED", "on")
+RADAR_COLLECTION_INTERVAL = max(
+    900, int(os.getenv("PANEL_RADAR_COLLECTION_INTERVAL", str(3 * 60 * 60)))
+)
+RADAR_INITIAL_DELAY = max(1, int(os.getenv("PANEL_RADAR_INITIAL_DELAY", "20")))
+RADAR_GOOGLE_TRENDS_GEO = os.getenv("PANEL_RADAR_GOOGLE_TRENDS_GEO", "RU").strip() or "RU"
+RADAR_TELEGRAM_CHANNELS = _env_csv(
+    "PANEL_RADAR_TELEGRAM_CHANNELS",
+    "memachh,memsearch,meme_forum,BrandAnalytics",
+)
+RADAR_DISCOVERY_TERMS_PER_RUN = max(
+    1, min(20, int(os.getenv("PANEL_RADAR_DISCOVERY_TERMS_PER_RUN", "4")))
+)
+RADAR_POSTS_PER_TERM = max(
+    1, min(50, int(os.getenv("PANEL_RADAR_POSTS_PER_TERM", "5")))
+)
+RADAR_COMMENTS_POSTS_PER_RUN = max(
+    0, min(10, int(os.getenv("PANEL_RADAR_COMMENTS_POSTS_PER_RUN", "1")))
+)
+RADAR_REQUEST_TIMEOUT = max(
+    5, min(120, int(os.getenv("PANEL_RADAR_REQUEST_TIMEOUT", "30")))
+)
+BRIGHTDATA_API_TOKEN = os.getenv("BRIGHTDATA_API_TOKEN", "").strip()
+
 # Если владелец не отметил ни одного чекбокса, стиль выбирает арт-директор по теме.
 # Раньше здесь был принудительный anime style 34: поэтому Doctor Doom без выбора
 # неожиданно уходил в аниме-журнал и чаще ловил IMAGE_OTHER/PROHIBITED_CONTENT.

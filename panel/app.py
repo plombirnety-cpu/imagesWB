@@ -25,6 +25,7 @@ import time
 import uuid
 import zipfile
 from collections import deque
+from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -46,10 +47,21 @@ if str(ENGINE_ROOT) not in sys.path:
 import settings        # noqa: E402  (panel/settings.py)
 import orchestrator    # noqa: E402  (panel/orchestrator.py)
 import trend_radar     # noqa: E402  (panel/trend_radar.py)
+import radar_collector  # noqa: E402  (panel/radar_collector.py)
 
 STATIC_DIR = PANEL_DIR / "static"
 
-app = FastAPI(title="Print Factory Panel", version="1.0")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _radar_collector.start()
+    try:
+        yield
+    finally:
+        _radar_collector.stop()
+
+
+app = FastAPI(title="Print Factory Panel", version="1.0", lifespan=_lifespan)
 
 # Джобы — фон (генерация 1..50 картинок не должна упираться в HTTP-таймаут).
 # max_workers=2 — держим нагрузку на Gemini-квоту и локальный CPU в разумных
@@ -64,6 +76,31 @@ _jobs_lock = threading.Lock()
 # SQLite, поэтому повторный запрос безопасен и не дублирует сигнал.
 _radar_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="radar-ingest")
 _radar_store = trend_radar.TrendRadarStore(settings.RADAR_DB_PATH)
+_radar_collector = radar_collector.RadarCollector(
+    _radar_store,
+    radar_collector.CollectorConfig(
+        enabled=settings.RADAR_AUTO_ENABLED,
+        interval_seconds=settings.RADAR_COLLECTION_INTERVAL,
+        initial_delay_seconds=settings.RADAR_INITIAL_DELAY,
+        google_geo=settings.RADAR_GOOGLE_TRENDS_GEO,
+        telegram_channels=settings.RADAR_TELEGRAM_CHANNELS,
+        discovery_terms_per_run=settings.RADAR_DISCOVERY_TERMS_PER_RUN,
+        posts_per_term=settings.RADAR_POSTS_PER_TERM,
+        comments_posts_per_run=settings.RADAR_COMMENTS_POSTS_PER_RUN,
+    ),
+    google=radar_collector.GoogleTrendsSource(
+        geo=settings.RADAR_GOOGLE_TRENDS_GEO,
+        timeout=settings.RADAR_REQUEST_TIMEOUT,
+    ),
+    telegram=radar_collector.TelegramPublicSource(
+        settings.RADAR_TELEGRAM_CHANNELS,
+        timeout=settings.RADAR_REQUEST_TIMEOUT,
+    ),
+    tiktok=radar_collector.BrightDataClient(
+        settings.BRIGHTDATA_API_TOKEN,
+        timeout=settings.RADAR_REQUEST_TIMEOUT,
+    ),
+)
 
 _AUTH_COOKIE = "print_factory_access"
 _AUTH_TOKEN_MESSAGE = b"print-factory-panel-session-v1"
@@ -375,6 +412,24 @@ def api_radar_signals_batch(req: RadarBatchRequest):
         "errors": errors,
         "results": results,
     }
+
+
+@app.get("/api/radar/collector/status")
+def api_radar_collector_status():
+    return _radar_collector.status()
+
+
+@app.post("/api/radar/collector/run", status_code=202)
+def api_radar_collector_run():
+    result = _radar_collector.queue_run("owner")
+    if not result["queued"]:
+        return JSONResponse(result, status_code=409)
+    return result
+
+
+@app.get("/api/radar/seeds")
+def api_radar_seeds(limit: int = 30):
+    return _radar_store.list_seeds(limit=limit)
 
 
 @app.get("/api/radar/jobs/{job_id}")
