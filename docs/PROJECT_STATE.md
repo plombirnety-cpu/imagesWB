@@ -45,6 +45,22 @@
   локально. Встроенный браузер Codex не смог открыть localhost, поэтому финальная
   визуальная проверка выполняется на production после выкладки.
 
+### Production-deploy
+
+- Код этапа: commit `f3cce7e`, отправлен в `origin/main`.
+- Linux Docker-кандидат `print-factory-panel:f3cce7e`: **386 passed**,
+  4 предупреждения `multiprocessing/fork`, 0 падений.
+- Production-образ:
+  `sha256:bd68e8884edcdfece6e1555e53b7cb5eb7e07bc979f56c4e7e2747cdb7c05b24`.
+- Контейнер `print-factory-panel`: `running healthy`.
+- Smoke: `/health` → 200; `/` → 303 на `/login`; `/api/radar/trends` без сессии
+  → 401.
+- Живая SQLite-база успешно мигрирована: присутствуют `metric_snapshots`,
+  `trends.velocity_score` и `observations.comments_count`. Постоянный volume
+  `panel_panel_out` сохранён.
+- Откат: image `print-factory-panel:backup-pre-radar-velocity-f3cce7e` и каталог
+  `/opt/print-panel-backup-pre-radar-velocity-e6646a4`.
+
 ## 2026-07-26 — вариативность автомобильных партий
 
 ### Живой дефект

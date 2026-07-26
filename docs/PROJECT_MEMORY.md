@@ -14,6 +14,12 @@
 - Глобальный TikTok-мониторинг пока не реализован: официальный Display API не даёт
   глобальную выдачу, а Research API требует одобрения. Следующий источник должен
   подключаться адаптером из разрешённого API/экспорта, без нестабильного скрейпинга.
+- Этап повторных замеров/скорости выложен из commit `f3cce7e`; Linux-кандидат прошёл
+  386/386 тестов. Production healthy на image
+  `sha256:bd68e8884edcdfece6e1555e53b7cb5eb7e07bc979f56c4e7e2747cdb7c05b24`.
+  Миграция SQLite подтверждена. Откат: image
+  `print-factory-panel:backup-pre-radar-velocity-f3cce7e`, каталог
+  `/opt/print-panel-backup-pre-radar-velocity-e6646a4`.
 - Production: `http://195.133.66.37:8040`, серверный каталог
   `/opt/print-panel`, контейнер `print-factory-panel`, Docker volume
   `panel_panel_out`.
