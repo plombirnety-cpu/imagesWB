@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import requests
@@ -136,6 +137,36 @@ def test_tiktok_candidates_expand_search_graph_without_generic_tags():
 
     assert terms == ["сованаскакалке", "черемша"]
     assert "машины" not in terms
+
+
+def test_comment_candidate_needs_two_observations_and_not_generic_word():
+    base = {
+        "term": "сованаскакалке",
+        "score": 80,
+        "unique_authors": 4,
+        "observation_count": 1,
+    }
+
+    assert radar_collector.comment_candidate_is_confirmed(base, "другая тема") is False
+    assert radar_collector.comment_candidate_is_confirmed(
+        {**base, "observation_count": 2},
+        "другая тема",
+    ) is True
+    assert radar_collector.comment_candidate_is_confirmed(
+        {**base, "term": "машины", "observation_count": 2},
+        "другая тема",
+    ) is False
+
+
+def test_confirmed_tiktok_seed_has_priority_over_broad_google(tmp_path):
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    now = datetime.now(timezone.utc)
+    store.upsert_seed("широкий запрос", "google_trends", now=now)
+    store.upsert_seed("сованаскакалке", "tiktok_hashtag", now=now)
+
+    assert store.discovery_terms(1, now=now + timedelta(minutes=1)) == [
+        "сованаскакалке",
+    ]
 
 
 def test_google_trends_rss_becomes_search_seeds():

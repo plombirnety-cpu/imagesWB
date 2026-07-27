@@ -121,6 +121,21 @@ def confirmed_tiktok_candidates(records: list[dict], search_term: str) -> list[s
     ][:5]
 
 
+def comment_candidate_is_confirmed(candidate: dict, search_term: str) -> bool:
+    """Требует независимое повторение, а не один шумный comments snapshot."""
+    term = str(candidate.get("term") or "")
+    key = canonical_key(term)
+    return bool(
+        candidate.get("score", 0) >= 35
+        and candidate.get("unique_authors", 0) >= 3
+        and candidate.get("observation_count", 0) >= 2
+        and len(key.replace(" ", "")) >= 7
+        and viable_seed_term(term)
+        and key != canonical_key(search_term)
+        and key not in _GENERIC_TIKTOK_TAGS
+    )
+
+
 @dataclass(frozen=True)
 class SeedTerm:
     term: str
@@ -586,13 +601,7 @@ class RadarCollector:
                         trend = self.store.get_trend(result["trend_id"])
                         if trend:
                             for candidate in trend["emerging_terms"]:
-                                if (
-                                    candidate["score"] < 35
-                                    or candidate["unique_authors"] < 3
-                                    or not viable_seed_term(candidate["term"])
-                                    or canonical_key(candidate["term"])
-                                    == canonical_key(term)
-                                ):
+                                if not comment_candidate_is_confirmed(candidate, term):
                                     continue
                                 promoted_seeds += int(self.store.upsert_seed(
                                     candidate["term"],

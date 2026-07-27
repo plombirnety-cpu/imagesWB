@@ -479,9 +479,11 @@ class TrendRadarStore:
                     CASE WHEN seed.last_queried_at IS NULL THEN 0 ELSE 1 END,
                     seed.last_queried_at ASC,
                     CASE seed.source_type
-                        WHEN 'telegram_memes' THEN 0
-                        WHEN 'telegram' THEN 1
-                        ELSE 2
+                        WHEN 'tiktok_hashtag' THEN 0
+                        WHEN 'tiktok_comments' THEN 1
+                        WHEN 'telegram_memes' THEN 2
+                        WHEN 'telegram' THEN 3
+                        ELSE 4
                     END,
                     seed.seen_count DESC,
                     seed.last_seen_at DESC
