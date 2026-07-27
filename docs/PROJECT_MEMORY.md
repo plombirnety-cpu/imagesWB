@@ -2,6 +2,17 @@
 
 ## Актуально на 2026-07-27
 
+- Финальный production радара: commit `6d622a1`, image
+  `sha256:3f1881c6e976a156dc4f989ef89e855cf2d1958b80abedf1b1e325aa7a5763e0`,
+  контейнер healthy, Linux **76/76 passed**.
+- Живой ротационный проход дал 18 seed и 30 новых TikTok-сигналов.
+- Санитарная миграция БД: 83 неподтверждённых `tiktok_hashtag` и 34 старых
+  `tiktok_comments` помечены `dismissed`, а не удалены. Подтверждённый двумя
+  роликами `kitchenhack` остался активным.
+- Откат финального этапа: image
+  `print-factory-panel:backup-pre-comment-filter-6d622a1`, каталог
+  `/opt/print-panel-backup-pre-comment-filter-6d622a1`.
+
 - Радар больше не должен зацикливаться на четырёх темах. В `radar_seeds`
   хранится ротация: `last_queried_at`, `query_count`, `dismissed`.
 - `reject` — постоянное решение: карточка исключается из списка, seed
