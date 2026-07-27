@@ -125,6 +125,19 @@ def test_schema_migrates_v1_database_and_seeds_first_measurement(tmp_path):
     assert trend["measurement_count"] == 1
 
 
+def test_store_marks_interrupted_collector_run_failed_on_restart(tmp_path):
+    db_path = tmp_path / "radar.sqlite3"
+    first = trend_radar.TrendRadarStore(db_path)
+    run_id = first.create_collector_run("schedule", now=NOW)
+    first.update_collector_run(run_id, status="running")
+
+    restarted = trend_radar.TrendRadarStore(db_path)
+    run = restarted.collector_run(run_id)
+
+    assert run["status"] == "failed"
+    assert run["error"] == "прерван перезапуском"
+
+
 def test_single_signal_without_origin_date_is_unverified(store):
     result = store.ingest_signal(
         _signal(comments="\n".join(["@a: воздухан"] * 12)),

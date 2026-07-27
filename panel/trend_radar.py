@@ -365,6 +365,17 @@ class TrendRadarStore:
                 WHERE canonical_key IN (SELECT canonical_key FROM trends)
                 """
             )
+            db.execute(
+                """
+                UPDATE collector_runs
+                SET status = 'failed',
+                    finished_at = ?,
+                    error = CASE WHEN error = '' THEN 'прерван перезапуском'
+                                 ELSE error END
+                WHERE status IN ('pending', 'running')
+                """,
+                (_iso(utcnow()),),
+            )
             # Existing observations become the first point in their time series.
             db.execute(
                 """

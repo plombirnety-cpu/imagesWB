@@ -84,6 +84,7 @@ def tiktok_candidate_terms(record: dict, search_term: str) -> list[str]:
         key = canonical_key(display)
         if (
             not viable_seed_term(display)
+            or len(key.replace(" ", "")) < 7
             or key == current_key
             or key in _GENERIC_TIKTOK_TAGS
             or key.startswith(("fyp", "рек", "recommend"))
@@ -93,6 +94,31 @@ def tiktok_candidate_terms(record: dict, search_term: str) -> list[str]:
         seen.add(key)
         result.append(display)
     return result[:5]
+
+
+def confirmed_tiktok_candidates(records: list[dict], search_term: str) -> list[str]:
+    """Оставляет хештеги, найденные минимум у двух независимых авторов/роликов."""
+    labels: dict[str, str] = {}
+    sources: dict[str, set[str]] = {}
+    for record in records:
+        source = canonical_key(str(
+            record.get("profile_username")
+            or record.get("author_username")
+            or record.get("post_id")
+            or record.get("id")
+            or ""
+        ))
+        if not source:
+            continue
+        for candidate in tiktok_candidate_terms(record, search_term):
+            key = canonical_key(candidate)
+            labels.setdefault(key, candidate)
+            sources.setdefault(key, set()).add(source)
+    return [
+        labels[key]
+        for key, identities in sources.items()
+        if len(identities) >= 2
+    ][:5]
 
 
 @dataclass(frozen=True)
@@ -498,6 +524,9 @@ class RadarCollector:
                         ),
                         reverse=True,
                     )
+                    confirmed_hashtags = confirmed_tiktok_candidates(
+                        records, term,
+                    )
                     for record in records:
                         source_url = self.tiktok.post_url(record)
                         if not source_url or source_url in seen_urls:
@@ -554,10 +583,6 @@ class RadarCollector:
                             updated += int(bool(result["updated"]))
                         else:
                             created += 1
-                        for candidate in tiktok_candidate_terms(record, term):
-                            promoted_seeds += int(self.store.upsert_seed(
-                                candidate, "tiktok_hashtag", source_url,
-                            ))
                         trend = self.store.get_trend(result["trend_id"])
                         if trend:
                             for candidate in trend["emerging_terms"]:
@@ -574,6 +599,10 @@ class RadarCollector:
                                     "tiktok_comments",
                                     source_url,
                                 ))
+                    for candidate in confirmed_hashtags:
+                        promoted_seeds += int(self.store.upsert_seed(
+                            candidate, "tiktok_hashtag",
+                        ))
 
             self.store.update_collector_run(
                 run_id,
