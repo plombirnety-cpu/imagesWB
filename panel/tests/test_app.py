@@ -321,6 +321,8 @@ def test_frontend_contains_cancel_and_individual_preview_controls():
     assert 'id="opportunitySummary"' in html
     assert "/api/radar/opportunities" in html
     assert "loadRadarCards" in html
+    assert "Это промежуточный экран" in html
+    assert "refreshOpportunityEmptyState" in html
 
 
 def test_unknown_job_404():

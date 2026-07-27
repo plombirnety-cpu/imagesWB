@@ -607,6 +607,7 @@ class RadarCollector:
                 )
                 for term_index, term in enumerate(terms):
                     self._check_cancelled()
+                    google_origin_key = self.store.google_origin_for_seed(term)
                     term_has_comments = False
                     self.store.update_collector_run(
                         run_id, status="running", phase="tiktok_discovery",
@@ -698,6 +699,7 @@ class RadarCollector:
                                 comments_count=int(
                                     record.get("comment_count") or len(comment_rows)
                                 ),
+                                google_origin_key=google_origin_key,
                             )
                         )
                         if result["duplicate"]:
@@ -713,10 +715,12 @@ class RadarCollector:
                                     candidate["term"],
                                     "tiktok_comments",
                                     source_url,
+                                    google_origin_key=google_origin_key,
                                 ))
                     for candidate in confirmed_hashtags:
                         promoted_seeds += int(self.store.upsert_seed(
                             candidate, "tiktok_hashtag",
+                            google_origin_key=google_origin_key,
                         ))
                     self.store.update_collector_run(
                         run_id, status="running", phase="tiktok_discovery",

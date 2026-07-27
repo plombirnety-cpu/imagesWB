@@ -73,6 +73,21 @@ _TIKTOK_VIRAL_VIEWS = 30_000
 _TIKTOK_VIRAL_SHARES = 300
 _TIKTOK_MIN_TOTAL_VIEWS = 100_000
 
+_UTILITY_SEED_PATTERNS = (
+    re.compile(r"\bпогода\b", re.IGNORECASE),
+    re.compile(r"\b(теле)?программ\w*\s+(тв|телевидени\w*|россия\s*\d*)\b", re.IGNORECASE),
+    re.compile(r"\bсписк\w*\s+зачислен\w*\b", re.IGNORECASE),
+    re.compile(r"\bлунн\w*\s+календар\w*\b", re.IGNORECASE),
+    re.compile(r"\bмагнитн\w*\s+бур\w*\b", re.IGNORECASE),
+    re.compile(r"\bкурс\w*\s+(доллар\w*|евро|валют\w*)\b", re.IGNORECASE),
+    re.compile(
+        r"^\d{1,2}\s+(января|февраля|марта|апреля|мая|июня|июля|"
+        r"августа|сентября|октября|ноября|декабря)$",
+        re.IGNORECASE,
+    ),
+)
+_UTILITY_SEED_EXACT = {"банк", "деньги", "календарь", "телепрограмма"}
+
 
 
 def utcnow() -> datetime:
@@ -114,6 +129,16 @@ def viable_seed_term(text: str) -> bool:
         key
         and 3 <= len(display) <= 80
         and len(key.split()) <= 5
+    )
+
+
+def merchable_seed_term(text: str) -> bool:
+    """Rejects obvious utility/news queries that waste scarce TikTok checks."""
+    key = canonical_key(text)
+    return bool(
+        viable_seed_term(text)
+        and key not in _UTILITY_SEED_EXACT
+        and not any(pattern.search(key) for pattern in _UTILITY_SEED_PATTERNS)
     )
 
 
@@ -172,6 +197,7 @@ class SignalInput:
     likes: int = 0
     shares: int = 0
     comments_count: int = 0
+    google_origin_key: str = ""
 
 
 def parse_comment_lines(raw: str) -> list[tuple[str, str]]:
@@ -222,6 +248,7 @@ class TrendRadarStore:
                 CREATE TABLE IF NOT EXISTS trends (
                     id TEXT PRIMARY KEY,
                     canonical_key TEXT NOT NULL UNIQUE,
+                    google_origin_key TEXT NOT NULL DEFAULT '',
                     display_name TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     radar_first_seen_at TEXT NOT NULL,
@@ -297,6 +324,7 @@ class TrendRadarStore:
                     display_name TEXT NOT NULL,
                     source_type TEXT NOT NULL,
                     source_url TEXT NOT NULL DEFAULT '',
+                    google_origin_key TEXT NOT NULL DEFAULT '',
                     first_seen_at TEXT NOT NULL,
                     last_seen_at TEXT NOT NULL,
                     seen_count INTEGER NOT NULL DEFAULT 1,
@@ -345,6 +373,10 @@ class TrendRadarStore:
             trend_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(trends)")
             }
+            if "google_origin_key" not in trend_columns:
+                db.execute(
+                    "ALTER TABLE trends ADD COLUMN google_origin_key TEXT NOT NULL DEFAULT ''"
+                )
             if "velocity_score" not in trend_columns:
                 db.execute(
                     "ALTER TABLE trends ADD COLUMN velocity_score REAL NOT NULL DEFAULT 0"
@@ -360,6 +392,10 @@ class TrendRadarStore:
             seed_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(radar_seeds)")
             }
+            if "google_origin_key" not in seed_columns:
+                db.execute(
+                    "ALTER TABLE radar_seeds ADD COLUMN google_origin_key TEXT NOT NULL DEFAULT ''"
+                )
             if "last_queried_at" not in seed_columns:
                 db.execute("ALTER TABLE radar_seeds ADD COLUMN last_queried_at TEXT")
             if "query_count" not in seed_columns:
@@ -387,6 +423,24 @@ class TrendRadarStore:
                     db.execute(
                         f"ALTER TABLE collector_runs ADD COLUMN {column} {definition}"
                     )
+            db.execute(
+                """
+                UPDATE radar_seeds
+                SET google_origin_key = canonical_key
+                WHERE source_type = 'google_trends'
+                  AND google_origin_key = ''
+                """
+            )
+            db.execute(
+                """
+                UPDATE trends
+                SET google_origin_key = canonical_key
+                WHERE google_origin_key = ''
+                  AND canonical_key IN (
+                      SELECT DISTINCT canonical_key FROM google_trend_snapshots
+                  )
+                """
+            )
             db.execute(
                 """
                 UPDATE collector_runs
@@ -446,12 +500,16 @@ class TrendRadarStore:
         source_type: str,
         source_url: str = "",
         *,
+        google_origin_key: str = "",
         now: datetime | None = None,
     ) -> bool:
         """Сохраняет автоматически найденную тему и возвращает True для новой."""
         now_text = _iso(now or utcnow())
         display_name = " ".join((term or "").strip().split())[:120]
         key = canonical_key(display_name)
+        origin_key = canonical_key(google_origin_key)
+        if source_type == "google_trends":
+            origin_key = key
         if not viable_seed_term(display_name):
             return False
         with self._connect() as db:
@@ -463,8 +521,8 @@ class TrendRadarStore:
                 """
                 INSERT INTO radar_seeds (
                     canonical_key, display_name, source_type, source_url,
-                    first_seen_at, last_seen_at, seen_count
-                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                    google_origin_key, first_seen_at, last_seen_at, seen_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(canonical_key) DO UPDATE SET
                     display_name = excluded.display_name,
                     source_type = excluded.source_type,
@@ -472,15 +530,38 @@ class TrendRadarStore:
                         WHEN excluded.source_url <> '' THEN excluded.source_url
                         ELSE radar_seeds.source_url
                     END,
+                    google_origin_key = CASE
+                        WHEN excluded.google_origin_key <> ''
+                            THEN excluded.google_origin_key
+                        ELSE radar_seeds.google_origin_key
+                    END,
                     last_seen_at = excluded.last_seen_at,
                     seen_count = radar_seeds.seen_count + 1
                 """,
                 (
                     key, display_name, source_type[:32], source_url[:2048],
-                    now_text, now_text,
+                    origin_key, now_text, now_text,
                 ),
             )
         return existing is None
+
+    def google_origin_for_seed(self, term: str) -> str:
+        key = canonical_key(term)
+        if not key:
+            return ""
+        with self._connect() as db:
+            row = db.execute(
+                """
+                SELECT google_origin_key, source_type
+                FROM radar_seeds WHERE canonical_key = ?
+                """,
+                (key,),
+            ).fetchone()
+        if not row:
+            return ""
+        if row["google_origin_key"]:
+            return row["google_origin_key"]
+        return key if row["source_type"] == "google_trends" else ""
 
     def record_google_trend(
         self,
@@ -541,7 +622,7 @@ class TrendRadarStore:
                     """
                     SELECT canonical_key, display_name, source_type, source_url,
                            first_seen_at, last_seen_at, seen_count,
-                           last_queried_at, query_count
+                           last_queried_at, query_count, google_origin_key
                     FROM radar_seeds
                     WHERE dismissed = 0
                     ORDER BY
@@ -569,7 +650,8 @@ class TrendRadarStore:
         with self._connect() as db:
             rows = db.execute(
                 """
-                SELECT canonical_key, display_name
+                SELECT canonical_key, display_name, source_type,
+                       google_origin_key
                 FROM radar_seeds AS seed
                 WHERE seed.dismissed = 0
                   AND seed.last_seen_at >= ?
@@ -578,10 +660,26 @@ class TrendRadarStore:
                       WHERE trend.canonical_key = seed.canonical_key
                         AND trend.rejected = 1
                   )
+                  AND (
+                      seed.source_type <> 'google_trends'
+                      OR EXISTS (
+                          SELECT 1
+                          FROM google_trend_snapshots AS eligible_google
+                          WHERE eligible_google.canonical_key = COALESCE(
+                              NULLIF(seed.google_origin_key, ''),
+                              seed.canonical_key
+                          )
+                            AND eligible_google.captured_at >= ?
+                            AND eligible_google.approx_traffic >= 2000
+                      )
+                  )
                 ORDER BY
                     CASE WHEN EXISTS (
                         SELECT 1 FROM google_trend_snapshots AS google
-                        WHERE google.canonical_key = seed.canonical_key
+                        WHERE google.canonical_key = COALESCE(
+                            NULLIF(seed.google_origin_key, ''),
+                            seed.canonical_key
+                        )
                           AND google.captured_at >= ?
                           AND google.approx_traffic >= 2000
                     ) THEN 0 ELSE 1 END,
@@ -601,11 +699,14 @@ class TrendRadarStore:
                 (
                     _iso(selected_at - timedelta(days=7)),
                     _iso(selected_at - _GOOGLE_FRESH_WINDOW),
+                    _iso(selected_at - _GOOGLE_FRESH_WINDOW),
                     min(200, limit * 5),
                 ),
             ).fetchall()
             selected = [
-                row for row in rows if viable_seed_term(row["display_name"])
+                row for row in rows
+                if viable_seed_term(row["display_name"])
+                and merchable_seed_term(row["display_name"])
             ][:limit]
             db.executemany(
                 """
@@ -814,6 +915,7 @@ class TrendRadarStore:
         now_text = _iso(now)
         term = " ".join((signal.term or "").strip().split())
         key = canonical_key(term)
+        origin_key = canonical_key(signal.google_origin_key)
         if len(term) < 2 or len(term) > 120 or not key:
             raise ValueError("название мема/слово должно содержать 2–120 символов")
         source_type = (signal.source_type or "").strip().lower()
@@ -913,6 +1015,16 @@ class TrendRadarStore:
                         (_iso(published), existing_trend),
                     )
                 db.execute(
+                    """
+                    UPDATE trends
+                    SET google_origin_key = CASE
+                        WHEN google_origin_key = '' AND ? <> '' THEN ?
+                        ELSE google_origin_key END
+                    WHERE id = ?
+                    """,
+                    (origin_key, origin_key, existing_trend),
+                )
+                db.execute(
                     "UPDATE trends SET last_seen_at = ? WHERE id = ?",
                     (now_text, existing_trend),
                 )
@@ -959,6 +1071,16 @@ class TrendRadarStore:
                         (_iso(published), trend_id),
                     )
                 db.execute(
+                    """
+                    UPDATE trends
+                    SET google_origin_key = CASE
+                        WHEN google_origin_key = '' AND ? <> '' THEN ?
+                        ELSE google_origin_key END
+                    WHERE id = ?
+                    """,
+                    (origin_key, origin_key, trend_id),
+                )
+                db.execute(
                     "UPDATE trends SET last_seen_at = ? WHERE id = ?",
                     (now_text, trend_id),
                 )
@@ -966,12 +1088,12 @@ class TrendRadarStore:
                 db.execute(
                     """
                     INSERT INTO trends (
-                        id, canonical_key, display_name, created_at,
+                        id, canonical_key, google_origin_key, display_name, created_at,
                         radar_first_seen_at, earliest_published_at, last_seen_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        trend_id, key, term, now_text, now_text,
+                        trend_id, key, origin_key, term, now_text, now_text,
                         _iso(published) if published else None, now_text,
                     ),
                 )
@@ -1619,7 +1741,10 @@ class TrendRadarStore:
         now: datetime,
         db: sqlite3.Connection,
     ) -> dict:
-        google = self._google_spike_stats(trend["canonical_key"], now, db)
+        google_key = (
+            trend["google_origin_key"] or trend["canonical_key"]
+        )
+        google = self._google_spike_stats(google_key, now, db)
         tiktok = self._tiktok_viral_stats(observations, now)
         qualified = bool(google["spike"] and tiktok["confirmed"])
         google_points = (

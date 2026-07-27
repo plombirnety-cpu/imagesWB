@@ -30,6 +30,7 @@ def _signal(
     likes=0,
     shares=0,
     comments_count=0,
+    google_origin_key="",
 ):
     return trend_radar.SignalInput(
         term=term,
@@ -43,6 +44,7 @@ def _signal(
         likes=likes,
         shares=shares,
         comments_count=comments_count,
+        google_origin_key=google_origin_key,
     )
 
 
@@ -485,6 +487,86 @@ def test_print_opportunity_requires_google_spike_and_two_viral_tiktoks(store):
     assert "фигурный принт" in opportunity["idea"]["composition"].casefold()
     assert [item["id"] for item in store.list_opportunities()] == [
         first["trend_id"],
+    ]
+
+
+def test_tiktok_hashtag_inherits_google_origin_for_print_opportunity(store):
+    google_term = "Ходячие мертвецы"
+    child_term = "thewalkingdead"
+    google_key = trend_radar.canonical_key(google_term)
+    store.upsert_seed(google_term, "google_trends", now=NOW)
+    store.upsert_seed(
+        child_term,
+        "tiktok_hashtag",
+        google_origin_key=google_key,
+        now=NOW,
+    )
+    store.record_google_trend(
+        google_term,
+        5_000,
+        published_at=NOW - timedelta(hours=2),
+        now=NOW,
+    )
+    first = store.ingest_signal(
+        _signal(
+            term=child_term,
+            url="https://www.tiktok.com/@one/video/811",
+            author="@one",
+            published=NOW - timedelta(hours=2),
+            views=80_000,
+            shares=900,
+            google_origin_key=google_key,
+        ),
+        now=NOW,
+    )
+    store.ingest_signal(
+        _signal(
+            term=child_term,
+            url="https://www.tiktok.com/@two/video/822",
+            author="@two",
+            published=NOW - timedelta(hours=1),
+            views=90_000,
+            shares=1_100,
+            google_origin_key=google_key,
+        ),
+        now=NOW,
+    )
+
+    trend = store.get_trend(first["trend_id"])
+
+    assert store.google_origin_for_seed(child_term) == google_key
+    assert trend["google_origin_key"] == google_key
+    assert trend["opportunity"]["google"]["spike"] is True
+    assert trend["opportunity"]["qualified"] is True
+
+
+def test_utility_google_queries_do_not_consume_tiktok_budget(store):
+    store.upsert_seed("погода пенза", "google_trends", now=NOW)
+    store.record_google_trend(
+        "погода пенза", 20_000,
+        published_at=NOW - timedelta(hours=1), now=NOW,
+    )
+    store.upsert_seed("Сова на скакалке", "google_trends", now=NOW)
+    store.record_google_trend(
+        "Сова на скакалке", 2_000,
+        published_at=NOW - timedelta(hours=1), now=NOW,
+    )
+
+    assert store.discovery_terms(1, now=NOW + timedelta(minutes=1)) == [
+        "Сова на скакалке",
+    ]
+
+
+def test_low_volume_google_news_does_not_consume_tiktok_budget(store):
+    store.upsert_seed("Новостная фамилия", "google_trends", now=NOW)
+    store.record_google_trend(
+        "Новостная фамилия", 500,
+        published_at=NOW - timedelta(hours=1), now=NOW,
+    )
+    store.upsert_seed("сованаскакалке", "tiktok_hashtag", now=NOW)
+
+    assert store.discovery_terms(2, now=NOW + timedelta(minutes=1)) == [
+        "сованаскакалке",
     ]
 
 

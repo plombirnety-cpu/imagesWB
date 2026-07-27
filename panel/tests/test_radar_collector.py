@@ -112,6 +112,31 @@ class _TrackingTikTok:
     published_at = staticmethod(radar_collector.BrightDataClient.published_at)
 
 
+class _LineageTikTok:
+    configured = True
+
+    def discover(self, keyword, limit):
+        return [
+            {
+                "post_id": str(700 + index),
+                "profile_username": f"creator{index}",
+                "description": "#thewalkingdead новый вирусный монтаж",
+                "create_time": 1785056400 + index,
+                "play_count": 90_000 + index,
+                "digg_count": 9_000,
+                "share_count": 1_200,
+                "comment_count": 400,
+            }
+            for index in range(2)
+        ][:limit]
+
+    def comments(self, _post_url):
+        return []
+
+    post_url = staticmethod(radar_collector.BrightDataClient.post_url)
+    published_at = staticmethod(radar_collector.BrightDataClient.published_at)
+
+
 def test_tiktok_candidates_expand_search_graph_without_generic_tags():
     terms = radar_collector.confirmed_tiktok_candidates(
         [
@@ -290,7 +315,15 @@ def test_collector_stores_seeds_tiktok_metrics_and_comments(tmp_path):
             comments_posts_per_run=1,
         ),
         google=_SeedSource(
-            [radar_collector.SeedTerm("Воздухан", "google_trends", "https://example.test")]
+            [
+                radar_collector.SeedTerm(
+                    "Воздухан",
+                    "google_trends",
+                    "https://example.test",
+                    search_volume=5_000,
+                    published_at=datetime.now(timezone.utc).isoformat(),
+                )
+            ]
         ),
         telegram=_SeedSource([]),
         tiktok=_FakeTikTok(),
@@ -315,6 +348,67 @@ def test_collector_stores_seeds_tiktok_metrics_and_comments(tmp_path):
     assert "воздухан" in terms
 
 
+def test_collector_links_duplicate_tiktok_videos_back_to_google_origin(tmp_path):
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    published = datetime(2026, 7, 27, 20, 0, tzinfo=timezone.utc)
+    child_term = "thewalkingdead"
+    for index in range(2):
+        store.ingest_signal(
+            trend_radar.SignalInput(
+                term=child_term,
+                source_type="tiktok",
+                source_url=(
+                    f"https://www.tiktok.com/@creator{index}/video/{700 + index}"
+                ),
+                author=f"creator{index}",
+                published_at=published + timedelta(seconds=index),
+                views=90_000 + index,
+                shares=1_200,
+            ),
+            now=published + timedelta(hours=1),
+        )
+
+    collector = radar_collector.RadarCollector(
+        store,
+        radar_collector.CollectorConfig(
+            discovery_terms_per_run=1,
+            posts_per_term=2,
+            comments_posts_per_run=0,
+        ),
+        google=_SeedSource(
+            [
+                radar_collector.SeedTerm(
+                    "Ходячие мертвецы",
+                    "google_trends",
+                    "https://trends.google.com/trending?geo=RU",
+                    search_volume=5_000,
+                    published_at=published.isoformat(),
+                )
+            ]
+        ),
+        telegram=_SeedSource([]),
+        tiktok=_LineageTikTok(),
+        executor=_InlineExecutor(),
+    )
+
+    queued = collector.queue_run("test")
+
+    assert store.collector_run(queued["run_id"])["status"] == "succeeded"
+    child = next(
+        item for item in store.list_trends()
+        if item["display_name"] == child_term
+    )
+    assert child["google_origin_key"] == trend_radar.canonical_key(
+        "Ходячие мертвецы"
+    )
+    assert child["opportunity"]["google"]["spike"] is True
+    assert child["opportunity"]["tiktok"]["confirmed"] is True
+    assert child["opportunity"]["qualified"] is True
+    assert store.google_origin_for_seed("thewalkingdead") == trend_radar.canonical_key(
+        "Ходячие мертвецы"
+    )
+
+
 def test_comment_budget_is_distributed_one_post_per_search_term(tmp_path):
     store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
     tiktok = _TrackingTikTok()
@@ -327,9 +421,24 @@ def test_comment_budget_is_distributed_one_post_per_search_term(tmp_path):
         ),
         google=_SeedSource(
             [
-                radar_collector.SeedTerm("Первый мем", "google_trends"),
-                radar_collector.SeedTerm("Второй мем", "google_trends"),
-                radar_collector.SeedTerm("Третий мем", "google_trends"),
+                radar_collector.SeedTerm(
+                    "Первый мем",
+                    "google_trends",
+                    search_volume=5_000,
+                    published_at=datetime.now(timezone.utc).isoformat(),
+                ),
+                radar_collector.SeedTerm(
+                    "Второй мем",
+                    "google_trends",
+                    search_volume=5_000,
+                    published_at=datetime.now(timezone.utc).isoformat(),
+                ),
+                radar_collector.SeedTerm(
+                    "Третий мем",
+                    "google_trends",
+                    search_volume=5_000,
+                    published_at=datetime.now(timezone.utc).isoformat(),
+                ),
             ]
         ),
         telegram=_SeedSource([]),

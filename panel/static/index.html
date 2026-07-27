@@ -384,6 +384,8 @@ let radarPollTimer = null;
 let previewItems = [], previewIndex = 0;
 let themeOptionalStyleIds = new Set();
 let collectorRefreshKey = null;
+let collectorRunning = false;
+let collectorProgressLabel = '';
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
@@ -828,6 +830,21 @@ function providerPill(label, ok, warning=''){
   return pill;
 }
 
+function refreshOpportunityEmptyState(){
+  const empty = radarGrid.querySelector('.empty-radar');
+  if(!empty || radarGrid.querySelector('.trend-card')) return;
+  if(collectorRunning){
+    const progress = collectorProgressLabel ? ` Сейчас ${collectorProgressLabel}.` : '';
+    opportunitySummary.textContent = collectorProgressLabel
+      ? `Поиск выполняется: ${collectorProgressLabel}`
+      : 'Поиск выполняется';
+    empty.textContent = `Это промежуточный экран — проверка ещё не закончена.${progress} Итог появится автоматически после завершения всех тем.`;
+  }else{
+    opportunitySummary.textContent = 'Пока нет полного подтверждения';
+    empty.textContent = 'Пока нет темы, которая одновременно резко выросла в Google и подтверждена двумя вирусными TikTok-роликами.';
+  }
+}
+
 async function loadCollectorStatus(){
   const title = $('#collectorTitle'), state = $('#collectorState'),
         providers = $('#collectorProviders'), button = $('#collectorRun'), stop = $('#collectorStop'),
@@ -837,6 +854,9 @@ async function loadCollectorStatus(){
     if(!res.ok) throw new Error('Статус автопоиска недоступен');
     const data = await res.json();
     const run = data.latest_run;
+    collectorRunning = Boolean(data.running);
+    collectorProgressLabel = run?.steps_total
+      ? `${run.steps_done}/${run.steps_total}` : '';
     title.textContent = data.running ? 'Автопоиск выполняется…'
       : (data.enabled ? 'Автопоиск включён' : 'Автопоиск выключен');
     const parts = [];
@@ -880,7 +900,10 @@ async function loadCollectorStatus(){
       loadRadarSeeds();
     }
     collectorRefreshKey = nextRefreshKey;
+    refreshOpportunityEmptyState();
   }catch(e){
+    collectorRunning = false;
+    collectorProgressLabel = '';
     title.textContent = 'Не удалось проверить автопоиск';
     state.textContent = e.message;
     providers.innerHTML = '';
@@ -930,9 +953,10 @@ async function loadRadarCards(){
     radarGrid.innerHTML = '';
     opportunitySummary.textContent = opportunities.length
       ? `Готово к проверке: ${opportunities.length}`
-      : 'Пока нет полного подтверждения';
+      : (collectorRunning ? `Поиск выполняется: ${collectorProgressLabel || 'подготовка'}` : 'Пока нет полного подтверждения');
     if(!opportunities.length){
-      radarGrid.innerHTML = '<div class="empty-radar">Пока нет темы, которая одновременно резко выросла в Google и подтверждена двумя вирусными TikTok-роликами.</div>';
+      radarGrid.innerHTML = '<div class="empty-radar"></div>';
+      refreshOpportunityEmptyState();
     }else{
       opportunities.forEach(trend => radarGrid.append(trendCard(trend)));
     }
@@ -953,7 +977,7 @@ async function loadRadarCards(){
 }
 
 async function loadRadar(){
-  loadCollectorStatus();
+  await loadCollectorStatus();
   loadRadarSeeds();
   loadRadarCards();
 }
