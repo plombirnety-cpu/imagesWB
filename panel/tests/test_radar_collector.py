@@ -75,6 +75,41 @@ class _FakeTikTok:
     published_at = staticmethod(radar_collector.BrightDataClient.published_at)
 
 
+class _TrackingTikTok:
+    configured = True
+
+    def __init__(self):
+        self.comment_calls = []
+
+    def discover(self, keyword, limit):
+        slug = radar_collector.canonical_key(keyword).replace(" ", "-")
+        return [
+            {
+                "post_id": f"{slug}-{index}",
+                "profile_username": f"creator{index}",
+                "description": f"{keyword} #{slug}",
+                "create_time": 1785056400,
+                "play_count": 10_000 + index,
+                "digg_count": 1_000,
+                "share_count": 100,
+                "comment_count": 20,
+            }
+            for index in range(2)
+        ][:limit]
+
+    def comments(self, post_url):
+        self.comment_calls.append(post_url)
+        return [
+            {
+                "commenter_user_name": "viewer",
+                "comment_text": "новое упоминание",
+            }
+        ]
+
+    post_url = staticmethod(radar_collector.BrightDataClient.post_url)
+    published_at = staticmethod(radar_collector.BrightDataClient.published_at)
+
+
 def test_google_trends_rss_becomes_search_seeds():
     xml = """<?xml version="1.0" encoding="UTF-8"?>
     <rss><channel><item><title>Новая фраза</title></item>
@@ -197,6 +232,37 @@ def test_collector_stores_seeds_tiktok_metrics_and_comments(tmp_path):
     assert trend["observations"][0]["views"] == 150_000
     terms = {item["term"] for item in trend["emerging_terms"]}
     assert "воздухан" in terms
+
+
+def test_comment_budget_is_distributed_one_post_per_search_term(tmp_path):
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    tiktok = _TrackingTikTok()
+    collector = radar_collector.RadarCollector(
+        store,
+        radar_collector.CollectorConfig(
+            discovery_terms_per_run=3,
+            posts_per_term=2,
+            comments_posts_per_run=3,
+        ),
+        google=_SeedSource(
+            [
+                radar_collector.SeedTerm("Первый мем", "google_trends"),
+                radar_collector.SeedTerm("Второй мем", "google_trends"),
+                radar_collector.SeedTerm("Третий мем", "google_trends"),
+            ]
+        ),
+        telegram=_SeedSource([]),
+        tiktok=tiktok,
+        executor=_InlineExecutor(),
+    )
+
+    collector.queue_run("test")
+
+    assert len(tiktok.comment_calls) == 3
+    assert {
+        url.rsplit("/", 1)[-1].rsplit("-", 1)[0]
+        for url in tiktok.comment_calls
+    } == {"первый-мем", "второй-мем", "третий-мем"}
 
 
 def test_queue_does_not_allow_overlapping_runs(tmp_path):

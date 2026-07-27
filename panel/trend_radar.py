@@ -54,6 +54,14 @@ _RUS_STOPWORDS = {
 }
 _TOKEN_RE = re.compile(r"[a-zа-яё][a-zа-яё0-9-]{2,}", re.IGNORECASE)
 _AUTHOR_LINE_RE = re.compile(r"^\s*(@?[A-Za-zА-Яа-яЁё0-9_.-]{1,40})\s*:\s*(.+)$")
+_HASHTAG_RE = re.compile(r"#([a-zа-яё][a-zа-яё0-9_.-]{1,50})", re.IGNORECASE)
+_GENERIC_HASHTAGS = {
+    "fyp", "fy", "viral", "trend", "trending", "tiktok", "тикток",
+    "мем", "мемы", "прикол", "приколы", "юмор", "смешно",
+    "рек", "реки", "рекомендации", "популярное", "тренды",
+}
+
+
 
 
 def utcnow() -> datetime:
@@ -86,6 +94,38 @@ def canonical_key(text: str) -> str:
     value = (text or "").casefold().replace("ё", "е")
     value = re.sub(r"[^a-zа-я0-9]+", " ", value, flags=re.IGNORECASE)
     return " ".join(value.split())
+
+
+def viable_seed_term(text: str) -> bool:
+    display = " ".join((text or "").strip().split())
+    key = canonical_key(display)
+    return bool(
+        key
+        and 3 <= len(display) <= 80
+        and len(key.split()) <= 10
+    )
+
+
+def _specific_hashtags(observations: list[dict]) -> list[dict]:
+    counts: Counter[str] = Counter()
+    for observation in observations:
+        tags_in_post: set[str] = set()
+        for match in _HASHTAG_RE.finditer(observation.get("caption") or ""):
+            tag = match.group(1).casefold().replace("ё", "е").strip("._-")
+            if (
+                len(tag) < 3
+                or tag in _GENERIC_HASHTAGS
+                or tag.startswith(("fyp", "рек", "хочув", "recommend"))
+            ):
+                continue
+            tags_in_post.add(tag)
+        counts.update(tags_in_post)
+    return [
+        {"tag": f"#{tag}", "count": count}
+        for tag, count in sorted(
+            counts.items(), key=lambda item: (-item[1], item[0]),
+        )[:8]
+    ]
 
 
 def normalize_comment(text: str) -> str:
@@ -248,7 +288,10 @@ class TrendRadarStore:
                     source_url TEXT NOT NULL DEFAULT '',
                     first_seen_at TEXT NOT NULL,
                     last_seen_at TEXT NOT NULL,
-                    seen_count INTEGER NOT NULL DEFAULT 1
+                    seen_count INTEGER NOT NULL DEFAULT 1,
+                    last_queried_at TEXT,
+                    query_count INTEGER NOT NULL DEFAULT 0,
+                    dismissed INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_radar_seeds_last_seen
                     ON radar_seeds(last_seen_at DESC);
@@ -284,6 +327,44 @@ class TrendRadarStore:
                     "ALTER TABLE observations ADD COLUMN comments_count "
                     "INTEGER NOT NULL DEFAULT 0"
                 )
+            seed_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(radar_seeds)")
+            }
+            if "last_queried_at" not in seed_columns:
+                db.execute("ALTER TABLE radar_seeds ADD COLUMN last_queried_at TEXT")
+            if "query_count" not in seed_columns:
+                db.execute(
+                    "ALTER TABLE radar_seeds ADD COLUMN query_count "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            if "dismissed" not in seed_columns:
+                db.execute(
+                    "ALTER TABLE radar_seeds ADD COLUMN dismissed "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            # Keep earlier user decisions and do not immediately repeat topics
+            # already checked before the rotation columns existed.
+            db.execute(
+                """
+                UPDATE radar_seeds
+                SET dismissed = 1
+                WHERE canonical_key IN (
+                    SELECT canonical_key FROM trends WHERE rejected = 1
+                )
+                """
+            )
+            db.execute(
+                """
+                UPDATE radar_seeds
+                SET query_count = MAX(query_count, 1),
+                    last_queried_at = COALESCE(
+                        last_queried_at,
+                        (SELECT last_seen_at FROM trends
+                         WHERE trends.canonical_key = radar_seeds.canonical_key)
+                    )
+                WHERE canonical_key IN (SELECT canonical_key FROM trends)
+                """
+            )
             # Existing observations become the first point in their time series.
             db.execute(
                 """
@@ -308,7 +389,7 @@ class TrendRadarStore:
         now_text = _iso(now or utcnow())
         display_name = " ".join((term or "").strip().split())[:120]
         key = canonical_key(display_name)
-        if len(display_name) < 2 or not key:
+        if not viable_seed_term(display_name):
             return False
         with self._connect() as db:
             existing = db.execute(
@@ -341,54 +422,77 @@ class TrendRadarStore:
     def list_seeds(self, limit: int = 30) -> list[dict]:
         limit = max(1, min(200, int(limit)))
         with self._connect() as db:
-            return [
+            rows = [
                 dict(row) for row in db.execute(
                     """
                     SELECT canonical_key, display_name, source_type, source_url,
-                           first_seen_at, last_seen_at, seen_count
+                           first_seen_at, last_seen_at, seen_count,
+                           last_queried_at, query_count
                     FROM radar_seeds
-                    ORDER BY last_seen_at DESC, seen_count DESC
+                    WHERE dismissed = 0
+                    ORDER BY
+                        CASE WHEN last_queried_at IS NULL THEN 0 ELSE 1 END,
+                        last_queried_at ASC,
+                        last_seen_at DESC
                     LIMIT ?
                     """,
-                    (limit,),
+                    (min(200, limit * 4),),
                 ).fetchall()
             ]
+        return [
+            row for row in rows if viable_seed_term(row["display_name"])
+        ][:limit]
 
-    def discovery_terms(self, limit: int = 4) -> list[str]:
-        """Свежие автосемена с подмешиванием уже растущих сигналов."""
+    def discovery_terms(
+        self,
+        limit: int = 4,
+        *,
+        now: datetime | None = None,
+    ) -> list[str]:
+        """Выдаёт ротационную очередь и отмечает выбранные темы проверенными."""
         limit = max(1, min(20, int(limit)))
+        selected_at = now or utcnow()
         with self._connect() as db:
             rows = db.execute(
                 """
-                SELECT display_name FROM (
-                    SELECT display_name, last_seen_at,
-                           seen_count + CASE source_type
-                               WHEN 'telegram_memes' THEN 100
-                               WHEN 'telegram' THEN 60
-                               ELSE 0
-                           END AS weight
-                    FROM radar_seeds
-                    WHERE last_seen_at >= ?
-                    UNION ALL
-                    SELECT display_name, last_seen_at, CAST(score AS INTEGER) AS weight
-                    FROM trends
-                    WHERE rejected = 0 AND lifecycle IN ('NEW', 'RISING', 'RESURGENCE')
-                )
-                ORDER BY weight DESC, last_seen_at DESC
+                SELECT canonical_key, display_name
+                FROM radar_seeds AS seed
+                WHERE seed.dismissed = 0
+                  AND seed.last_seen_at >= ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM trends AS trend
+                      WHERE trend.canonical_key = seed.canonical_key
+                        AND trend.rejected = 1
+                  )
+                ORDER BY
+                    CASE WHEN seed.last_queried_at IS NULL THEN 0 ELSE 1 END,
+                    seed.last_queried_at ASC,
+                    CASE seed.source_type
+                        WHEN 'telegram_memes' THEN 0
+                        WHEN 'telegram' THEN 1
+                        ELSE 2
+                    END,
+                    seed.seen_count DESC,
+                    seed.last_seen_at DESC
                 LIMIT ?
                 """,
-                (_iso(utcnow() - timedelta(days=7)), limit * 3),
+                (_iso(selected_at - timedelta(days=7)), min(200, limit * 5)),
             ).fetchall()
-        result: list[str] = []
-        seen: set[str] = set()
-        for row in rows:
-            key = canonical_key(row["display_name"])
-            if key and key not in seen:
-                seen.add(key)
-                result.append(row["display_name"])
-            if len(result) >= limit:
-                break
-        return result
+            selected = [
+                row for row in rows if viable_seed_term(row["display_name"])
+            ][:limit]
+            db.executemany(
+                """
+                UPDATE radar_seeds
+                SET last_queried_at = ?, query_count = query_count + 1
+                WHERE canonical_key = ?
+                """,
+                [
+                    (_iso(selected_at), row["canonical_key"])
+                    for row in selected
+                ],
+            )
+        return [row["display_name"] for row in selected]
 
     def create_collector_run(
         self,
@@ -650,7 +754,7 @@ class TrendRadarStore:
                         (_iso(published), existing_trend),
                     )
                 db.execute(
-                    "UPDATE trends SET last_seen_at = ?, rejected = 0 WHERE id = ?",
+                    "UPDATE trends SET last_seen_at = ? WHERE id = ?",
                     (now_text, existing_trend),
                 )
                 measurement_recorded = self._record_metric_snapshot(
@@ -696,7 +800,7 @@ class TrendRadarStore:
                         (_iso(published), trend_id),
                     )
                 db.execute(
-                    "UPDATE trends SET last_seen_at = ?, rejected = 0 WHERE id = ?",
+                    "UPDATE trends SET last_seen_at = ? WHERE id = ?",
                     (now_text, trend_id),
                 )
             else:
@@ -1180,7 +1284,11 @@ class TrendRadarStore:
         result["rejected"] = bool(result["rejected"])
         result["observation_count"] = len(observations)
         result["source_count"] = len({item["source_type"] for item in observations})
+        result["author_count"] = len({
+            item["author"].casefold() for item in observations if item["author"]
+        })
         result["observations"] = observations
+        result["hashtags"] = _specific_hashtags(observations)
         result["measurement_count"] = db.execute(
             "SELECT COUNT(*) AS count FROM metric_snapshots WHERE trend_id = ?",
             (trend_id,),
@@ -1208,6 +1316,7 @@ class TrendRadarStore:
                 row["id"] for row in db.execute(
                     """
                     SELECT id FROM trends
+                    WHERE rejected = 0
                     ORDER BY rejected ASC, approved DESC, score DESC, last_seen_at DESC
                     LIMIT ?
                     """,
@@ -1224,12 +1333,22 @@ class TrendRadarStore:
         if decision == "reset":
             approved = rejected = 0
         with self._connect() as db:
+            row = db.execute(
+                "SELECT canonical_key FROM trends WHERE id = ?",
+                (trend_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(trend_id)
             cursor = db.execute(
                 "UPDATE trends SET approved = ?, rejected = ? WHERE id = ?",
                 (approved, rejected, trend_id),
             )
             if cursor.rowcount == 0:
                 raise KeyError(trend_id)
+            db.execute(
+                "UPDATE radar_seeds SET dismissed = ? WHERE canonical_key = ?",
+                (1 if decision == "reject" else 0, row["canonical_key"]),
+            )
             return self._trend_payload(trend_id, db)
 
     def generation_prompt(self, trend_id: str) -> str:

@@ -54,13 +54,13 @@ RADAR_TELEGRAM_CHANNELS = _env_csv(
     "memachh,memsearch,meme_forum,BrandAnalytics",
 )
 RADAR_DISCOVERY_TERMS_PER_RUN = max(
-    1, min(20, int(os.getenv("PANEL_RADAR_DISCOVERY_TERMS_PER_RUN", "4")))
+    1, min(20, int(os.getenv("PANEL_RADAR_DISCOVERY_TERMS_PER_RUN", "6")))
 )
 RADAR_POSTS_PER_TERM = max(
     1, min(50, int(os.getenv("PANEL_RADAR_POSTS_PER_TERM", "5")))
 )
 RADAR_COMMENTS_POSTS_PER_RUN = max(
-    0, min(10, int(os.getenv("PANEL_RADAR_COMMENTS_POSTS_PER_RUN", "1")))
+    0, min(10, int(os.getenv("PANEL_RADAR_COMMENTS_POSTS_PER_RUN", "4")))
 )
 RADAR_REQUEST_TIMEOUT = max(
     5, min(120, int(os.getenv("PANEL_RADAR_REQUEST_TIMEOUT", "30")))

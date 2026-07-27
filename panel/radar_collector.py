@@ -21,7 +21,12 @@ from urllib.parse import quote
 import requests
 from loguru import logger
 
-from trend_radar import SignalInput, TrendRadarStore, canonical_key
+from trend_radar import (
+    SignalInput,
+    TrendRadarStore,
+    canonical_key,
+    viable_seed_term,
+)
 
 _POSTS_DATASET = "gd_lu702nij2f790tmv9h"
 _COMMENTS_DATASET = "gd_lkf2st302ap89utw5k"
@@ -61,9 +66,9 @@ class CollectorConfig:
     initial_delay_seconds: int = 20
     google_geo: str = "RU"
     telegram_channels: tuple[str, ...] = ()
-    discovery_terms_per_run: int = 4
+    discovery_terms_per_run: int = 6
     posts_per_term: int = 5
-    comments_posts_per_run: int = 1
+    comments_posts_per_run: int = 4
 
 
 class GoogleTrendsSource:
@@ -418,7 +423,7 @@ class RadarCollector:
             unique_seeds: dict[str, SeedTerm] = {}
             for seed in seeds:
                 key = canonical_key(seed.term)
-                if key:
+                if key and viable_seed_term(seed.term):
                     unique_seeds[key] = seed
             for seed in unique_seeds.values():
                 self.store.upsert_seed(
@@ -432,6 +437,7 @@ class RadarCollector:
                     self.config.discovery_terms_per_run,
                 )
                 for term in terms:
+                    term_has_comments = False
                     try:
                         records = self.tiktok.discover(
                             term, self.config.posts_per_term,
@@ -454,9 +460,10 @@ class RadarCollector:
                             continue
                         seen_urls.add(source_url)
                         comment_rows: list[dict] = []
-                        if comment_budget > 0:
+                        if comment_budget > 0 and not term_has_comments:
                             try:
                                 comment_rows = self.tiktok.comments(source_url)
+                                term_has_comments = True
                                 comment_budget -= 1
                             except Exception as exc:
                                 errors.append(f"Комментарии TikTok: {exc}")

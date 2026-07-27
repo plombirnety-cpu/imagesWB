@@ -247,7 +247,7 @@
       </div>
 
       <div class="seed-panel">
-        <div class="seed-title">Что система сейчас проверяет</div>
+        <div class="seed-title">Очередь тем для TikTok-проверки</div>
         <div class="seed-list" id="seedList"><span class="seed-chip">Загрузка…</span></div>
       </div>
 
@@ -675,7 +675,7 @@ function trendCard(trend){
   const age = trend.age_days == null ? 'не подтверждён' : `${trend.age_days} дн.`;
   meta.append(
     document.createTextNode(`Возраст: ${age}`), document.createElement('br'),
-    document.createTextNode(`Сигналов: ${trend.observation_count} · источников: ${trend.source_count}`),
+    document.createTextNode(`Роликов: ${trend.observation_count} · авторов: ${trend.author_count || 0}`),
     document.createElement('br'),
     document.createTextNode(`Замеров: ${trend.measurement_count || 0}`),
     document.createElement('br'),
@@ -705,10 +705,21 @@ function trendCard(trend){
 
   const terms = document.createElement('div');
   terms.className = 'trend-terms';
-  const emerging = (trend.emerging_terms || []).slice(0, 5);
+  const titleWords = (trend.display_name || '').toLocaleLowerCase('ru-RU').replaceAll('ё', 'е');
+  const emerging = (trend.emerging_terms || [])
+    .filter(item => Number(item.score) >= 35 && Number(item.unique_authors) >= 3 &&
+      (Number(item.observation_count) >= 2 || titleWords.includes(item.term)))
+    .slice(0, 5);
   terms.textContent = emerging.length
-    ? 'Повторы в комментариях: ' + emerging.map(item => `${item.term} ×${item.mentions_6h}`).join(', ')
-    : 'Повторяющихся новых слов в комментариях пока нет.';
+    ? 'Новые слова в комментариях: ' + emerging.map(item => `${item.term} ×${item.mentions_6h}`).join(', ')
+    : 'Подтверждённых повторов в комментариях пока нет.';
+
+  const hashtags = document.createElement('div');
+  hashtags.className = 'trend-terms';
+  const specificHashtags = (trend.hashtags || []).slice(0, 6);
+  hashtags.textContent = specificHashtags.length
+    ? 'Хештеги роликов: ' + specificHashtags.map(item => `${item.tag} ×${item.count}`).join(', ')
+    : 'Осмысленных хештегов в роликах пока нет.';
 
   const actions = document.createElement('div');
   actions.className = 'trend-actions';
@@ -730,7 +741,7 @@ function trendCard(trend){
   generate.onclick = () => generateTrend(trend.id, trend.display_name);
   actions.append(approve, reject, generate);
 
-  card.append(titleRow, body, scores, terms, actions);
+  card.append(titleRow, body, scores, hashtags, terms, actions);
   return card;
 }
 
@@ -804,7 +815,7 @@ async function loadRadarSeeds(){
       const chip = document.createElement('span');
       chip.className = 'seed-chip';
       chip.textContent = `${seed.display_name} · ${seed.source_type}`;
-      chip.title = `Замечено раз: ${seed.seen_count}`;
+      chip.title = `Найдено источниками: ${seed.seen_count}; TikTok-проверок: ${seed.query_count || 0}`;
       list.append(chip);
     });
   }catch(e){

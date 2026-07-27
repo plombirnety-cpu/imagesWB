@@ -9,7 +9,7 @@ import pytest
 import trend_radar
 
 
-NOW = datetime(2026, 7, 26, 9, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
 
 @pytest.fixture
@@ -205,6 +205,72 @@ def test_comment_terms_count_unique_repetition_and_ignore_copy_paste(store):
     assert term["mentions_6h"] == 4
     assert term["unique_authors"] == 4
     assert term["score"] > 0
+
+
+def test_rejected_trend_disappears_stays_rejected_and_suppresses_seed(store):
+    store.upsert_seed("Движуха", "telegram_memes", now=NOW)
+    result = store.ingest_signal(
+        _signal(term="Движуха", caption="#движуха"),
+        now=NOW,
+    )
+
+    rejected = store.set_decision(result["trend_id"], "reject")
+
+    assert rejected["rejected"] is True
+    assert store.list_trends() == []
+    assert store.list_seeds() == []
+    assert store.discovery_terms(4, now=NOW + timedelta(minutes=1)) == []
+
+    store.ingest_signal(
+        _signal(term="Движуха", caption="#движуха снова", views=100),
+        now=NOW + timedelta(hours=1),
+    )
+    assert store.get_trend(result["trend_id"])["rejected"] is True
+    assert store.list_trends() == []
+
+
+def test_discovery_terms_rotate_instead_of_repeating_top_four(store):
+    for index in range(8):
+        store.upsert_seed(
+            f"Мем {index}",
+            "telegram_memes",
+            now=NOW + timedelta(seconds=index),
+        )
+
+    first = store.discovery_terms(4, now=NOW + timedelta(minutes=1))
+    second = store.discovery_terms(4, now=NOW + timedelta(minutes=2))
+
+    assert len(first) == len(second) == 4
+    assert set(first).isdisjoint(second)
+    seeds = {row["display_name"]: row for row in store.list_seeds(20)}
+    assert all(seeds[name]["query_count"] == 1 for name in first + second)
+
+
+def test_trend_payload_separates_specific_hashtags_from_generic_noise(store):
+    result = store.ingest_signal(
+        _signal(
+            term="Движуха",
+            caption="#fyp #viral #движуха #максимкац",
+            author="@one",
+        ),
+        now=NOW,
+    )
+    store.ingest_signal(
+        _signal(
+            term="Движуха",
+            url="https://www.tiktok.com/@two/video/456",
+            author="@two",
+            caption="#рек #движуха #максимкац",
+        ),
+        now=NOW,
+    )
+
+    trend = store.get_trend(result["trend_id"])
+
+    assert trend["author_count"] == 2
+    assert {item["tag"] for item in trend["hashtags"]} == {
+        "#движуха", "#максимкац",
+    }
 
 
 class _OEmbedResponse:

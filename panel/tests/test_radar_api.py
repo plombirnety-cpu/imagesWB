@@ -177,6 +177,7 @@ def test_reject_disables_previous_approval(radar_client):
     assert rejected.status_code == 200
     assert rejected.json()["approved"] is False
     assert rejected.json()["rejected"] is True
+    assert client.get("/api/radar/trends").json() == []
 
 
 def test_automatic_collector_status_and_manual_trigger(radar_client):
