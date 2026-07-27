@@ -33,6 +33,20 @@
 - Python-модули проходят `py_compile`, `git diff --check` чистый.
 - Браузерная проверка подтверждённой карточки прошла без ошибок консоли.
 
+### Production
+
+- Исходный код: commit `8ea040a`, отправлен в `origin/main`.
+- Linux-кандидат прошёл полный набор панели: **83/83 passed**.
+- Production healthy, 0 рестартов, image
+  `sha256:5bf818a97054f6abe4cc855d817ca997a63e5bb887b67f564672766db9449c6f`.
+- SQLite-миграция подтверждена: таблица `google_trend_snapshots` создана.
+- Первый плановый проход новой версии `6f47497498df459f` завершился `succeeded`:
+  6/6 тем, 20 seed, 27 новых TikTok-сигналов и 3 обновлённых.
+- Следующий запуск с `trigger_type=owner` начат пользователем отдельно и работает штатно.
+- Откат: image `print-factory-panel:backup-pre-google-tiktok-8ea040a`, каталог
+  `/opt/print-panel-backup-pre-google-tiktok-8ea040a`, резерв SQLite
+  `trend_radar.sqlite3.pre-google-tiktok-8ea040a` в постоянном томе.
+
 ## 2026-07-27 — наблюдаемый прогресс и остановка радара
 
 ### Причина

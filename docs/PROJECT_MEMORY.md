@@ -20,6 +20,16 @@
 - Проверки этапа: 43 профильных теста, `py_compile`, чистый `git diff --check`,
   браузер без console errors.
 
+- Production-код этапа: commit `8ea040a`, Linux **83/83 passed**.
+- Production image:
+  `sha256:5bf818a97054f6abe4cc855d817ca997a63e5bb887b67f564672766db9449c6f`,
+  контейнер healthy, 0 рестартов.
+- Первый плановый проход новой версии `6f47497498df459f` завершился `succeeded`:
+  6/6, 20 seed, 27 новых TikTok-сигналов, 3 обновлённых; история Google содержит
+  первые сохранённые замеры.
+- Откат этапа: image `print-factory-panel:backup-pre-google-tiktok-8ea040a`,
+  исходники `/opt/print-panel-backup-pre-google-tiktok-8ea040a`, SQLite backup в volume.
+
 ## Актуально после исправления прогресса радара (2026-07-27)
 
 - Production image:
