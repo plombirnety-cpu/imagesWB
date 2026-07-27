@@ -149,6 +149,23 @@
   .score-box b{display:block;font-size:15px;color:var(--text)}
   .score-box span{font-size:9px;color:var(--muted)}
   .trend-terms{font-size:11px;color:#b9c5d9;min-height:16px}
+  .opportunity-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+  .opportunity-head h3{margin:0;font-size:18px}
+  .opportunity-head p{margin:4px 0 0;color:var(--muted);font-size:12px}
+  .opportunity-summary{font-size:12px;color:#7ee0a6;text-align:right}
+  .opportunity-box{border:1px solid #245f43;background:#123626;border-radius:8px;
+    padding:9px;display:flex;flex-direction:column;gap:5px}
+  .opportunity-box.candidate{border-color:#4b4652;background:#292831}
+  .opportunity-proof{font-size:11px;color:#9fe1b8;line-height:1.45}
+  .opportunity-box.candidate .opportunity-proof{color:#c0b8c9}
+  .idea-title{font-size:13px;font-weight:700;color:#fff}
+  .idea-copy{font-size:11px;line-height:1.45;color:#d5dfd8}
+  .idea-text{font-size:12px;color:#ffd277}
+  .confidence{font-weight:700;color:#7ee0a6}
+  .candidate-list{background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px}
+  .candidate-list>summary{cursor:pointer;font-size:12px;color:#8f96a5}
+  .candidate-list .radar-grid{margin-top:12px}
   .trend-actions{display:flex;gap:6px;flex-wrap:wrap}
   .trend-actions button{padding:6px 9px;font-size:11px;flex:1}
   .trend-actions .approve{background:#185f36;border-color:#23864d}
@@ -313,9 +330,22 @@
         </details>
       </details>
 
-      <div class="radar-grid" id="radarGrid">
-        <div class="empty-radar">Автопоиск ещё не нашёл подтверждённых TikTok-сигналов.</div>
+      <div class="opportunity-head">
+        <div>
+          <h3>Подтверждённые идеи для принтов</h3>
+          <p>Новый всплеск Google Trends + минимум два вирусных TikTok-ролика разных авторов.</p>
+        </div>
+        <div class="opportunity-summary" id="opportunitySummary"></div>
       </div>
+      <div class="radar-grid" id="radarGrid">
+        <div class="empty-radar">Ищу пересечение Google Trends и вирусных TikTok-роликов…</div>
+      </div>
+      <details class="candidate-list" id="candidateDetails">
+        <summary>Кандидаты, которым пока не хватает подтверждения</summary>
+        <div class="radar-grid" id="candidateGrid">
+          <div class="empty-radar">Кандидатов пока нет.</div>
+        </div>
+      </details>
     </section>
   </main>
 </div>
@@ -346,12 +376,14 @@ const stylesEl = $('#styles'), themeEl = $('#theme'), charsEl = $('#characters')
       previewNext = $('#previewNext'), generationTab = $('#generationTab'),
       radarTab = $('#radarTab'), generationView = $('#generationView'),
       radarView = $('#radarView'), radarGrid = $('#radarGrid'),
+      candidateGrid = $('#candidateGrid'), opportunitySummary = $('#opportunitySummary'),
       radarForm = $('#radarForm'), radarFormStatus = $('#radarFormStatus');
 
 let pollTimer = null, currentJob = null;
 let radarPollTimer = null;
 let previewItems = [], previewIndex = 0;
 let themeOptionalStyleIds = new Set();
+let collectorRefreshKey = null;
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
@@ -706,6 +738,40 @@ function trendCard(trend){
     scoreBox('НОВИЗНА', trend.novelty_score),
   );
 
+  const opportunity = trend.opportunity || {};
+  const opportunityBox = document.createElement('div');
+  opportunityBox.className = 'opportunity-box' + (opportunity.qualified ? '' : ' candidate');
+  const proof = document.createElement('div');
+  proof.className = 'opportunity-proof';
+  if(opportunity.qualified){
+    const google = opportunity.google || {}, tiktok = opportunity.tiktok || {};
+    const growth = google.growth_percent == null ? 'новый всплеск'
+      : `рост +${Math.round(google.growth_percent)}%`;
+    proof.innerHTML = `<span class="confidence">${Math.round(opportunity.confidence || 0)}% уверенности</span> · ` +
+      `Google ${Number(google.approx_traffic || 0).toLocaleString('ru-RU')}+ запросов, ${growth}<br>` +
+      `TikTok: ${tiktok.viral_videos || 0} вирусных ролика · ${tiktok.author_count || 0} автора · ` +
+      `${Number(tiktok.total_views || 0).toLocaleString('ru-RU')} просмотров`;
+    const idea = opportunity.idea || {};
+    const ideaTitle = document.createElement('div');
+    ideaTitle.className = 'idea-title';
+    ideaTitle.textContent = 'Рекомендованная идея принта';
+    const ideaText = document.createElement('div');
+    ideaText.className = 'idea-text';
+    ideaText.textContent = `Надпись: ${idea.headline || trend.display_name}` +
+      (idea.secondary_text ? ` / ${idea.secondary_text}` : '');
+    const ideaCopy = document.createElement('div');
+    ideaCopy.className = 'idea-copy';
+    ideaCopy.textContent = `${idea.visual || ''} ${idea.composition || ''}`;
+    const timing = document.createElement('div');
+    timing.className = 'opportunity-proof';
+    timing.textContent = idea.production_window || '';
+    opportunityBox.append(proof, ideaTitle, ideaText, ideaCopy, timing);
+  }else{
+    proof.textContent = (opportunity.missing || []).join(' · ') ||
+      'Недостаточно независимых данных.';
+    opportunityBox.append(proof);
+  }
+
   const terms = document.createElement('div');
   terms.className = 'trend-terms';
   const titleWords = (trend.display_name || '').toLocaleLowerCase('ru-RU').replaceAll('ё', 'е');
@@ -729,7 +795,8 @@ function trendCard(trend){
   const approve = document.createElement('button');
   approve.type = 'button'; approve.className = 'approve';
   approve.textContent = trend.approved ? '✓ Одобрено' : 'Одобрить';
-  approve.disabled = trend.approved;
+  approve.disabled = trend.approved || !opportunity.qualified;
+  approve.title = opportunity.qualified ? '' : 'Сначала нужны Google-всплеск и два вирусных TikTok-ролика';
   approve.onclick = () => decideTrend(trend.id, 'approve');
   const reject = document.createElement('button');
   reject.type = 'button'; reject.className = 'reject';
@@ -739,12 +806,12 @@ function trendCard(trend){
   const generate = document.createElement('button');
   generate.type = 'button'; generate.className = 'generate';
   generate.textContent = 'В генерацию';
-  generate.disabled = !trend.approved;
+  generate.disabled = !trend.approved || !opportunity.qualified;
   generate.title = trend.approved ? '' : 'Сначала одобрите тренд';
   generate.onclick = () => generateTrend(trend.id, trend.display_name);
   actions.append(approve, reject, generate);
 
-  card.append(titleRow, body, scores, hashtags, terms, actions);
+  card.append(titleRow, body, scores, opportunityBox, hashtags, terms, actions);
   return card;
 }
 
@@ -806,6 +873,13 @@ async function loadCollectorStatus(){
     note.textContent = p.tiktok.configured
       ? 'Система сама ищет ролики и комментарии. Ручные ссылки не нужны.'
       : 'Бесплатные темы уже собираются. Для реального TikTok-поиска нужен один ключ Bright Data в настройках сервера.';
+    const nextRefreshKey = run ? `${run.id || ''}:${run.status}:${run.finished_at || ''}` : 'none';
+    if(collectorRefreshKey && nextRefreshKey !== collectorRefreshKey &&
+       run && ['succeeded','failed','cancelled'].includes(run.status)){
+      loadRadarCards();
+      loadRadarSeeds();
+    }
+    collectorRefreshKey = nextRefreshKey;
   }catch(e){
     title.textContent = 'Не удалось проверить автопоиск';
     state.textContent = e.message;
@@ -840,27 +914,48 @@ async function loadRadarSeeds(){
   }
 }
 
-async function loadRadar(){
-  loadCollectorStatus();
-  loadRadarSeeds();
+async function loadRadarCards(){
   radarGrid.innerHTML = '<div class="empty-radar">Загружаю сигналы…</div>';
+  candidateGrid.innerHTML = '<div class="empty-radar">Загружаю кандидатов…</div>';
   try{
-    const res = await fetch('/api/radar/trends?limit=100');
-    if(!res.ok) throw new Error('Не удалось загрузить радар');
-    const trends = await res.json();
+    const [opportunityRes, trendRes] = await Promise.all([
+      fetch('/api/radar/opportunities?limit=50'),
+      fetch('/api/radar/trends?limit=100'),
+    ]);
+    if(!opportunityRes.ok || !trendRes.ok) throw new Error('Не удалось загрузить радар');
+    const opportunities = await opportunityRes.json();
+    const trends = await trendRes.json();
+    const qualifiedIds = new Set(opportunities.map(item => item.id));
+    const candidates = trends.filter(item => !qualifiedIds.has(item.id));
     radarGrid.innerHTML = '';
-    if(!trends.length){
-      radarGrid.innerHTML = '<div class="empty-radar">Автопоиск ещё не нашёл подтверждённых TikTok-сигналов. Нажмите «Проверить тренды сейчас» или дождитесь планового запуска.</div>';
-      return;
+    opportunitySummary.textContent = opportunities.length
+      ? `Готово к проверке: ${opportunities.length}`
+      : 'Пока нет полного подтверждения';
+    if(!opportunities.length){
+      radarGrid.innerHTML = '<div class="empty-radar">Пока нет темы, которая одновременно резко выросла в Google и подтверждена двумя вирусными TikTok-роликами.</div>';
+    }else{
+      opportunities.forEach(trend => radarGrid.append(trendCard(trend)));
     }
-    trends.forEach(trend => radarGrid.append(trendCard(trend)));
+    candidateGrid.innerHTML = '';
+    if(!candidates.length){
+      candidateGrid.innerHTML = '<div class="empty-radar">Кандидатов пока нет.</div>';
+    }else{
+      candidates.forEach(trend => candidateGrid.append(trendCard(trend)));
+    }
   }catch(e){
     radarGrid.innerHTML = '';
+    candidateGrid.innerHTML = '';
     const error = document.createElement('div');
     error.className = 'empty-radar';
     error.textContent = e.message;
     radarGrid.append(error);
   }
+}
+
+async function loadRadar(){
+  loadCollectorStatus();
+  loadRadarSeeds();
+  loadRadarCards();
 }
 
 $('#radarRefresh').onclick = loadRadar;

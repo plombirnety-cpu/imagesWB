@@ -183,6 +183,57 @@ def test_reject_disables_previous_approval(radar_client):
     assert client.get("/api/radar/trends").json() == []
 
 
+def test_opportunities_endpoint_returns_only_double_confirmed_trends(radar_client):
+    client, store, _, _ = radar_client
+    now = trend_radar.utcnow()
+    store.record_google_trend(
+        "Сова на скакалке",
+        8_000,
+        published_at=now,
+        now=now,
+    )
+    first = store.ingest_signal(
+        trend_radar.SignalInput(
+            term="Сова на скакалке",
+            source_type="tiktok",
+            source_url="https://www.tiktok.com/@one/video/1",
+            author="@one",
+            published_at=now,
+            views=70_000,
+            shares=700,
+        ),
+        now=now,
+    )
+    store.ingest_signal(
+        trend_radar.SignalInput(
+            term="Сова на скакалке",
+            source_type="tiktok",
+            source_url="https://www.tiktok.com/@two/video/2",
+            author="@two",
+            published_at=now,
+            views=80_000,
+            shares=800,
+        ),
+        now=now,
+    )
+    store.ingest_signal(
+        trend_radar.SignalInput(
+            term="Слабый кандидат",
+            source_type="tiktok",
+            source_url="https://www.tiktok.com/@three/video/3",
+            author="@three",
+            published_at=now,
+            views=1_000,
+        ),
+        now=now,
+    )
+
+    response = client.get("/api/radar/opportunities")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [first["trend_id"]]
+
+
 def test_automatic_collector_status_and_manual_trigger(radar_client):
     client, store, _, collector = radar_client
     store.upsert_seed("Новый звук", "google_trends")

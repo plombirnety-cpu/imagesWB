@@ -450,6 +450,11 @@ def api_radar_trends(limit: int = 50):
     return _radar_store.list_trends(limit=limit)
 
 
+@app.get("/api/radar/opportunities")
+def api_radar_opportunities(limit: int = 30):
+    return _radar_store.list_opportunities(limit=limit)
+
+
 @app.get("/api/radar/trends/{trend_id}")
 def api_radar_trend(trend_id: str):
     trend = _radar_store.get_trend(trend_id)

@@ -61,6 +61,17 @@ _GENERIC_HASHTAGS = {
     "рек", "реки", "рекомендации", "популярное", "тренды",
 }
 
+# A print opportunity is deliberately stricter than a raw radar card.
+# Google Trending Now supplies the search spike; independent recent TikTok
+# videos prove that the same phrase has already become a shareable visual meme.
+_GOOGLE_NEW_WINDOW = timedelta(hours=36)
+_GOOGLE_FRESH_WINDOW = timedelta(hours=8)
+_GOOGLE_MIN_TRAFFIC = 2_000
+_GOOGLE_MIN_GROWTH_RATIO = 1.5
+_TIKTOK_RECENT_WINDOW = timedelta(days=14)
+_TIKTOK_VIRAL_VIEWS = 30_000
+_TIKTOK_VIRAL_SHARES = 300
+_TIKTOK_MIN_TOTAL_VIEWS = 100_000
 
 
 
@@ -314,6 +325,20 @@ class TrendRadarStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_collector_runs_created
                     ON collector_runs(created_at DESC);
+                CREATE TABLE IF NOT EXISTS google_trend_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    canonical_key TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    captured_at TEXT NOT NULL,
+                    published_at TEXT,
+                    approx_traffic INTEGER NOT NULL DEFAULT 0,
+                    source_url TEXT NOT NULL DEFAULT '',
+                    UNIQUE(canonical_key, captured_at)
+                );
+                CREATE INDEX IF NOT EXISTS idx_google_trend_key_time
+                    ON google_trend_snapshots(
+                        canonical_key, captured_at DESC
+                    );
                 """
             )
             # SQLite migrations for production databases created by radar MVP v1.
@@ -457,6 +482,57 @@ class TrendRadarStore:
             )
         return existing is None
 
+    def record_google_trend(
+        self,
+        term: str,
+        approx_traffic: int,
+        *,
+        published_at: str | datetime | None = None,
+        source_url: str = "",
+        now: datetime | None = None,
+    ) -> bool:
+        """Persist one Google Trending Now measurement for spike comparison."""
+        display_name = " ".join((term or "").strip().split())[:120]
+        key = canonical_key(display_name)
+        if not viable_seed_term(display_name):
+            return False
+        captured = now or utcnow()
+        try:
+            published = _parse_datetime(published_at)
+        except ValueError:
+            published = None
+        with self._connect() as db:
+            cursor = db.execute(
+                """
+                INSERT INTO google_trend_snapshots (
+                    canonical_key, display_name, captured_at, published_at,
+                    approx_traffic, source_url
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(canonical_key, captured_at) DO UPDATE SET
+                    approx_traffic = MAX(
+                        google_trend_snapshots.approx_traffic,
+                        excluded.approx_traffic
+                    ),
+                    published_at = COALESCE(
+                        excluded.published_at,
+                        google_trend_snapshots.published_at
+                    ),
+                    source_url = CASE WHEN excluded.source_url <> ''
+                        THEN excluded.source_url
+                        ELSE google_trend_snapshots.source_url END
+                """,
+                (
+                    key, display_name, _iso(captured),
+                    _iso(published) if published else None,
+                    max(0, int(approx_traffic or 0)), source_url[:2048],
+                ),
+            )
+            db.execute(
+                "DELETE FROM google_trend_snapshots WHERE captured_at < ?",
+                (_iso(captured - timedelta(days=30)),),
+            )
+        return cursor.rowcount > 0
+
     def list_seeds(self, limit: int = 30) -> list[dict]:
         limit = max(1, min(200, int(limit)))
         with self._connect() as db:
@@ -503,6 +579,12 @@ class TrendRadarStore:
                         AND trend.rejected = 1
                   )
                 ORDER BY
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM google_trend_snapshots AS google
+                        WHERE google.canonical_key = seed.canonical_key
+                          AND google.captured_at >= ?
+                          AND google.approx_traffic >= 2000
+                    ) THEN 0 ELSE 1 END,
                     CASE WHEN seed.last_queried_at IS NULL THEN 0 ELSE 1 END,
                     seed.last_queried_at ASC,
                     CASE seed.source_type
@@ -516,7 +598,11 @@ class TrendRadarStore:
                     seed.last_seen_at DESC
                 LIMIT ?
                 """,
-                (_iso(selected_at - timedelta(days=7)), min(200, limit * 5)),
+                (
+                    _iso(selected_at - timedelta(days=7)),
+                    _iso(selected_at - _GOOGLE_FRESH_WINDOW),
+                    min(200, limit * 5),
+                ),
             ).fetchall()
             selected = [
                 row for row in rows if viable_seed_term(row["display_name"])
@@ -1334,6 +1420,251 @@ class TrendRadarStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def _google_spike_stats(
+        self,
+        canonical: str,
+        now: datetime,
+        db: sqlite3.Connection,
+    ) -> dict:
+        rows = db.execute(
+            """
+            SELECT * FROM google_trend_snapshots
+            WHERE canonical_key = ?
+            ORDER BY captured_at DESC
+            LIMIT 12
+            """,
+            (canonical,),
+        ).fetchall()
+        if not rows:
+            return {
+                "present": False,
+                "spike": False,
+                "is_new": False,
+                "accelerating": False,
+                "approx_traffic": 0,
+                "growth_ratio": None,
+                "growth_percent": None,
+                "published_at": None,
+                "captured_at": None,
+                "reason": "Нет свежего всплеска Google Trends",
+            }
+
+        latest = rows[0]
+        latest_at = _parse_datetime(latest["captured_at"])
+        first_row = db.execute(
+            """
+            SELECT captured_at FROM google_trend_snapshots
+            WHERE canonical_key = ?
+            ORDER BY captured_at ASC LIMIT 1
+            """,
+            (canonical,),
+        ).fetchone()
+        first_at = _parse_datetime(first_row["captured_at"]) if first_row else latest_at
+        published_at = _parse_datetime(latest["published_at"])
+        traffic = max(0, int(latest["approx_traffic"] or 0))
+        previous_traffic = max(
+            (int(row["approx_traffic"] or 0) for row in rows[1:]),
+            default=0,
+        )
+        growth_ratio = (
+            traffic / previous_traffic if previous_traffic > 0 else None
+        )
+        growth_percent = (
+            round(max(0.0, growth_ratio - 1.0) * 100, 1)
+            if growth_ratio is not None else None
+        )
+        fresh = bool(latest_at and now - latest_at <= _GOOGLE_FRESH_WINDOW)
+        is_new = bool(
+            first_at
+            and published_at
+            and now - first_at <= _GOOGLE_NEW_WINDOW
+            and now - published_at <= _GOOGLE_NEW_WINDOW
+        )
+        accelerating = bool(
+            growth_ratio is not None
+            and growth_ratio >= _GOOGLE_MIN_GROWTH_RATIO
+            and traffic - previous_traffic >= 1_000
+        )
+        spike = bool(
+            fresh
+            and traffic >= _GOOGLE_MIN_TRAFFIC
+            and (is_new or accelerating)
+        )
+        if not fresh:
+            reason = "Google-всплеск уже не свежий"
+        elif traffic < _GOOGLE_MIN_TRAFFIC:
+            reason = f"Google: только {traffic:,} запросов"
+        elif accelerating:
+            reason = f"Google: рост +{growth_percent:.0f}%"
+        elif is_new:
+            reason = f"Google: новый всплеск {traffic:,}+ запросов"
+        else:
+            reason = "Google не подтвердил новый резкий рост"
+        return {
+            "present": True,
+            "spike": spike,
+            "is_new": is_new,
+            "accelerating": accelerating,
+            "approx_traffic": traffic,
+            "growth_ratio": round(growth_ratio, 2) if growth_ratio else None,
+            "growth_percent": growth_percent,
+            "published_at": latest["published_at"],
+            "captured_at": latest["captured_at"],
+            "source_url": latest["source_url"],
+            "reason": reason.replace(",", " "),
+        }
+
+    @staticmethod
+    def _tiktok_viral_stats(observations: list[dict], now: datetime) -> dict:
+        recent: list[dict] = []
+        for item in observations:
+            if item["source_type"] != "tiktok":
+                continue
+            published = _parse_datetime(item.get("published_at"))
+            if published is None or now - published > _TIKTOK_RECENT_WINDOW:
+                continue
+            recent.append(item)
+        viral = [
+            item for item in recent
+            if int(item.get("views") or 0) >= _TIKTOK_VIRAL_VIEWS
+            or int(item.get("shares") or 0) >= _TIKTOK_VIRAL_SHARES
+        ]
+        authors = {
+            canonical_key(item.get("author") or "")
+            for item in viral if canonical_key(item.get("author") or "")
+        }
+        total_views = sum(int(item.get("views") or 0) for item in viral)
+        total_shares = sum(int(item.get("shares") or 0) for item in viral)
+        confirmed = bool(
+            len(viral) >= 2
+            and len(authors) >= 2
+            and total_views >= _TIKTOK_MIN_TOTAL_VIEWS
+        )
+        reason = (
+            f"TikTok: {len(viral)} вирусных ролика, "
+            f"{len(authors)} автора, {total_views:,} просмотров"
+            if confirmed else
+            "TikTok: нужны 2 вирусных ролика разных авторов "
+            "и суммарно 100 000 просмотров"
+        )
+        return {
+            "confirmed": confirmed,
+            "recent_videos": len(recent),
+            "viral_videos": len(viral),
+            "author_count": len(authors),
+            "total_views": total_views,
+            "total_shares": total_shares,
+            "max_views": max(
+                (int(item.get("views") or 0) for item in viral),
+                default=0,
+            ),
+            "reason": reason.replace(",", " "),
+        }
+
+    @staticmethod
+    def _print_idea(
+        display_name: str,
+        observations: list[dict],
+        hashtags: list[dict],
+        emerging_terms: list[dict],
+        confidence: float,
+    ) -> dict:
+        headline = " ".join(display_name.upper().split())[:34]
+        title_key = canonical_key(display_name)
+        secondary = next(
+            (
+                item["term"].upper()
+                for item in emerging_terms
+                if canonical_key(item["term"]) != title_key
+                and item["score"] >= 35
+            ),
+            "",
+        )[:28]
+        if not secondary and hashtags:
+            secondary = hashtags[0]["tag"].lstrip("#").upper()[:28]
+        context = ""
+        for item in observations:
+            candidate = re.sub(
+                r"#\S+", " ", str(item.get("caption") or "")
+            )
+            candidate = " ".join(candidate.split())
+            if candidate:
+                context = candidate[:120]
+                break
+        subject = context or display_name
+        return {
+            "headline": headline,
+            "secondary_text": secondary,
+            "visual": (
+                f"Центральный узнаваемый образ из контекста «{subject}», "
+                "утрированный до одного сильного силуэта с динамическими "
+                "эффектами распространения."
+            ),
+            "composition": (
+                "Цельный фигурный принт без прямоугольной рамки: крупный образ, "
+                "одна ударная надпись, открытые края и свободные промежутки."
+            ),
+            "production_window": (
+                "Выпускать в течение 24–48 часов"
+                if confidence >= 80 else "Тестовая партия в течение 72 часов"
+            ),
+        }
+
+    def _opportunity_payload(
+        self,
+        trend: sqlite3.Row,
+        observations: list[dict],
+        hashtags: list[dict],
+        emerging_terms: list[dict],
+        now: datetime,
+        db: sqlite3.Connection,
+    ) -> dict:
+        google = self._google_spike_stats(trend["canonical_key"], now, db)
+        tiktok = self._tiktok_viral_stats(observations, now)
+        qualified = bool(google["spike"] and tiktok["confirmed"])
+        google_points = (
+            min(
+                45.0,
+                24.0
+                + (10.0 if google["is_new"] else 0.0)
+                + (11.0 if google["accelerating"] else 0.0)
+                + 4.0 * math.log1p(google["approx_traffic"] / 2_000),
+            )
+            if google["spike"] else 0.0
+        )
+        tiktok_points = (
+            min(
+                55.0,
+                18.0
+                + 8.0 * tiktok["viral_videos"]
+                + 4.0 * tiktok["author_count"]
+                + 5.0 * math.log1p(tiktok["total_views"] / 100_000)
+                + 3.0 * math.log1p(tiktok["total_shares"] / 300),
+            )
+            if tiktok["confirmed"] else 0.0
+        )
+        confidence = round(min(100.0, google_points + tiktok_points), 1)
+        missing = []
+        if not google["spike"]:
+            missing.append(google["reason"])
+        if not tiktok["confirmed"]:
+            missing.append(tiktok["reason"])
+        idea = (
+            self._print_idea(
+                trend["display_name"], observations, hashtags,
+                emerging_terms, confidence,
+            )
+            if qualified else None
+        )
+        return {
+            "qualified": qualified,
+            "confidence": confidence,
+            "google": google,
+            "tiktok": tiktok,
+            "missing": missing,
+            "idea": idea,
+        }
+
     def _trend_payload(self, trend_id: str, db: sqlite3.Connection) -> dict:
         trend = db.execute(
             "SELECT * FROM trends WHERE id = ?", (trend_id,),
@@ -1361,7 +1692,8 @@ class TrendRadarStore:
             item["author"].casefold() for item in observations if item["author"]
         })
         result["observations"] = observations
-        result["hashtags"] = _specific_hashtags(observations)
+        hashtags = _specific_hashtags(observations)
+        result["hashtags"] = hashtags
         result["measurement_count"] = db.execute(
             "SELECT COUNT(*) AS count FROM metric_snapshots WHERE trend_id = ?",
             (trend_id,),
@@ -1372,7 +1704,17 @@ class TrendRadarStore:
             round(max(0.0, (utcnow() - earliest).total_seconds() / 86400), 1)
             if earliest else None
         )
-        result["emerging_terms"] = self._comment_term_stats(trend_id, utcnow(), db)
+        now = utcnow()
+        emerging_terms = self._comment_term_stats(trend_id, now, db)
+        result["emerging_terms"] = emerging_terms
+        result["opportunity"] = self._opportunity_payload(
+            trend,
+            observations,
+            hashtags,
+            emerging_terms,
+            now,
+            db,
+        )
         return result
 
     def get_trend(self, trend_id: str) -> dict | None:
@@ -1397,6 +1739,20 @@ class TrendRadarStore:
                 ).fetchall()
             ]
             return [self._trend_payload(trend_id, db) for trend_id in ids]
+
+    def list_opportunities(self, limit: int = 30) -> list[dict]:
+        opportunities = [
+            trend for trend in self.list_trends(limit=200)
+            if trend["opportunity"]["qualified"]
+        ]
+        opportunities.sort(
+            key=lambda trend: (
+                trend["opportunity"]["confidence"],
+                trend["last_seen_at"],
+            ),
+            reverse=True,
+        )
+        return opportunities[:max(1, min(100, int(limit)))]
 
     def set_decision(self, trend_id: str, decision: str) -> dict:
         if decision not in {"approve", "reject", "reset"}:
@@ -1430,6 +1786,17 @@ class TrendRadarStore:
             raise KeyError(trend_id)
         if not trend["approved"]:
             raise PermissionError("сначала подтвердите тренд")
+        opportunity = trend.get("opportunity") or {}
+        idea = opportunity.get("idea") or {}
+        idea_hint = ""
+        if idea:
+            idea_hint = (
+                f" Рекомендованная идея анализа: главная надпись "
+                f"«{idea.get('headline', '')}»; дополнительная надпись "
+                f"«{idea.get('secondary_text', '')}»; визуал: "
+                f"{idea.get('visual', '')}; композиция: "
+                f"{idea.get('composition', '')}."
+            )
         phrases = [
             item["term"] for item in trend["emerging_terms"][:4]
             if item["score"] >= 25
@@ -1448,4 +1815,5 @@ class TrendRadarStore:
             "короткую точную надпись. Нужен цельный принт, не стикер, не карточка, не "
             "прямоугольный скриншот. Изолированная композиция на ровном green/blue "
             "chroma с открытыми промежутками и свободными краями для GreenKey."
+            f"{idea_hint}"
         )

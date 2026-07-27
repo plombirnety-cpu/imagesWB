@@ -259,6 +259,21 @@ def test_discovery_terms_rotate_instead_of_repeating_top_four(store):
     assert all(seeds[name]["query_count"] == 1 for name in first + second)
 
 
+def test_fresh_google_spike_moves_to_front_of_tiktok_check_queue(store):
+    store.upsert_seed("Обычный подтверждённый тег", "tiktok_hashtag", now=NOW)
+    store.upsert_seed("Резкий рост", "google_trends", now=NOW)
+    store.record_google_trend(
+        "Резкий рост",
+        5_000,
+        published_at=NOW,
+        now=NOW,
+    )
+
+    selected = store.discovery_terms(1, now=NOW + timedelta(minutes=1))
+
+    assert selected == ["Резкий рост"]
+
+
 def test_trend_payload_separates_specific_hashtags_from_generic_noise(store):
     result = store.ingest_signal(
         _signal(
@@ -419,6 +434,119 @@ def test_old_meme_with_new_metric_spike_is_resurgence_not_rising(store):
     trend = store.get_trend(first["trend_id"])
     assert trend["velocity_score"] >= 70
     assert trend["lifecycle"] == "RESURGENCE"
+
+
+def test_print_opportunity_requires_google_spike_and_two_viral_tiktoks(store):
+    term = "Сова на скакалке"
+    store.record_google_trend(
+        term,
+        5_000,
+        published_at=NOW - timedelta(hours=2),
+        now=NOW,
+    )
+    first = store.ingest_signal(
+        _signal(
+            term=term,
+            url="https://www.tiktok.com/@one/video/101",
+            author="@one",
+            published=NOW - timedelta(hours=4),
+            caption="Сова снова прыгает #сованаскакалке",
+            views=70_000,
+            likes=8_000,
+            shares=900,
+        ),
+        now=NOW,
+    )
+    store.ingest_signal(
+        _signal(
+            term=term,
+            url="https://www.tiktok.com/@two/video/202",
+            author="@two",
+            published=NOW - timedelta(hours=3),
+            caption="Все повторяют сову #сованаскакалке",
+            views=90_000,
+            likes=9_000,
+            shares=1_100,
+        ),
+        now=NOW,
+    )
+
+    trend = store.get_trend(first["trend_id"])
+    opportunity = trend["opportunity"]
+
+    assert opportunity["qualified"] is True
+    assert opportunity["google"]["spike"] is True
+    assert opportunity["google"]["is_new"] is True
+    assert opportunity["tiktok"]["viral_videos"] == 2
+    assert opportunity["tiktok"]["author_count"] == 2
+    assert opportunity["tiktok"]["total_views"] == 160_000
+    assert opportunity["confidence"] >= 70
+    assert opportunity["idea"]["headline"] == "СОВА НА СКАКАЛКЕ"
+    assert "фигурный принт" in opportunity["idea"]["composition"].casefold()
+    assert [item["id"] for item in store.list_opportunities()] == [
+        first["trend_id"],
+    ]
+
+
+def test_google_only_or_single_viral_video_is_not_a_print_opportunity(store):
+    term = "Одинокий сигнал"
+    store.record_google_trend(
+        term,
+        10_000,
+        published_at=NOW - timedelta(hours=1),
+        now=NOW,
+    )
+    result = store.ingest_signal(
+        _signal(
+            term=term,
+            author="@only",
+            published=NOW - timedelta(hours=1),
+            views=500_000,
+            shares=8_000,
+        ),
+        now=NOW,
+    )
+
+    opportunity = store.get_trend(result["trend_id"])["opportunity"]
+
+    assert opportunity["google"]["spike"] is True
+    assert opportunity["tiktok"]["confirmed"] is False
+    assert opportunity["qualified"] is False
+    assert opportunity["idea"] is None
+    assert store.list_opportunities() == []
+
+
+def test_google_acceleration_qualifies_after_repeated_measurement(store):
+    term = "Вторая волна"
+    store.record_google_trend(
+        term, 2_000,
+        published_at=NOW - timedelta(days=3),
+        now=NOW - timedelta(hours=3),
+    )
+    store.record_google_trend(
+        term, 5_000,
+        published_at=NOW - timedelta(days=3),
+        now=NOW,
+    )
+    store.ingest_signal(
+        _signal(term=term, published=NOW, views=60_000, shares=500),
+        now=NOW,
+    )
+    second = store.ingest_signal(
+        _signal(
+            term=term,
+            url="https://www.tiktok.com/@other/video/222",
+            author="@other",
+            published=NOW,
+            views=70_000,
+            shares=600,
+        ),
+        now=NOW,
+    )
+
+    google = store.get_trend(second["trend_id"])["opportunity"]["google"]
+    assert google["accelerating"] is True
+    assert google["growth_percent"] == 150.0
 
 
 def test_generation_requires_owner_approval(store):

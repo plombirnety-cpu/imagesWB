@@ -183,6 +183,24 @@ def test_google_trends_rss_becomes_search_seeds():
     assert all(seed.source_type == "google_trends" for seed in seeds)
 
 
+def test_google_trends_rss_preserves_volume_and_start_time():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss xmlns:ht="https://trends.google.com/trending/rss"><channel><item>
+      <title>Резкий новый мем</title>
+      <ht:approx_traffic>5,000+</ht:approx_traffic>
+      <pubDate>Mon, 27 Jul 2026 12:40:00 -0700</pubDate>
+    </item></channel></rss>""".encode()
+    source = radar_collector.GoogleTrendsSource(
+        geo="RU", get=lambda *args, **kwargs: _Response(content=xml),
+    )
+
+    seed = source.collect()[0]
+
+    assert seed.term == "Резкий новый мем"
+    assert seed.search_volume == 5_000
+    assert seed.published_at == "2026-07-27T19:40:00Z"
+
+
 def test_telegram_keeps_explicit_hashtags_without_generic_word_noise():
     page = """
     <div class="tgme_widget_message" data-post="memes/1">

@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Callable, Iterable
 from urllib.parse import quote
@@ -35,6 +36,7 @@ _PROGRESS_URL = "https://api.brightdata.com/datasets/v3/progress/{snapshot_id}"
 _SNAPSHOT_URL = (
     "https://api.brightdata.com/datasets/v3/snapshot/{snapshot_id}?format=json"
 )
+_GOOGLE_TRENDS_NS = "https://trends.google.com/trending/rss"
 _HASHTAG_RE = re.compile(r"#([a-zа-яё][a-zа-яё0-9_-]{2,})", re.IGNORECASE)
 _UNSAFE_SEED_RE = re.compile(
     r"\b(порно|pornhub|эротик|казино|ставк[аи]|наркотик)\b", re.IGNORECASE,
@@ -141,6 +143,37 @@ class SeedTerm:
     term: str
     source_type: str
     source_url: str = ""
+    search_volume: int = 0
+    published_at: str = ""
+
+
+def _google_search_volume(raw: str | None) -> int:
+    """Converts Google RSS values such as ``2,000+`` and ``200 тыс.+``."""
+    text = str(raw or "").strip().casefold().replace("\xa0", " ")
+    match = re.search(r"([\d.,]+)", text)
+    if not match:
+        return 0
+    number = match.group(1).replace(",", "")
+    try:
+        value = float(number)
+    except ValueError:
+        return 0
+    multiplier = 1
+    if any(marker in text for marker in ("тыс", "k")):
+        multiplier = 1_000
+    elif any(marker in text for marker in ("млн", "m")):
+        multiplier = 1_000_000
+    return max(0, int(value * multiplier))
+
+
+def _google_published_at(raw: str | None) -> str:
+    try:
+        parsed = parsedate_to_datetime(str(raw or "").strip())
+    except (TypeError, ValueError):
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return _iso(parsed)
 
 
 @dataclass(frozen=True)
@@ -180,11 +213,16 @@ class GoogleTrendsSource:
         for item in root.findall(".//item"):
             title = (item.findtext("title") or "").strip()
             if title:
+                traffic = item.findtext(
+                    f"{{{_GOOGLE_TRENDS_NS}}}approx_traffic"
+                )
                 result.append(
                     SeedTerm(
                         title[:120],
                         "google_trends",
                         f"https://trends.google.com/trending?geo={quote(self.geo)}",
+                        _google_search_volume(traffic),
+                        _google_published_at(item.findtext("pubDate")),
                     )
                 )
         return result
@@ -532,6 +570,14 @@ class RadarCollector:
                 except Exception as exc:  # isolated provider failure
                     logger.warning(f"radar {name} source failed: {exc}")
                     errors.append(f"{name}: {exc}")
+            for seed in seeds:
+                if seed.source_type == "google_trends":
+                    self.store.record_google_trend(
+                        seed.term,
+                        seed.search_volume,
+                        published_at=seed.published_at,
+                        source_url=seed.source_url,
+                    )
             unique_seeds: dict[str, SeedTerm] = {}
             for seed in seeds:
                 key = canonical_key(seed.term)
