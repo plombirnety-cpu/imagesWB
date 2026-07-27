@@ -66,7 +66,7 @@ _GENERIC_HASHTAGS = {
 # videos prove that the same phrase has already become a shareable visual meme.
 _GOOGLE_NEW_WINDOW = timedelta(hours=36)
 _GOOGLE_FRESH_WINDOW = timedelta(hours=8)
-_GOOGLE_MIN_TRAFFIC = 2_000
+_GOOGLE_MIN_TRAFFIC = 500
 _GOOGLE_MIN_GROWTH_RATIO = 1.5
 _TIKTOK_RECENT_WINDOW = timedelta(days=14)
 _TIKTOK_VIRAL_VIEWS = 30_000
@@ -670,7 +670,7 @@ class TrendRadarStore:
                               seed.canonical_key
                           )
                             AND eligible_google.captured_at >= ?
-                            AND eligible_google.approx_traffic >= 2000
+                            AND eligible_google.approx_traffic >= ?
                       )
                   )
                 ORDER BY
@@ -681,7 +681,7 @@ class TrendRadarStore:
                             seed.canonical_key
                         )
                           AND google.captured_at >= ?
-                          AND google.approx_traffic >= 2000
+                          AND google.approx_traffic >= ?
                     ) THEN 0 ELSE 1 END,
                     CASE WHEN seed.last_queried_at IS NULL THEN 0 ELSE 1 END,
                     seed.last_queried_at ASC,
@@ -699,15 +699,33 @@ class TrendRadarStore:
                 (
                     _iso(selected_at - timedelta(days=7)),
                     _iso(selected_at - _GOOGLE_FRESH_WINDOW),
+                    _GOOGLE_MIN_TRAFFIC,
                     _iso(selected_at - _GOOGLE_FRESH_WINDOW),
-                    min(200, limit * 5),
+                    _GOOGLE_MIN_TRAFFIC,
+                    min(200, limit * 10),
                 ),
             ).fetchall()
-            selected = [
+            candidates = [
                 row for row in rows
                 if viable_seed_term(row["display_name"])
                 and merchable_seed_term(row["display_name"])
-            ][:limit]
+            ]
+            google_candidates = [
+                row for row in candidates
+                if row["source_type"] == "google_trends"
+            ]
+            other_candidates = [
+                row for row in candidates
+                if row["source_type"] != "google_trends"
+            ]
+            if google_candidates and other_candidates:
+                google_quota = min(len(google_candidates), max(1, limit // 2))
+                selected = google_candidates[:google_quota]
+                selected.extend(other_candidates[:limit - len(selected)])
+                if len(selected) < limit:
+                    selected.extend(google_candidates[google_quota:limit])
+            else:
+                selected = (google_candidates or other_candidates)[:limit]
             db.executemany(
                 """
                 UPDATE radar_seeds

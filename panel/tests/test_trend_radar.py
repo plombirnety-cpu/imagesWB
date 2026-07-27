@@ -560,7 +560,7 @@ def test_utility_google_queries_do_not_consume_tiktok_budget(store):
 def test_low_volume_google_news_does_not_consume_tiktok_budget(store):
     store.upsert_seed("Новостная фамилия", "google_trends", now=NOW)
     store.record_google_trend(
-        "Новостная фамилия", 500,
+        "Новостная фамилия", 100,
         published_at=NOW - timedelta(hours=1), now=NOW,
     )
     store.upsert_seed("сованаскакалке", "tiktok_hashtag", now=NOW)
@@ -568,6 +568,48 @@ def test_low_volume_google_news_does_not_consume_tiktok_budget(store):
     assert store.discovery_terms(2, now=NOW + timedelta(minutes=1)) == [
         "сованаскакалке",
     ]
+
+
+def test_discovery_reserves_budget_for_fresh_google_and_tiktok(store):
+    store.upsert_seed("Odyssey", "google_trends", now=NOW)
+    store.record_google_trend(
+        "Odyssey", 500,
+        published_at=NOW - timedelta(hours=1), now=NOW,
+    )
+    store.upsert_seed("tiktok-only", "tiktok_hashtag", now=NOW)
+
+    assert store.discovery_terms(2, now=NOW + timedelta(minutes=1)) == [
+        "Odyssey",
+        "tiktok-only",
+    ]
+
+
+def test_new_google_500_plus_two_viral_tiktoks_is_an_opportunity(store):
+    term = "Odyssey"
+    store.record_google_trend(
+        term, 500,
+        published_at=NOW - timedelta(hours=1), now=NOW,
+    )
+    store.ingest_signal(
+        _signal(term=term, published=NOW, views=150_000, shares=1_000),
+        now=NOW,
+    )
+    second = store.ingest_signal(
+        _signal(
+            term=term,
+            url="https://www.tiktok.com/@other/video/500",
+            author="@other",
+            published=NOW,
+            views=200_000,
+            shares=2_000,
+        ),
+        now=NOW,
+    )
+
+    opportunity = store.get_trend(second["trend_id"])["opportunity"]
+    assert opportunity["google"]["spike"] is True
+    assert opportunity["tiktok"]["confirmed"] is True
+    assert opportunity["qualified"] is True
 
 
 def test_google_only_or_single_viral_video_is_not_a_print_opportunity(store):
