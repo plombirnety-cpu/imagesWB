@@ -407,6 +407,10 @@ class BrightDataClient:
         return text or None
 
 
+class CollectorCancelled(RuntimeError):
+    """Raised between provider calls when the owner stops a radar run."""
+
+
 class RadarCollector:
     def __init__(
         self,
@@ -430,6 +434,7 @@ class RadarCollector:
         self._queue_lock = threading.Lock()
         self._active_run_id: str | None = None
         self._stop = threading.Event()
+        self._cancel_requested = threading.Event()
         self._scheduler: threading.Thread | None = None
         self._next_run_at: datetime | None = None
 
@@ -449,6 +454,7 @@ class RadarCollector:
 
     def stop(self) -> None:
         self._stop.set()
+        self._cancel_requested.set()
         if self._scheduler and self._scheduler.is_alive():
             self._scheduler.join(timeout=2)
 
@@ -472,6 +478,7 @@ class RadarCollector:
                     "run": self.store.collector_run(self._active_run_id),
                 }
             run_id = self.store.create_collector_run(trigger)
+            self._cancel_requested.clear()
             self._active_run_id = run_id
         try:
             self._executor.submit(self._run, run_id)
@@ -483,6 +490,20 @@ class RadarCollector:
             )
             raise
         return {"queued": True, "run_id": run_id}
+
+    def cancel_run(self) -> dict:
+        with self._queue_lock:
+            run_id = self._active_run_id
+            if run_id is None:
+                return {"cancelled": False, "reason": "not_running"}
+            self._cancel_requested.set()
+        if not self.store.request_collector_cancel(run_id):
+            return {"cancelled": False, "reason": "already_finished"}
+        return {"cancelled": True, "run_id": run_id}
+
+    def _check_cancelled(self) -> None:
+        if self._cancel_requested.is_set():
+            raise CollectorCancelled("остановлено владельцем")
 
     def _run(self, run_id: str) -> None:
         if not self._run_lock.acquire(blocking=False):
@@ -496,9 +517,16 @@ class RadarCollector:
         created = updated = 0
         errors: list[str] = []
         try:
-            self.store.update_collector_run(run_id, status="running")
+            self.store.update_collector_run(
+                run_id,
+                status="running",
+                phase="sources",
+                current_term="Google Trends и Telegram",
+            )
+            self._check_cancelled()
             seeds: list[SeedTerm] = []
             for name, source in (("Google Trends", self.google), ("Telegram", self.telegram)):
+                self._check_cancelled()
                 try:
                     seeds.extend(source.collect())
                 except Exception as exc:  # isolated provider failure
@@ -514,6 +542,7 @@ class RadarCollector:
                     seed.term, seed.source_type, seed.source_url,
                 )
 
+            self._check_cancelled()
             promoted_seeds = 0
             if self.tiktok.configured:
                 seen_urls: set[str] = set()
@@ -521,8 +550,24 @@ class RadarCollector:
                 terms = self.store.discovery_terms(
                     self.config.discovery_terms_per_run,
                 )
-                for term in terms:
+                self.store.update_collector_run(
+                    run_id,
+                    status="running",
+                    phase="tiktok_discovery",
+                    current_term="",
+                    steps_total=len(terms),
+                    steps_done=0,
+                    seeds_found=len(unique_seeds),
+                )
+                for term_index, term in enumerate(terms):
+                    self._check_cancelled()
                     term_has_comments = False
+                    self.store.update_collector_run(
+                        run_id, status="running", phase="tiktok_discovery",
+                        current_term=term, steps_total=len(terms),
+                        steps_done=term_index, seeds_found=len(unique_seeds) + promoted_seeds,
+                        signals_created=created, signals_updated=updated,
+                    )
                     try:
                         records = self.tiktok.discover(
                             term, self.config.posts_per_term,
@@ -530,7 +575,14 @@ class RadarCollector:
                     except Exception as exc:
                         logger.warning(f"radar TikTok discovery '{term}' failed: {exc}")
                         errors.append(f"TikTok «{term}»: {exc}")
+                        self.store.update_collector_run(
+                            run_id, status="running", phase="tiktok_discovery",
+                            current_term=term, steps_total=len(terms),
+                            steps_done=term_index + 1,
+                            signals_created=created, signals_updated=updated,
+                        )
                         continue
+                    self._check_cancelled()
                     records.sort(
                         key=lambda item: (
                             int(item.get("share_count") or 0),
@@ -549,12 +601,20 @@ class RadarCollector:
                         seen_urls.add(source_url)
                         comment_rows: list[dict] = []
                         if comment_budget > 0 and not term_has_comments:
+                            self._check_cancelled()
+                            self.store.update_collector_run(
+                                run_id, status="running", phase="tiktok_comments",
+                                current_term=term, steps_total=len(terms),
+                                steps_done=term_index, seeds_found=len(unique_seeds) + promoted_seeds,
+                                signals_created=created, signals_updated=updated,
+                            )
                             try:
                                 comment_rows = self.tiktok.comments(source_url)
                                 term_has_comments = True
                                 comment_budget -= 1
                             except Exception as exc:
                                 errors.append(f"Комментарии TikTok: {exc}")
+                        self._check_cancelled()
                         comment_text = "\n".join(
                             f"@{str(row.get('commenter_user_name') or row.get('username') or '').lstrip('@')}: "
                             f"{row.get('comment_text') or row.get('text') or ''}"
@@ -612,20 +672,42 @@ class RadarCollector:
                         promoted_seeds += int(self.store.upsert_seed(
                             candidate, "tiktok_hashtag",
                         ))
+                    self.store.update_collector_run(
+                        run_id, status="running", phase="tiktok_discovery",
+                        current_term=term, steps_total=len(terms),
+                        steps_done=term_index + 1,
+                        seeds_found=len(unique_seeds) + promoted_seeds,
+                        signals_created=created, signals_updated=updated,
+                    )
 
+            self._check_cancelled()
             self.store.update_collector_run(
                 run_id,
                 status="succeeded",
+                phase="completed",
+                current_term="",
                 seeds_found=len(unique_seeds) + promoted_seeds,
                 signals_created=created,
                 signals_updated=updated,
                 error="; ".join(errors),
+            )
+        except CollectorCancelled as exc:
+            self.store.update_collector_run(
+                run_id,
+                status="cancelled",
+                phase="cancelled",
+                current_term="",
+                signals_created=created,
+                signals_updated=updated,
+                error=str(exc),
             )
         except Exception as exc:
             logger.exception(f"automatic radar run {run_id} failed")
             self.store.update_collector_run(
                 run_id,
                 status="failed",
+                phase="failed",
+                current_term="",
                 seeds_found=len(self.store.list_seeds(200)),
                 signals_created=created,
                 signals_updated=updated,

@@ -1,5 +1,27 @@
 # Память проекта Print Factory
 
+## Актуально после исправления прогресса радара (2026-07-27)
+
+- Production image:
+  `sha256:46423a43fdf7289d00585962bf19c821c7499999c31d6203cd193c41b0244bfd`,
+  контейнер `print-factory-panel` healthy, 0 рестартов.
+- Ранее «зависший шаг» был невидимым последовательным ожиданием Bright Data:
+  база обновляла counters только после всего прохода.
+- `collector_runs` теперь хранит живые `phase/current_term/steps_total/steps_done`
+  и `heartbeat_at`; UI показывает конкретную тему и `N/6`.
+- У радара есть отдельная кнопка остановки и
+  `POST /api/radar/collector/stop`. Остановка происходит после текущего
+  сетевого ответа, максимум в пределах его 75-секундного timeout.
+- Реальный контрольный проход `7b1caa2b62fc4d90` доказал движение `0/6 → 3/6`,
+  записал 19 seed и 15 TikTok-сигналов, после клика в UI завершился
+  `cancelled`; завершённые данные не потерялись.
+- Проверки: профильные **36/36**, Linux panel **77/77**. Полный локальный
+  Windows-набор дал 400 passed и 4 известные spawn-ошибки monkeypatch; эти же
+  четыре теста проходят в Linux.
+- Авторасписание включено (`on`), интервал 3 часа.
+- Откат: image `print-factory-panel:backup-pre-radar-progress`, каталог
+  `/opt/print-panel-backup-pre-radar-progress`.
+
 ## Актуально на 2026-07-27
 
 - Финальный production радара: commit `6d622a1`, image

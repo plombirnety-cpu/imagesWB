@@ -286,6 +286,10 @@ def test_collector_stores_seeds_tiktok_metrics_and_comments(tmp_path):
     assert run["status"] == "succeeded"
     assert run["seeds_found"] == 1
     assert run["signals_created"] == 1
+    assert run["phase"] == "completed"
+    assert run["steps_total"] == 1
+    assert run["steps_done"] == 1
+    assert run["heartbeat_at"]
     trend = store.list_trends()[0]
     assert trend["display_name"] == "Воздухан"
     assert trend["observations"][0]["views"] == 150_000
@@ -343,6 +347,20 @@ def test_queue_does_not_allow_overlapping_runs(tmp_path):
     assert second["queued"] is False
     assert second["reason"] == "already_running"
     assert len(executor.calls) == 1
+
+
+def test_cancel_marks_pending_run_as_stopping(tmp_path):
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    executor = _HoldingExecutor()
+    collector = radar_collector.RadarCollector(
+        store,
+        radar_collector.CollectorConfig(),
+        google=_SeedSource([]), telegram=_SeedSource([]),
+        tiktok=radar_collector.BrightDataClient(""), executor=executor,
+    )
+    queued = collector.queue_run("owner")
+    assert collector.cancel_run()["cancelled"] is True
+    assert store.collector_run(queued["run_id"])["phase"] == "stopping"
 
 
 def test_without_tiktok_key_free_sources_still_run(tmp_path):

@@ -305,7 +305,12 @@ class TrendRadarStore:
                     seeds_found INTEGER NOT NULL DEFAULT 0,
                     signals_created INTEGER NOT NULL DEFAULT 0,
                     signals_updated INTEGER NOT NULL DEFAULT 0,
-                    error TEXT NOT NULL DEFAULT ''
+                    error TEXT NOT NULL DEFAULT '',
+                    phase TEXT NOT NULL DEFAULT 'pending',
+                    current_term TEXT NOT NULL DEFAULT '',
+                    steps_total INTEGER NOT NULL DEFAULT 0,
+                    steps_done INTEGER NOT NULL DEFAULT 0,
+                    heartbeat_at TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_collector_runs_created
                     ON collector_runs(created_at DESC);
@@ -342,6 +347,27 @@ class TrendRadarStore:
                     "ALTER TABLE radar_seeds ADD COLUMN dismissed "
                     "INTEGER NOT NULL DEFAULT 0"
                 )
+            collector_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(collector_runs)")
+            }
+            collector_migrations = {
+                "phase": "TEXT NOT NULL DEFAULT 'pending'",
+                "current_term": "TEXT NOT NULL DEFAULT ''",
+                "steps_total": "INTEGER NOT NULL DEFAULT 0",
+                "steps_done": "INTEGER NOT NULL DEFAULT 0",
+                "heartbeat_at": "TEXT",
+            }
+            for column, definition in collector_migrations.items():
+                if column not in collector_columns:
+                    db.execute(
+                        f"ALTER TABLE collector_runs ADD COLUMN {column} {definition}"
+                    )
+            db.execute(
+                """
+                UPDATE collector_runs
+                SET heartbeat_at = COALESCE(heartbeat_at, started_at, created_at)
+                """
+            )
             # Keep earlier user decisions and do not immediately repeat topics
             # already checked before the rotation columns existed.
             db.execute(
@@ -370,6 +396,7 @@ class TrendRadarStore:
                 UPDATE collector_runs
                 SET status = 'failed',
                     finished_at = ?,
+                    phase = 'interrupted',
                     error = CASE WHEN error = '' THEN 'прерван перезапуском'
                                  ELSE error END
                 WHERE status IN ('pending', 'running')
@@ -530,13 +557,17 @@ class TrendRadarStore:
         run_id: str,
         *,
         status: str,
+        phase: str | None = None,
+        current_term: str | None = None,
+        steps_total: int | None = None,
+        steps_done: int | None = None,
         seeds_found: int | None = None,
         signals_created: int | None = None,
         signals_updated: int | None = None,
         error: str | None = None,
         now: datetime | None = None,
     ) -> None:
-        if status not in {"pending", "running", "succeeded", "failed"}:
+        if status not in {"pending", "running", "succeeded", "failed", "cancelled"}:
             raise ValueError("неизвестный статус запуска радара")
         now_text = _iso(now or utcnow())
         with self._connect() as db:
@@ -549,14 +580,15 @@ class TrendRadarStore:
             finished_at = current["finished_at"]
             if status == "running" and not started_at:
                 started_at = now_text
-            if status in {"succeeded", "failed"}:
+            if status in {"succeeded", "failed", "cancelled"}:
                 finished_at = now_text
             db.execute(
                 """
                 UPDATE collector_runs
                 SET status = ?, started_at = ?, finished_at = ?,
                     seeds_found = ?, signals_created = ?, signals_updated = ?,
-                    error = ?
+                    error = ?, phase = ?, current_term = ?,
+                    steps_total = ?, steps_done = ?, heartbeat_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -565,9 +597,37 @@ class TrendRadarStore:
                     current["signals_created"] if signals_created is None else signals_created,
                     current["signals_updated"] if signals_updated is None else signals_updated,
                     current["error"] if error is None else error[:4000],
+                    current["phase"] if phase is None else phase[:64],
+                    current["current_term"]
+                    if current_term is None else current_term[:120],
+                    current["steps_total"]
+                    if steps_total is None else max(0, int(steps_total)),
+                    current["steps_done"]
+                    if steps_done is None else max(0, int(steps_done)),
+                    now_text,
                     run_id,
                 ),
             )
+
+    def request_collector_cancel(
+        self,
+        run_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        """Atomically marks only an unfinished run as stopping."""
+        with self._connect() as db:
+            cursor = db.execute(
+                """
+                UPDATE collector_runs
+                SET phase = 'stopping',
+                    error = 'остановка запрошена владельцем',
+                    heartbeat_at = ?
+                WHERE id = ? AND status IN ('pending', 'running')
+                """,
+                (_iso(now or utcnow()), run_id),
+            )
+        return cursor.rowcount > 0
 
     def collector_run(self, run_id: str) -> dict | None:
         with self._connect() as db:

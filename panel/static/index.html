@@ -112,6 +112,8 @@
   .provider-pill.warn{background:#4d3b17;color:#ffd277}
   .collector-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}
   .collector-actions button{background:var(--accent2);border-color:#367bd6}
+  .collector-actions button.stop{background:#9f2d31;border-color:#d65358}
+  .collector-actions button[hidden]{display:none}
   .collector-note{font-size:11px;color:var(--muted);line-height:1.45}
   .seed-panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
   .seed-title{font-size:12px;color:var(--muted);margin-bottom:8px}
@@ -242,6 +244,7 @@
         </div>
         <div class="collector-actions">
           <button id="collectorRun" type="button">Проверить тренды сейчас</button>
+          <button id="collectorStop" class="stop" type="button" hidden>Остановить проверку</button>
           <div class="collector-note" id="collectorNote">Ручные ссылки для обычной работы не нужны.</div>
         </div>
       </div>
@@ -760,7 +763,7 @@ function providerPill(label, ok, warning=''){
 
 async function loadCollectorStatus(){
   const title = $('#collectorTitle'), state = $('#collectorState'),
-        providers = $('#collectorProviders'), button = $('#collectorRun'),
+        providers = $('#collectorProviders'), button = $('#collectorRun'), stop = $('#collectorStop'),
         note = $('#collectorNote');
   try{
     const res = await fetch('/api/radar/collector/status');
@@ -773,8 +776,20 @@ async function loadCollectorStatus(){
     if(run) parts.push(`Последняя проверка: ${formatDate(run.finished_at || run.started_at || run.created_at)}`);
     if(run?.status === 'succeeded'){
       parts.push(`тем: ${run.seeds_found}; новых TikTok-сигналов: ${run.signals_created}; обновлено: ${run.signals_updated}`);
+    }else if(run?.status === 'running'){
+      const labels = {
+        sources: 'собираю темы Google Trends и Telegram',
+        tiktok_discovery: 'ищу ролики TikTok',
+        tiktok_comments: 'читаю комментарии TikTok',
+        stopping: 'останавливаю после текущего сетевого запроса',
+      };
+      const progress = run.steps_total ? `${run.steps_done}/${run.steps_total}` : '';
+      const current = run.current_term ? `«${run.current_term}»` : '';
+      parts.push([labels[run.phase] || 'выполняется', progress, current].filter(Boolean).join(' · '));
     }else if(run?.status === 'failed'){
       parts.push(`ошибка: ${run.error || 'неизвестная ошибка'}`);
+    }else if(run?.status === 'cancelled'){
+      parts.push('остановлено владельцем');
     }
     if(data.next_run_at) parts.push(`следующая: ${formatDate(data.next_run_at)}`);
     state.textContent = parts.join(' · ') || 'Первый автоматический запуск ещё не выполнялся.';
@@ -786,6 +801,8 @@ async function loadCollectorStatus(){
       providerPill('TikTok', p.tiktok.configured, 'нужен ключ провайдера'),
     );
     button.disabled = data.running || !data.enabled;
+    stop.hidden = !data.running;
+    stop.disabled = run?.phase === 'stopping';
     note.textContent = p.tiktok.configured
       ? 'Система сама ищет ролики и комментарии. Ручные ссылки не нужны.'
       : 'Бесплатные темы уже собираются. Для реального TikTok-поиска нужен один ключ Bright Data в настройках сервера.';
@@ -861,6 +878,21 @@ $('#collectorRun').onclick = async () => {
     }else{
       $('#collectorNote').textContent = 'Проверка запущена. Экран обновится автоматически.';
     }
+    await loadCollectorStatus();
+  }catch(e){
+    $('#collectorNote').textContent = e.message;
+    button.disabled = false;
+  }
+};
+
+$('#collectorStop').onclick = async () => {
+  const button = $('#collectorStop');
+  button.disabled = true;
+  $('#collectorNote').textContent = 'Запрашиваю остановку…';
+  try{
+    const res = await fetch('/api/radar/collector/stop', {method:'POST'});
+    if(!res.ok) throw new Error('Не удалось остановить проверку');
+    $('#collectorNote').textContent = 'Остановка выполнится после текущего сетевого ответа.';
     await loadCollectorStatus();
   }catch(e){
     $('#collectorNote').textContent = e.message;

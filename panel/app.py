@@ -427,6 +427,11 @@ def api_radar_collector_run():
     return result
 
 
+@app.post("/api/radar/collector/stop")
+def api_radar_collector_stop():
+    return _radar_collector.cancel_run()
+
+
 @app.get("/api/radar/seeds")
 def api_radar_seeds(limit: int = 30):
     return _radar_store.list_seeds(limit=limit)

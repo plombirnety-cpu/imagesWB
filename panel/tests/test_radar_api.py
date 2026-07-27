@@ -43,6 +43,9 @@ class _CollectorStub:
         self.run_calls.append(trigger)
         return {"queued": True, "run_id": "automatic123"}
 
+    def cancel_run(self):
+        return {"cancelled": True, "run_id": "automatic123"}
+
 
 @pytest.fixture
 def radar_client(tmp_path, monkeypatch):
@@ -187,10 +190,13 @@ def test_automatic_collector_status_and_manual_trigger(radar_client):
     status = client.get("/api/radar/collector/status")
     seeds = client.get("/api/radar/seeds")
     started = client.post("/api/radar/collector/run")
+    stopped = client.post("/api/radar/collector/stop")
 
     assert status.status_code == 200
     assert status.json()["providers"]["google_trends"]["configured"] is True
     assert seeds.json()[0]["display_name"] == "Новый звук"
     assert started.status_code == 202
     assert started.json()["run_id"] == "automatic123"
+    assert stopped.status_code == 200
+    assert stopped.json()["cancelled"] is True
     assert collector.run_calls == ["owner"]
