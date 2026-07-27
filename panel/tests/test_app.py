@@ -323,6 +323,8 @@ def test_frontend_contains_cancel_and_individual_preview_controls():
     assert "loadRadarCards" in html
     assert "Это промежуточный экран" in html
     assert "refreshOpportunityEmptyState" in html
+    assert "monthly_growth_estimate" in html
+    assert "расчётно +" in html
 
 
 def test_unknown_job_404():

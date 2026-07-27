@@ -584,6 +584,15 @@ def test_discovery_reserves_budget_for_fresh_google_and_tiktok(store):
     ]
 
 
+def test_monthly_growth_estimate_has_explicit_3000_boundary():
+    estimate = trend_radar.estimated_monthly_search_growth
+
+    assert estimate(99, 0, is_new=True, accelerating=False) == 2_970
+    assert estimate(100, 0, is_new=True, accelerating=False) == 3_000
+    assert estimate(500, 400, is_new=False, accelerating=True) == 3_000
+    assert estimate(500, 400, is_new=False, accelerating=False) == 0
+
+
 def test_new_google_500_plus_two_viral_tiktoks_is_an_opportunity(store):
     term = "Odyssey"
     store.record_google_trend(
@@ -608,6 +617,13 @@ def test_new_google_500_plus_two_viral_tiktoks_is_an_opportunity(store):
 
     opportunity = store.get_trend(second["trend_id"])["opportunity"]
     assert opportunity["google"]["spike"] is True
+    assert opportunity["google"]["monthly_growth_estimate"] == 15_000
+    assert opportunity["google"]["monthly_growth_threshold"] == 3_000
+    assert opportunity["google"]["monthly_growth_confirmed"] is True
+    assert (
+        opportunity["google"]["monthly_growth_basis"]
+        == "estimate_from_google_trending_24h"
+    )
     assert opportunity["tiktok"]["confirmed"] is True
     assert opportunity["qualified"] is True
 
@@ -671,6 +687,8 @@ def test_google_acceleration_qualifies_after_repeated_measurement(store):
     google = store.get_trend(second["trend_id"])["opportunity"]["google"]
     assert google["accelerating"] is True
     assert google["growth_percent"] == 150.0
+    assert google["monthly_growth_estimate"] == 90_000
+    assert google["monthly_growth_confirmed"] is True
 
 
 def test_generation_requires_owner_approval(store):

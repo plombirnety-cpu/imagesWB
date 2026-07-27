@@ -68,6 +68,8 @@ _GOOGLE_NEW_WINDOW = timedelta(hours=36)
 _GOOGLE_FRESH_WINDOW = timedelta(hours=8)
 _GOOGLE_MIN_TRAFFIC = 500
 _GOOGLE_MIN_GROWTH_RATIO = 1.5
+_GOOGLE_MIN_MONTHLY_GROWTH = 3_000
+_GOOGLE_MONTH_DAYS = 30
 _TIKTOK_RECENT_WINDOW = timedelta(days=14)
 _TIKTOK_VIRAL_VIEWS = 30_000
 _TIKTOK_VIRAL_SHARES = 300
@@ -92,6 +94,30 @@ _UTILITY_SEED_EXACT = {"банк", "деньги", "календарь", "тел
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def estimated_monthly_search_growth(
+    traffic: int,
+    previous_traffic: int,
+    *,
+    is_new: bool,
+    accelerating: bool,
+) -> int:
+    """Estimate monthly incremental demand from Google's rolling 24h bucket.
+
+    Trending Now exposes a bucketed current-period volume rather than Keyword
+    Planner's absolute monthly volume. New topics use the whole current bucket;
+    accelerating topics use only the increase over the previous snapshot.
+    Calculating from persisted snapshots keeps repeated job reads idempotent and
+    prevents duplicate snapshots from inflating the estimate.
+    """
+    if is_new:
+        daily_increment = max(0, int(traffic))
+    elif accelerating:
+        daily_increment = max(0, int(traffic) - int(previous_traffic))
+    else:
+        daily_increment = 0
+    return daily_increment * _GOOGLE_MONTH_DAYS
 
 
 def _iso(value: datetime) -> str:
@@ -1584,6 +1610,13 @@ class TrendRadarStore:
                 "approx_traffic": 0,
                 "growth_ratio": None,
                 "growth_percent": None,
+                "monthly_growth_estimate": 0,
+                "monthly_growth_threshold": _GOOGLE_MIN_MONTHLY_GROWTH,
+                "monthly_growth_confirmed": False,
+                "monthly_growth_basis": "estimate_from_google_trending_24h",
+                "monthly_growth_reason": (
+                    "Нет данных для оценки роста +3 000 запросов в месяц"
+                ),
                 "published_at": None,
                 "captured_at": None,
                 "reason": "Нет свежего всплеска Google Trends",
@@ -1625,6 +1658,21 @@ class TrendRadarStore:
             and growth_ratio >= _GOOGLE_MIN_GROWTH_RATIO
             and traffic - previous_traffic >= 1_000
         )
+        monthly_growth_estimate = estimated_monthly_search_growth(
+            traffic,
+            previous_traffic,
+            is_new=is_new,
+            accelerating=accelerating,
+        )
+        monthly_growth_confirmed = bool(
+            monthly_growth_estimate >= _GOOGLE_MIN_MONTHLY_GROWTH
+        )
+        monthly_growth_reason = (
+            f"Расчётный рост +{monthly_growth_estimate:,} запросов в месяц"
+            if monthly_growth_confirmed else
+            f"Расчётный рост только +{monthly_growth_estimate:,} запросов в месяц; "
+            f"нужно не меньше +{_GOOGLE_MIN_MONTHLY_GROWTH:,}"
+        )
         spike = bool(
             fresh
             and traffic >= _GOOGLE_MIN_TRAFFIC
@@ -1648,6 +1696,11 @@ class TrendRadarStore:
             "approx_traffic": traffic,
             "growth_ratio": round(growth_ratio, 2) if growth_ratio else None,
             "growth_percent": growth_percent,
+            "monthly_growth_estimate": monthly_growth_estimate,
+            "monthly_growth_threshold": _GOOGLE_MIN_MONTHLY_GROWTH,
+            "monthly_growth_confirmed": monthly_growth_confirmed,
+            "monthly_growth_basis": "estimate_from_google_trending_24h",
+            "monthly_growth_reason": monthly_growth_reason.replace(",", " "),
             "published_at": latest["published_at"],
             "captured_at": latest["captured_at"],
             "source_url": latest["source_url"],
@@ -1764,7 +1817,11 @@ class TrendRadarStore:
         )
         google = self._google_spike_stats(google_key, now, db)
         tiktok = self._tiktok_viral_stats(observations, now)
-        qualified = bool(google["spike"] and tiktok["confirmed"])
+        qualified = bool(
+            google["spike"]
+            and google["monthly_growth_confirmed"]
+            and tiktok["confirmed"]
+        )
         google_points = (
             min(
                 45.0,
@@ -1790,6 +1847,8 @@ class TrendRadarStore:
         missing = []
         if not google["spike"]:
             missing.append(google["reason"])
+        elif not google["monthly_growth_confirmed"]:
+            missing.append(google["monthly_growth_reason"])
         if not tiktok["confirmed"]:
             missing.append(tiktok["reason"])
         idea = (

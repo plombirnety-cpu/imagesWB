@@ -749,8 +749,10 @@ function trendCard(trend){
     const google = opportunity.google || {}, tiktok = opportunity.tiktok || {};
     const growth = google.growth_percent == null ? 'новый всплеск'
       : `рост +${Math.round(google.growth_percent)}%`;
+    const monthlyGrowth = Number(google.monthly_growth_estimate || 0);
     proof.innerHTML = `<span class="confidence">${Math.round(opportunity.confidence || 0)}% уверенности</span> · ` +
-      `Google ${Number(google.approx_traffic || 0).toLocaleString('ru-RU')}+ запросов, ${growth}<br>` +
+      `Google ${Number(google.approx_traffic || 0).toLocaleString('ru-RU')}+ запросов, ${growth} · ` +
+      `расчётно +${monthlyGrowth.toLocaleString('ru-RU')} запросов/мес.<br>` +
       `TikTok: ${tiktok.viral_videos || 0} вирусных ролика · ${tiktok.author_count || 0} автора · ` +
       `${Number(tiktok.total_views || 0).toLocaleString('ru-RU')} просмотров`;
     const idea = opportunity.idea || {};
