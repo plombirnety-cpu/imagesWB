@@ -26,6 +26,17 @@
 - Проверки этапа: **40/40** профильных тестов, миграция на копии production SQLite,
   `py_compile`, JS syntax check, чистый `git diff --check`.
 
+- Production выложен из commit `b082a67`, image
+  `sha256:00a448e9f9eea64e74e11728e51d5f1ee25811d198d6deb46d9dc2fcfd4af62b`;
+  контейнер healthy, 0 рестартов. Linux-кандидат: **89 passed**.
+- Контрольный run `2783876f83614a48` завершился `succeeded`: 6/6, 21 seed,
+  27 новых сигналов, 3 обновлённых. Появились две подтверждённые идеи.
+- Главная проверка lineage: Google «одиссея» связался с TikTok `Odyssey`;
+  3 вирусных ролика, 2 автора, 4 322 800 просмотров, confidence 89,9%.
+- Откат: image `print-factory-panel:backup-pre-google-quota-b082a67`, исходники
+  `/opt/print-panel-backup-pre-google-quota-b082a67`, SQLite backup
+  `trend_radar.sqlite3.pre-google-quota-b082a67`.
+
 ## Актуально после добавления Google→TikTok возможностей (2026-07-27)
 
 - Основная единица результата радара теперь называется «подтверждённая идея для принта».

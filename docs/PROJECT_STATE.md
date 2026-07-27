@@ -40,6 +40,18 @@
 - Миграция и новая очередь проверены на отдельной копии production-базы;
   изменённые Python-модули и JavaScript проходят синтаксическую проверку.
 
+- Linux production-кандидат прошёл **89/89** тестов.
+- Production: commit `b082a67`, image
+  `sha256:00a448e9f9eea64e74e11728e51d5f1ee25811d198d6deb46d9dc2fcfd4af62b`,
+  контейнер healthy, 0 рестартов.
+- Контрольный run `2783876f83614a48`: `succeeded`, 6/6, 21 seed, 27 новых
+  сигналов и 3 обновлённых. Итог — две подтверждённые идеи.
+- Сквозная проверка перевода/хештега: Google «одиссея» → TikTok `Odyssey`,
+  3 вирусных ролика, 2 автора, 4 322 800 просмотров, confidence 89,9%.
+- Rollback: image `print-factory-panel:backup-pre-google-quota-b082a67`,
+  source `/opt/print-panel-backup-pre-google-quota-b082a67`, DB backup
+  `trend_radar.sqlite3.pre-google-quota-b082a67`.
+
 ## 2026-07-27 — идеи для принтов: резкий рост Google + вирусный TikTok
 
 ### Новый продуктовый фильтр
