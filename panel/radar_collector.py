@@ -39,6 +39,12 @@ _HASHTAG_RE = re.compile(r"#([a-zа-яё][a-zа-яё0-9_-]{2,})", re.IGNORECASE)
 _UNSAFE_SEED_RE = re.compile(
     r"\b(порно|pornhub|эротик|казино|ставк[аи]|наркотик)\b", re.IGNORECASE,
 )
+_GENERIC_TIKTOK_TAGS = {
+    "fyp", "fy", "viral", "trend", "trending", "tiktok", "тикток",
+    "мем", "мемы", "прикол", "приколы", "юмор", "смешно",
+    "рек", "реки", "рекомендации", "популярное", "тренды",
+}
+
 _MEMSEARCH_SKIP_PREFIXES = (
     "друзья", "реклама", "подпис", "розыгрыш", "в приюте", "сбор ",
 )
@@ -50,6 +56,43 @@ def _utcnow() -> datetime:
 
 def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def tiktok_candidate_terms(record: dict, search_term: str) -> list[str]:
+    """Извлекает конкретные хештеги ролика для следующего шага поиска."""
+    candidates: list[str] = []
+    description = str(record.get("description") or record.get("caption") or "")
+    candidates.extend(match.group(1) for match in _HASHTAG_RE.finditer(description))
+    raw_hashtags = record.get("hashtags") or record.get("challenges") or []
+    if isinstance(raw_hashtags, list):
+        for item in raw_hashtags:
+            if isinstance(item, dict):
+                value = (
+                    item.get("name")
+                    or item.get("title")
+                    or item.get("hashtag_name")
+                    or ""
+                )
+            else:
+                value = item
+            candidates.append(str(value).lstrip("#"))
+    current_key = canonical_key(search_term)
+    result: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        display = " ".join(candidate.strip().split())
+        key = canonical_key(display)
+        if (
+            not viable_seed_term(display)
+            or key == current_key
+            or key in _GENERIC_TIKTOK_TAGS
+            or key.startswith(("fyp", "рек", "recommend"))
+            or key in seen
+        ):
+            continue
+        seen.add(key)
+        result.append(display)
+    return result[:5]
 
 
 @dataclass(frozen=True)
@@ -430,6 +473,7 @@ class RadarCollector:
                     seed.term, seed.source_type, seed.source_url,
                 )
 
+            promoted_seeds = 0
             if self.tiktok.configured:
                 seen_urls: set[str] = set()
                 comment_budget = self.config.comments_posts_per_run
@@ -510,11 +554,31 @@ class RadarCollector:
                             updated += int(bool(result["updated"]))
                         else:
                             created += 1
+                        for candidate in tiktok_candidate_terms(record, term):
+                            promoted_seeds += int(self.store.upsert_seed(
+                                candidate, "tiktok_hashtag", source_url,
+                            ))
+                        trend = self.store.get_trend(result["trend_id"])
+                        if trend:
+                            for candidate in trend["emerging_terms"]:
+                                if (
+                                    candidate["score"] < 35
+                                    or candidate["unique_authors"] < 3
+                                    or not viable_seed_term(candidate["term"])
+                                    or canonical_key(candidate["term"])
+                                    == canonical_key(term)
+                                ):
+                                    continue
+                                promoted_seeds += int(self.store.upsert_seed(
+                                    candidate["term"],
+                                    "tiktok_comments",
+                                    source_url,
+                                ))
 
             self.store.update_collector_run(
                 run_id,
                 status="succeeded",
-                seeds_found=len(unique_seeds),
+                seeds_found=len(unique_seeds) + promoted_seeds,
                 signals_created=created,
                 signals_updated=updated,
                 error="; ".join(errors),

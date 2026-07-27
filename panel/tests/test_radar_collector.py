@@ -56,7 +56,7 @@ class _FakeTikTok:
             {
                 "post_id": "123",
                 "profile_username": "creator",
-                "description": f"{keyword} новый звук",
+                "description": f"{keyword} новый звук #сованаскакалке #fyp",
                 "create_time": 1785056400,
                 "play_count": 150_000,
                 "digg_count": 12_000,
@@ -69,6 +69,7 @@ class _FakeTikTok:
         return [
             {"commenter_user_name": "one", "comment_text": "воздухан нужен"},
             {"commenter_user_name": "two", "comment_text": "где купить воздухан"},
+            {"commenter_user_name": "three", "comment_text": "воздухан опять"},
         ]
 
     post_url = staticmethod(radar_collector.BrightDataClient.post_url)
@@ -108,6 +109,18 @@ class _TrackingTikTok:
 
     post_url = staticmethod(radar_collector.BrightDataClient.post_url)
     published_at = staticmethod(radar_collector.BrightDataClient.published_at)
+
+
+def test_tiktok_candidates_expand_search_graph_without_generic_tags():
+    terms = radar_collector.tiktok_candidate_terms(
+        {
+            "description": "#fyp #сованаскакалке #воздухан",
+            "hashtags": [{"name": "черемша"}, "viral"],
+        },
+        "Воздухан",
+    )
+
+    assert terms == ["сованаскакалке", "черемша"]
 
 
 def test_google_trends_rss_becomes_search_seeds():
@@ -225,13 +238,16 @@ def test_collector_stores_seeds_tiktok_metrics_and_comments(tmp_path):
     assert queued["queued"] is True
     run = store.collector_run(queued["run_id"])
     assert run["status"] == "succeeded"
-    assert run["seeds_found"] == 1
+    assert run["seeds_found"] == 2
     assert run["signals_created"] == 1
     trend = store.list_trends()[0]
     assert trend["display_name"] == "Воздухан"
     assert trend["observations"][0]["views"] == 150_000
     terms = {item["term"] for item in trend["emerging_terms"]}
     assert "воздухан" in terms
+    assert any(
+        seed["display_name"] == "сованаскакалке" for seed in store.list_seeds()
+    )
 
 
 def test_comment_budget_is_distributed_one_post_per_search_term(tmp_path):

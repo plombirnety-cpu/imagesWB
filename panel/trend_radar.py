@@ -102,7 +102,7 @@ def viable_seed_term(text: str) -> bool:
     return bool(
         key
         and 3 <= len(display) <= 80
-        and len(key.split()) <= 10
+        and len(key.split()) <= 5
     )
 
 
