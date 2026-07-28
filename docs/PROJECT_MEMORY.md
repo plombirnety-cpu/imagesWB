@@ -1,6 +1,6 @@
 # Память проекта Print Factory
 
-## Постоянная защита расходов Bright Data (2026-07-28, кандидат к деплою)
+## Постоянная защита расходов Bright Data (2026-07-28, production)
 
 - Production остаётся в `PANEL_RADAR_AUTO_ENABLED=off`; значение по умолчанию в
   `settings.py` также изменено на `off`.
@@ -21,8 +21,16 @@
 - Профильные store/collector/API тесты: **55 passed**; `py_compile`, JS syntax и
   `git diff --check` чистые. Полный Windows-набор: **418 passed**, 4 прежних
   multiprocessing/spawn-сбоя генераторных моков; обязательна Linux-проверка.
-- Этот блок описывает локальный deploy-кандидат; production-проверка и импорт
-  фактических 93 snapshots в новый журнал выполняются следующим этапом.
+- Код развернут из commit `e6c0857`; полный Linux-кандидат прошёл **96/96**.
+  Production image `sha256:83b176b633ae2a234518227e1460fe231e91e280b8dcc7f5d70d879820af505a`,
+  контейнер healthy, 0 рестартов, `/health` → 200.
+- В `brightdata_usage` импортированы все фактические 93 snapshots и 15 978
+  записей. На текущие UTC-сутки: posts 16/6, comments 12/1, records 4 967/1 000,
+  estimate $7.4505; `blocked=true`, оба remaining=0.
+- Повторный read-only замер после деплоя снова показал ровно 93 snapshots:
+  production не создал ни одного нового Bright Data задания.
+- Откат: image `print-factory-panel:backup-pre-budget-e6c0857`, каталог
+  `/opt/print-panel-backup-pre-budget-e6c0857`.
 
 ## Аварийная остановка расходов Bright Data (2026-07-28)
 

@@ -1,6 +1,6 @@
 # PROJECT_STATE — print-factory-nb
 
-## 2026-07-28 — постоянный предохранитель Bright Data (deploy-кандидат)
+## 2026-07-28 — постоянный предохранитель Bright Data (production)
 
 ### Контракт расхода
 
@@ -28,14 +28,25 @@
   числом записей и максимальной оценкой. Статус радара показывает requests/limits,
   records и estimated cost.
 
-### Проверка до деплоя
+### Проверка и production
 
 - Профильный набор: **55 passed**.
 - `py_compile` для store/collector/app/settings, JS syntax и `git diff --check` — OK.
-- Полный Windows-набор: **418 passed, 4 failed**; все четыре — прежние ограничения
-  `multiprocessing/spawn` в тестовых monkeypatch генерации, не связанные с радаром.
-  Перед production обязателен полный Linux-кандидат.
-- Production-деплой и импорт исторических 93 Bright Data snapshots ещё не выполнены.
+- Полный Windows-набор: **418 passed, 4 failed**; четыре прежних ограничения
+  `multiprocessing/spawn` исчезли в Linux. Docker-кандидат commit `e6c0857` прошёл
+  **96/96**, 4 ожидаемых fork warnings.
+- Production image:
+  `sha256:83b176b633ae2a234518227e1460fe231e91e280b8dcc7f5d70d879820af505a`;
+  контейнер `healthy`, 0 рестартов, `/health` → 200.
+- Через management API в новую таблицу импортированы все 93 snapshots расследования:
+  54 posts, 39 comments, 15 978 records, gross estimate $23.967.
+- На 2026-07-28 UTC локальный budget показывает posts `16/6`, comments `12/1`,
+  records `4 967/1 000`, estimate `$7.4505`, `blocked=true`. Поэтому интерфейс
+  не разрешает ещё один платный запрос в текущие сутки.
+- Повторный management API замер после выкладки остался 93/93: новых snapshots
+  не появилось, startup-run отсутствует.
+- Откат: image `print-factory-panel:backup-pre-budget-e6c0857`, каталог
+  `/opt/print-panel-backup-pre-budget-e6c0857`.
 ## 2026-07-28 — аварийное отключение Bright Data
 
 - После подтверждения владельца `panel/docker-compose.yml` переключает
