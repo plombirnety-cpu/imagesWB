@@ -43,7 +43,7 @@ def _env_csv(name: str, default: str = "") -> tuple[str, ...]:
 # Автоматический радар. Бесплатные Google Trends и публичные Telegram-каналы
 # дают темы-кандидаты; Bright Data выполняет discovery TikTok и чтение комментариев.
 # Токен хранится только в env сервера и никогда не записывается в SQLite.
-RADAR_AUTO_ENABLED = _env_bool("PANEL_RADAR_AUTO_ENABLED", "on")
+RADAR_AUTO_ENABLED = _env_bool("PANEL_RADAR_AUTO_ENABLED", "off")
 RADAR_COLLECTION_INTERVAL = max(
     900, int(os.getenv("PANEL_RADAR_COLLECTION_INTERVAL", str(3 * 60 * 60)))
 )
@@ -60,12 +60,29 @@ RADAR_POSTS_PER_TERM = max(
     1, min(50, int(os.getenv("PANEL_RADAR_POSTS_PER_TERM", "5")))
 )
 RADAR_COMMENTS_POSTS_PER_RUN = max(
-    0, min(10, int(os.getenv("PANEL_RADAR_COMMENTS_POSTS_PER_RUN", "4")))
+    0, min(10, int(os.getenv("PANEL_RADAR_COMMENTS_POSTS_PER_RUN", "0")))
 )
 RADAR_REQUEST_TIMEOUT = max(
     5, min(120, int(os.getenv("PANEL_RADAR_REQUEST_TIMEOUT", "30")))
 )
 BRIGHTDATA_API_TOKEN = os.getenv("BRIGHTDATA_API_TOKEN", "").strip()
+# Жёсткий предохранитель платного провайдера. Любая попытка резервирует лимит ДО
+# HTTP-запроса: таймаут тоже расходует слот, потому что snapshot уже мог быть создан.
+BRIGHTDATA_POSTS_DAILY_LIMIT = max(
+    0, int(os.getenv("PANEL_BRIGHTDATA_POSTS_DAILY_LIMIT", "6"))
+)
+BRIGHTDATA_COMMENTS_DAILY_LIMIT = max(
+    0, int(os.getenv("PANEL_BRIGHTDATA_COMMENTS_DAILY_LIMIT", "1"))
+)
+BRIGHTDATA_RECORDS_DAILY_LIMIT = max(
+    0, int(os.getenv("PANEL_BRIGHTDATA_RECORDS_DAILY_LIMIT", "1000"))
+)
+BRIGHTDATA_COMMENT_MAX_EXPECTED = max(
+    0, int(os.getenv("PANEL_BRIGHTDATA_COMMENT_MAX_EXPECTED", "500"))
+)
+BRIGHTDATA_PRICE_PER_1000 = max(
+    0.0, float(os.getenv("PANEL_BRIGHTDATA_PRICE_PER_1000", "1.5"))
+)
 
 # Если владелец не отметил ни одного чекбокса, стиль выбирает арт-директор по теме.
 # Раньше здесь был принудительный anime style 34: поэтому Doctor Doom без выбора

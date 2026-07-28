@@ -55,6 +55,11 @@ _RUS_STOPWORDS = {
 _TOKEN_RE = re.compile(r"[a-zа-яё][a-zа-яё0-9-]{2,}", re.IGNORECASE)
 _AUTHOR_LINE_RE = re.compile(r"^\s*(@?[A-Za-zА-Яа-яЁё0-9_.-]{1,40})\s*:\s*(.+)$")
 _HASHTAG_RE = re.compile(r"#([a-zа-яё][a-zа-яё0-9_.-]{1,50})", re.IGNORECASE)
+
+class BrightDataBudgetExceeded(RuntimeError):
+    """A paid Bright Data request was blocked before it reached the provider."""
+
+
 _GENERIC_HASHTAGS = {
     "fyp", "fy", "viral", "trend", "trending", "tiktok", "тикток",
     "мем", "мемы", "прикол", "приколы", "юмор", "смешно",
@@ -379,6 +384,24 @@ class TrendRadarStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_collector_runs_created
                     ON collector_runs(created_at DESC);
+                CREATE TABLE IF NOT EXISTS brightdata_usage (
+                    id TEXT PRIMARY KEY,
+                    operation TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    run_id TEXT NOT NULL DEFAULT '',
+                    trend_id TEXT NOT NULL DEFAULT '',
+                    source_url TEXT NOT NULL DEFAULT '',
+                    snapshot_id TEXT UNIQUE,
+                    records INTEGER NOT NULL DEFAULT 0,
+                    estimated_cost REAL NOT NULL DEFAULT 0,
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_brightdata_usage_created
+                    ON brightdata_usage(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_brightdata_usage_operation_created
+                    ON brightdata_usage(operation, created_at DESC);
                 CREATE TABLE IF NOT EXISTS google_trend_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     canonical_key TEXT NOT NULL,
@@ -764,6 +787,192 @@ class TrendRadarStore:
                 ],
             )
         return [row["display_name"] for row in selected]
+
+    def reserve_brightdata_request(
+        self,
+        operation: str,
+        *,
+        posts_daily_limit: int,
+        comments_daily_limit: int,
+        records_daily_limit: int,
+        run_id: str = "",
+        trend_id: str = "",
+        source_url: str = "",
+        now: datetime | None = None,
+    ) -> str:
+        """Atomically reserve a paid request before contacting Bright Data.
+
+        Reserved and failed requests count against the request cap because the
+        provider may already have created a billable snapshot when our HTTP
+        client times out.
+        """
+        if operation not in {"posts", "comments"}:
+            raise ValueError("неизвестная операция Bright Data")
+        current = now or utcnow()
+        day_start = current.astimezone(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+        day_end = day_start + timedelta(days=1)
+        request_limit = (
+            max(0, int(posts_daily_limit))
+            if operation == "posts"
+            else max(0, int(comments_daily_limit))
+        )
+        usage_id = uuid.uuid4().hex[:20]
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            used = db.execute(
+                """
+                SELECT COUNT(*) AS requests, COALESCE(SUM(records), 0) AS records
+                FROM brightdata_usage
+                WHERE operation = ? AND created_at >= ? AND created_at < ?
+                """,
+                (operation, _iso(day_start), _iso(day_end)),
+            ).fetchone()
+            total_records = db.execute(
+                """
+                SELECT COALESCE(SUM(records), 0) AS records
+                FROM brightdata_usage
+                WHERE created_at >= ? AND created_at < ?
+                """,
+                (_iso(day_start), _iso(day_end)),
+            ).fetchone()["records"]
+            if request_limit == 0 or int(used["requests"]) >= request_limit:
+                raise BrightDataBudgetExceeded(
+                    f"дневной лимит Bright Data для {operation} исчерпан "
+                    f"({int(used['requests'])}/{request_limit})"
+                )
+            if int(records_daily_limit) > 0 and int(total_records) >= int(records_daily_limit):
+                raise BrightDataBudgetExceeded(
+                    f"дневной лимит записей Bright Data исчерпан "
+                    f"({int(total_records)}/{int(records_daily_limit)})"
+                )
+            db.execute(
+                """
+                INSERT INTO brightdata_usage (
+                    id, operation, status, run_id, trend_id, source_url, created_at
+                ) VALUES (?, ?, 'reserved', ?, ?, ?, ?)
+                """,
+                (
+                    usage_id, operation, run_id[:64], trend_id[:64],
+                    source_url[:2048], _iso(current),
+                ),
+            )
+        return usage_id
+
+    def complete_brightdata_request(
+        self,
+        usage_id: str,
+        *,
+        status: str,
+        records: int = 0,
+        price_per_1000: float = 1.5,
+        snapshot_id: str = "",
+        error: str = "",
+        now: datetime | None = None,
+    ) -> dict:
+        if status not in {"succeeded", "failed", "timed_out", "cancelled"}:
+            raise ValueError("неизвестный статус операции Bright Data")
+        record_count = max(0, int(records))
+        with self._connect() as db:
+            cursor = db.execute(
+                """
+                UPDATE brightdata_usage
+                SET status = ?, records = ?, estimated_cost = ?,
+                    snapshot_id = NULLIF(?, ''), error = ?, completed_at = ?
+                WHERE id = ? AND status = 'reserved'
+                """,
+                (
+                    status, record_count,
+                    round(record_count / 1000 * max(0.0, float(price_per_1000)), 6),
+                    snapshot_id[:120], error[:4000], _iso(now or utcnow()), usage_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                row = db.execute(
+                    "SELECT * FROM brightdata_usage WHERE id = ?", (usage_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(usage_id)
+                return dict(row)
+            row = db.execute(
+                "SELECT * FROM brightdata_usage WHERE id = ?", (usage_id,),
+            ).fetchone()
+        return dict(row)
+
+    def brightdata_job(self, usage_id: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM brightdata_usage WHERE id = ?", (usage_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def brightdata_usage_summary(
+        self,
+        *,
+        posts_daily_limit: int,
+        comments_daily_limit: int,
+        records_daily_limit: int,
+        price_per_1000: float = 1.5,
+        now: datetime | None = None,
+    ) -> dict:
+        current = now or utcnow()
+        day_start = current.astimezone(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+        day_end = day_start + timedelta(days=1)
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT operation, COUNT(*) AS requests,
+                       COALESCE(SUM(records), 0) AS records,
+                       COALESCE(SUM(estimated_cost), 0) AS estimated_cost
+                FROM brightdata_usage
+                WHERE created_at >= ? AND created_at < ?
+                GROUP BY operation
+                """,
+                (_iso(day_start), _iso(day_end)),
+            ).fetchall()
+        by_operation = {
+            row["operation"]: {
+                "requests": int(row["requests"]),
+                "records": int(row["records"]),
+                "estimated_cost": round(float(row["estimated_cost"]), 6),
+            }
+            for row in rows
+        }
+        posts = by_operation.get("posts", {"requests": 0, "records": 0, "estimated_cost": 0.0})
+        comments = by_operation.get("comments", {"requests": 0, "records": 0, "estimated_cost": 0.0})
+        total_records = posts["records"] + comments["records"]
+        post_limit = max(0, int(posts_daily_limit))
+        comment_limit = max(0, int(comments_daily_limit))
+        record_limit = max(0, int(records_daily_limit))
+        return {
+            "date_utc": day_start.date().isoformat(),
+            "price_per_1000": float(price_per_1000),
+            "posts": {
+                **posts,
+                "limit": post_limit,
+                "remaining": max(0, post_limit - posts["requests"]),
+            },
+            "comments": {
+                **comments,
+                "limit": comment_limit,
+                "remaining": max(0, comment_limit - comments["requests"]),
+            },
+            "records": {
+                "used": total_records,
+                "limit": record_limit,
+                "remaining": max(0, record_limit - total_records),
+            },
+            "estimated_cost": round(
+                posts["estimated_cost"] + comments["estimated_cost"], 6,
+            ),
+            "blocked": (
+                posts["requests"] >= post_limit
+                or (record_limit > 0 and total_records >= record_limit)
+            ),
+        }
 
     def create_collector_run(
         self,

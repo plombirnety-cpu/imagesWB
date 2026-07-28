@@ -305,7 +305,7 @@ def test_bright_data_sync_scrape_waits_full_contract_without_short_retries():
     assert timeouts == [75]
 
 
-def test_collector_stores_seeds_tiktok_metrics_and_comments(tmp_path):
+def test_collector_stores_seeds_and_tiktok_metrics_without_auto_comments(tmp_path):
     store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
     collector = radar_collector.RadarCollector(
         store,
@@ -345,7 +345,7 @@ def test_collector_stores_seeds_tiktok_metrics_and_comments(tmp_path):
     assert trend["display_name"] == "Воздухан"
     assert trend["observations"][0]["views"] == 150_000
     terms = {item["term"] for item in trend["emerging_terms"]}
-    assert "воздухан" in terms
+    assert terms == set()
 
 
 def test_collector_links_duplicate_tiktok_videos_back_to_google_origin(tmp_path):
@@ -409,7 +409,7 @@ def test_collector_links_duplicate_tiktok_videos_back_to_google_origin(tmp_path)
     )
 
 
-def test_comment_budget_is_distributed_one_post_per_search_term(tmp_path):
+def test_full_discovery_never_fetches_comments(tmp_path):
     store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
     tiktok = _TrackingTikTok()
     collector = radar_collector.RadarCollector(
@@ -422,23 +422,12 @@ def test_comment_budget_is_distributed_one_post_per_search_term(tmp_path):
         google=_SeedSource(
             [
                 radar_collector.SeedTerm(
-                    "Первый мем",
+                    name,
                     "google_trends",
                     search_volume=5_000,
                     published_at=datetime.now(timezone.utc).isoformat(),
-                ),
-                radar_collector.SeedTerm(
-                    "Второй мем",
-                    "google_trends",
-                    search_volume=5_000,
-                    published_at=datetime.now(timezone.utc).isoformat(),
-                ),
-                radar_collector.SeedTerm(
-                    "Третий мем",
-                    "google_trends",
-                    search_volume=5_000,
-                    published_at=datetime.now(timezone.utc).isoformat(),
-                ),
+                )
+                for name in ("Первый мем", "Второй мем", "Третий мем")
             ]
         ),
         telegram=_SeedSource([]),
@@ -448,13 +437,94 @@ def test_comment_budget_is_distributed_one_post_per_search_term(tmp_path):
 
     collector.queue_run("test")
 
-    assert len(tiktok.comment_calls) == 3
-    assert {
-        url.rsplit("/", 1)[-1].rsplit("-", 1)[0]
-        for url in tiktok.comment_calls
-    } == {"первый-мем", "второй-мем", "третий-мем"}
+    assert tiktok.comment_calls == []
+    assert collector.status()["budget"]["posts"]["requests"] == 3
+    assert collector.status()["budget"]["comments"]["requests"] == 0
 
 
+def test_manual_comments_are_confirmed_limited_and_persisted(tmp_path):
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    signal = store.ingest_signal(
+        trend_radar.SignalInput(
+            term="Воздухан",
+            source_type="tiktok",
+            source_url="https://www.tiktok.com/@creator/video/77",
+            author="creator",
+            views=80_000,
+            comments_count=20,
+        )
+    )
+    tiktok = _TrackingTikTok()
+    collector = radar_collector.RadarCollector(
+        store,
+        radar_collector.CollectorConfig(comment_max_expected=500),
+        google=_SeedSource([]), telegram=_SeedSource([]), tiktok=tiktok,
+        executor=_InlineExecutor(),
+    )
+
+    with pytest.raises(PermissionError):
+        collector.queue_comments(signal["trend_id"])
+    queued = collector.queue_comments(signal["trend_id"], confirmed=True)
+
+    assert queued["expected_records"] == 20
+    assert len(tiktok.comment_calls) == 1
+    job = collector.comment_job(queued["job_id"])
+    assert job["status"] == "succeeded"
+    assert job["records"] == 1
+    assert collector.status()["budget"]["comments"]["remaining"] == 0
+
+
+def test_timed_out_manual_comments_consume_slot_without_retry(tmp_path):
+    class _TimeoutTikTok(_TrackingTikTok):
+        def comments(self, post_url):
+            self.comment_calls.append(post_url)
+            raise requests.ReadTimeout("snapshot is still processing")
+
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    signal = store.ingest_signal(
+        trend_radar.SignalInput(
+            term="Новый звук",
+            source_type="tiktok",
+            source_url="https://www.tiktok.com/@creator/video/88",
+            comments_count=100,
+        )
+    )
+    tiktok = _TimeoutTikTok()
+    collector = radar_collector.RadarCollector(
+        store, radar_collector.CollectorConfig(comments_daily_limit=1),
+        google=_SeedSource([]), telegram=_SeedSource([]), tiktok=tiktok,
+        executor=_InlineExecutor(),
+    )
+
+    queued = collector.queue_comments(signal["trend_id"], confirmed=True)
+    assert collector.comment_job(queued["job_id"])["status"] == "timed_out"
+    with pytest.raises(trend_radar.BrightDataBudgetExceeded):
+        collector.queue_comments(signal["trend_id"], confirmed=True)
+    assert len(tiktok.comment_calls) == 1
+
+
+def test_enabled_scheduler_waits_full_interval_after_restart(tmp_path):
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    executor = _HoldingExecutor()
+    collector = radar_collector.RadarCollector(
+        store,
+        radar_collector.CollectorConfig(
+            enabled=True, interval_seconds=900, initial_delay_seconds=1,
+        ),
+        google=_SeedSource([]), telegram=_SeedSource([]),
+        tiktok=radar_collector.BrightDataClient(""), executor=executor,
+    )
+
+    before = datetime.now(timezone.utc)
+    collector.start()
+    try:
+        next_run = datetime.fromisoformat(
+            collector.status()["next_run_at"].replace("Z", "+00:00")
+        )
+        assert (next_run - before).total_seconds() >= 895
+        assert executor.calls == []
+    finally:
+        collector.stop()
 def test_queue_does_not_allow_overlapping_runs(tmp_path):
     store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
     executor = _HoldingExecutor()

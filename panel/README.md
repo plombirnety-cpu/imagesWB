@@ -160,16 +160,21 @@ docker compose -f panel/docker-compose.yml up -d --build
 | `PANEL_PORT` | `8040` | порт uvicorn (локальный запуск; в Docker порт фиксирован в `EXPOSE`/`ports`) |
 | `PANEL_OUTPUT_DIR` | `panel/panel_out` | куда пишутся готовые PNG по job_id |
 | `PANEL_RADAR_DB` | `<PANEL_OUTPUT_DIR>/trend_radar.sqlite3` | постоянная SQLite-база сигналов, комментариев, решений и фоновых заданий радара |
-| `PANEL_RADAR_AUTO_ENABLED` | `on` | включает фоновый автоматический поиск |
+| `PANEL_RADAR_AUTO_ENABLED` | `off` | включает расписание; production держит выключенным, ручной запуск доступен отдельно |
 | `PANEL_RADAR_COLLECTION_INTERVAL` | `10800` | интервал проходов в секундах, минимум 900 |
-| `PANEL_RADAR_INITIAL_DELAY` | `20` | задержка первого прохода после запуска панели |
+| `PANEL_RADAR_INITIAL_DELAY` | `20` | устаревшая совместимая настройка; платный проход после рестарта больше не запускается |
 | `PANEL_RADAR_GOOGLE_TRENDS_GEO` | `RU` | регион официального Google Trends RSS |
 | `PANEL_RADAR_TELEGRAM_CHANNELS` | `memachh,memsearch,meme_forum,BrandAnalytics` | публичные Telegram-каналы через запятую |
-| `PANEL_RADAR_DISCOVERY_TERMS_PER_RUN` | `4` | сколько приоритетных тем проверять в TikTok за проход |
+| `PANEL_RADAR_DISCOVERY_TERMS_PER_RUN` | `6` | максимум приоритетных тем одного ручного TikTok-прохода |
 | `PANEL_RADAR_POSTS_PER_TERM` | `5` | сколько TikTok-роликов брать на тему |
-| `PANEL_RADAR_COMMENTS_POSTS_PER_RUN` | `1` | для скольких лучших роликов получать комментарии за проход |
+| `PANEL_RADAR_COMMENTS_POSTS_PER_RUN` | `0` | зафиксировано в 0: общий проход никогда не загружает комментарии |
 | `PANEL_RADAR_REQUEST_TIMEOUT` | `30` | обычный сетевой таймаут; синхронный TikTok scrape автоматически ждёт минимум 75 секунд |
 | `BRIGHTDATA_API_TOKEN` | пусто | секрет API TikTok discovery/comments; хранить только в `.env` сервера |
+| `PANEL_BRIGHTDATA_POSTS_DAILY_LIMIT` | `6` | максимум платных TikTok discovery-запросов за UTC-сутки; таймаут тоже считается |
+| `PANEL_BRIGHTDATA_COMMENTS_DAILY_LIMIT` | `1` | максимум одной ручной выгрузки комментариев за UTC-сутки |
+| `PANEL_BRIGHTDATA_RECORDS_DAILY_LIMIT` | `1000` | после достижения числа доставленных записей новые платные запросы блокируются |
+| `PANEL_BRIGHTDATA_COMMENT_MAX_EXPECTED` | `500` | ручная кнопка доступна только для ролика с не более чем 500 заявленными комментариями |
+| `PANEL_BRIGHTDATA_PRICE_PER_1000` | `1.5` | тариф для локальной оценки расхода в UI; точное списание смотреть в Cost Explorer |
 | `PANEL_DEFAULT_STYLE` | `auto` | автовыбор арт-директором, если чекбоксы не отмечены |
 | `PANEL_MAX_COUNT` | `50` | предохранитель — макс. дизайнов за один запуск |
 | `PANEL_STYLE_BANK` | `../docs/STYLE_BANK.json` | путь к банку стилей |
@@ -185,10 +190,14 @@ docker compose -f panel/docker-compose.yml up -d --build
 и т.д. В контейнере панели по умолчанию (`docker-compose.yml`): `UPSCALE=off`,
 `IMAGE_PROVIDER=gemini`, `ART_DIRECTOR_PROVIDER=gemini`.
 
-Автопоиск без `BRIGHTDATA_API_TOKEN` всё равно собирает темы Google/Telegram и
-показывает их в панели, но не может найти и измерить сами TikTok-ролики. После
-одноразового добавления токена в корневой `.env` ссылки, метрики и комментарии
-собираются автоматически; оператору остаётся только одобрять кандидатов.
+Без `BRIGHTDATA_API_TOKEN` бесплатные Google/Telegram-темы остаются доступны, но
+TikTok-ролики не ищутся. При настроенном токене платный discovery запускает только
+владелец кнопкой «Проверить тренды сейчас». Каждая попытка заранее резервирует слот
+в SQLite; timeout не вызывает дополнительный запрос и всё равно расходует слот.
+Комментарии общий проход не читает: владелец выбирает конкретную карточку, видит
+ожидаемое число записей и оценку цены, подтверждает одну ручную выгрузку. Точное
+списание проверяется в Bright Data Cost Explorer; дополнительно обязательно задать
+account-level daily spend limit в кабинете провайдера.
 
 ## Оговорки / TODO для деплоя
 

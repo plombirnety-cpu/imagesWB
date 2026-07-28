@@ -46,6 +46,19 @@ class _CollectorStub:
     def cancel_run(self):
         return {"cancelled": True, "run_id": "automatic123"}
 
+    def queue_comments(self, trend_id, *, confirmed=False):
+        if not confirmed:
+            raise PermissionError("нужно подтвердить платный сбор комментариев")
+        return {
+            "queued": True, "job_id": "comments123", "trend_id": trend_id,
+            "expected_records": 20, "estimated_max_cost": 0.03,
+        }
+
+    def comment_job(self, job_id):
+        if job_id != "comments123":
+            return None
+        return {"id": job_id, "status": "succeeded", "records": 20}
+
 
 @pytest.fixture
 def radar_client(tmp_path, monkeypatch):
@@ -251,3 +264,21 @@ def test_automatic_collector_status_and_manual_trigger(radar_client):
     assert stopped.status_code == 200
     assert stopped.json()["cancelled"] is True
     assert collector.run_calls == ["owner"]
+
+def test_manual_comment_endpoint_requires_confirmation_and_exposes_job(radar_client):
+    client, _, _, collector = radar_client
+    trend_id = client.post("/api/radar/signals", json=_payload()).json()["trend_id"]
+
+    denied = client.post(
+        f"/api/radar/trends/{trend_id}/comments", json={"confirmed": False},
+    )
+    queued = client.post(
+        f"/api/radar/trends/{trend_id}/comments", json={"confirmed": True},
+    )
+    job = client.get("/api/radar/comments/jobs/comments123")
+
+    assert denied.status_code == 400
+    assert queued.status_code == 202
+    assert queued.json()["job_id"] == "comments123"
+    assert job.status_code == 200
+    assert job.json()["records"] == 20

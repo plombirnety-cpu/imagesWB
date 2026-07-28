@@ -23,6 +23,7 @@ import requests
 from loguru import logger
 
 from trend_radar import (
+    BrightDataBudgetExceeded,
     SignalInput,
     TrendRadarStore,
     canonical_key,
@@ -178,14 +179,19 @@ def _google_published_at(raw: str | None) -> str:
 
 @dataclass(frozen=True)
 class CollectorConfig:
-    enabled: bool = True
+    enabled: bool = False
     interval_seconds: int = 10_800
     initial_delay_seconds: int = 20
     google_geo: str = "RU"
     telegram_channels: tuple[str, ...] = ()
     discovery_terms_per_run: int = 6
     posts_per_term: int = 5
-    comments_posts_per_run: int = 4
+    comments_posts_per_run: int = 0
+    posts_daily_limit: int = 6
+    comments_daily_limit: int = 1
+    records_daily_limit: int = 1_000
+    comment_max_expected: int = 500
+    price_per_1000: float = 1.5
 
 
 class GoogleTrendsSource:
@@ -480,8 +486,10 @@ class RadarCollector:
         if not self.config.enabled or (self._scheduler and self._scheduler.is_alive()):
             return
         self._stop.clear()
+        # A deploy/restart must never trigger a paid run. The first scheduled
+        # pass is delayed by the full interval; owner-triggered runs remain available.
         self._next_run_at = datetime.fromtimestamp(
-            time.time() + self.config.initial_delay_seconds, tz=timezone.utc,
+            time.time() + self.config.interval_seconds, tz=timezone.utc,
         )
         self._scheduler = threading.Thread(
             target=self._schedule_loop,
@@ -497,7 +505,7 @@ class RadarCollector:
             self._scheduler.join(timeout=2)
 
     def _schedule_loop(self) -> None:
-        if self._stop.wait(self.config.initial_delay_seconds):
+        if self._stop.wait(self.config.interval_seconds):
             return
         while not self._stop.is_set():
             self.queue_run("schedule")
@@ -592,7 +600,6 @@ class RadarCollector:
             promoted_seeds = 0
             if self.tiktok.configured:
                 seen_urls: set[str] = set()
-                comment_budget = self.config.comments_posts_per_run
                 terms = self.store.discovery_terms(
                     self.config.discovery_terms_per_run,
                 )
@@ -608,7 +615,6 @@ class RadarCollector:
                 for term_index, term in enumerate(terms):
                     self._check_cancelled()
                     google_origin_key = self.store.google_origin_for_seed(term)
-                    term_has_comments = False
                     self.store.update_collector_run(
                         run_id, status="running", phase="tiktok_discovery",
                         current_term=term, steps_total=len(terms),
@@ -616,10 +622,27 @@ class RadarCollector:
                         signals_created=created, signals_updated=updated,
                     )
                     try:
+                        usage_id = self.store.reserve_brightdata_request(
+                            "posts",
+                            posts_daily_limit=self.config.posts_daily_limit,
+                            comments_daily_limit=self.config.comments_daily_limit,
+                            records_daily_limit=self.config.records_daily_limit,
+                            run_id=run_id,
+                        )
+                    except BrightDataBudgetExceeded as exc:
+                        errors.append(str(exc))
+                        break
+                    try:
                         records = self.tiktok.discover(
                             term, self.config.posts_per_term,
                         )
                     except Exception as exc:
+                        self.store.complete_brightdata_request(
+                            usage_id,
+                            status=("timed_out" if isinstance(exc, (TimeoutError, requests.Timeout)) else "failed"),
+                            price_per_1000=self.config.price_per_1000,
+                            error=str(exc),
+                        )
                         logger.warning(f"radar TikTok discovery '{term}' failed: {exc}")
                         errors.append(f"TikTok «{term}»: {exc}")
                         self.store.update_collector_run(
@@ -629,6 +652,12 @@ class RadarCollector:
                             signals_created=created, signals_updated=updated,
                         )
                         continue
+                    self.store.complete_brightdata_request(
+                        usage_id,
+                        status="succeeded",
+                        records=len(records),
+                        price_per_1000=self.config.price_per_1000,
+                    )
                     self._check_cancelled()
                     records.sort(
                         key=lambda item: (
@@ -646,21 +675,10 @@ class RadarCollector:
                         if not source_url or source_url in seen_urls:
                             continue
                         seen_urls.add(source_url)
+                        # Comments are intentionally never fetched by an automatic
+                        # or full discovery run. The owner must choose one trend and
+                        # confirm its expected record count in queue_comments().
                         comment_rows: list[dict] = []
-                        if comment_budget > 0 and not term_has_comments:
-                            self._check_cancelled()
-                            self.store.update_collector_run(
-                                run_id, status="running", phase="tiktok_comments",
-                                current_term=term, steps_total=len(terms),
-                                steps_done=term_index, seeds_found=len(unique_seeds) + promoted_seeds,
-                                signals_created=created, signals_updated=updated,
-                            )
-                            try:
-                                comment_rows = self.tiktok.comments(source_url)
-                                term_has_comments = True
-                                comment_budget -= 1
-                            except Exception as exc:
-                                errors.append(f"Комментарии TikTok: {exc}")
                         self._check_cancelled()
                         comment_text = "\n".join(
                             f"@{str(row.get('commenter_user_name') or row.get('username') or '').lstrip('@')}: "
@@ -769,6 +787,105 @@ class RadarCollector:
                 if self._active_run_id == run_id:
                     self._active_run_id = None
 
+    def queue_comments(self, trend_id: str, *, confirmed: bool = False) -> dict:
+        if not confirmed:
+            raise PermissionError("нужно подтвердить платный сбор комментариев")
+        if not self.tiktok.configured:
+            raise RuntimeError("Bright Data не настроен")
+        trend = self.store.get_trend(trend_id)
+        if trend is None:
+            raise KeyError(trend_id)
+        eligible = [
+            observation for observation in trend.get("observations", [])
+            if observation.get("source_type") == "tiktok"
+            and str(observation.get("source_url") or "").startswith("https://")
+            and 0 < int(observation.get("comments_count") or 0)
+            <= self.config.comment_max_expected
+        ]
+        if not eligible:
+            raise ValueError(
+                "нет TikTok-ролика с известным числом комментариев "
+                f"от 1 до {self.config.comment_max_expected}"
+            )
+        observation = max(
+            eligible,
+            key=lambda item: (
+                int(item.get("views") or 0),
+                int(item.get("shares") or 0),
+            ),
+        )
+        usage_id = self.store.reserve_brightdata_request(
+            "comments",
+            posts_daily_limit=self.config.posts_daily_limit,
+            comments_daily_limit=self.config.comments_daily_limit,
+            records_daily_limit=self.config.records_daily_limit,
+            trend_id=trend_id,
+            source_url=observation["source_url"],
+        )
+        try:
+            self._executor.submit(
+                self._run_comments, usage_id, trend, observation,
+            )
+        except Exception as exc:
+            self.store.complete_brightdata_request(
+                usage_id, status="cancelled", error=str(exc),
+                price_per_1000=self.config.price_per_1000,
+            )
+            raise
+        expected = int(observation.get("comments_count") or 0)
+        return {
+            "queued": True,
+            "job_id": usage_id,
+            "trend_id": trend_id,
+            "expected_records": expected,
+            "estimated_max_cost": round(
+                expected / 1000 * self.config.price_per_1000, 4,
+            ),
+        }
+
+    def _run_comments(self, usage_id: str, trend: dict, observation: dict) -> None:
+        try:
+            rows = self.tiktok.comments(observation["source_url"])
+            comment_text = "\n".join(
+                f"@{str(row.get('commenter_user_name') or row.get('username') or '').lstrip('@')}: "
+                f"{row.get('comment_text') or row.get('text') or ''}"
+                for row in rows
+                if row.get("comment_text") or row.get("text")
+            )
+            self.store.ingest_signal(
+                SignalInput(
+                    term=trend["display_name"],
+                    source_type="tiktok",
+                    source_url=observation["source_url"],
+                    author=str(observation.get("author") or ""),
+                    caption=str(observation.get("caption") or ""),
+                    comments=comment_text,
+                    published_at=observation.get("published_at"),
+                    views=int(observation.get("views") or 0),
+                    likes=int(observation.get("likes") or 0),
+                    shares=int(observation.get("shares") or 0),
+                    comments_count=max(
+                        int(observation.get("comments_count") or 0), len(rows),
+                    ),
+                    google_origin_key=str(trend.get("google_origin_key") or ""),
+                )
+            )
+            self.store.complete_brightdata_request(
+                usage_id, status="succeeded", records=len(rows),
+                price_per_1000=self.config.price_per_1000,
+            )
+        except Exception as exc:
+            self.store.complete_brightdata_request(
+                usage_id,
+                status=("timed_out" if isinstance(exc, (TimeoutError, requests.Timeout)) else "failed"),
+                price_per_1000=self.config.price_per_1000,
+                error=str(exc),
+            )
+            logger.warning(f"manual TikTok comments failed: {exc}")
+
+    def comment_job(self, usage_id: str) -> dict | None:
+        return self.store.brightdata_job(usage_id)
+
     def status(self) -> dict:
         latest = self.store.latest_collector_run()
         return {
@@ -789,6 +906,16 @@ class RadarCollector:
                     "configured": self.tiktok.configured,
                     "provider": "Bright Data",
                 },
+            },
+            "budget": self.store.brightdata_usage_summary(
+                posts_daily_limit=self.config.posts_daily_limit,
+                comments_daily_limit=self.config.comments_daily_limit,
+                records_daily_limit=self.config.records_daily_limit,
+                price_per_1000=self.config.price_per_1000,
+            ),
+            "manual_comments": {
+                "max_expected_records": self.config.comment_max_expected,
+                "price_per_1000": self.config.price_per_1000,
             },
             "latest_run": latest,
         }

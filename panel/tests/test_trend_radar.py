@@ -700,3 +700,70 @@ def test_generation_requires_owner_approval(store):
     assert "Воздухан" in prompt
     assert "не стикер" in prompt
     assert "green/blue chroma" in prompt
+
+def test_brightdata_budget_reserves_before_result_and_blocks_extra_request(tmp_path):
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=timezone.utc)
+
+    first = store.reserve_brightdata_request(
+        "posts",
+        posts_daily_limit=1,
+        comments_daily_limit=1,
+        records_daily_limit=1000,
+        now=now,
+    )
+    with pytest.raises(trend_radar.BrightDataBudgetExceeded):
+        store.reserve_brightdata_request(
+            "posts",
+            posts_daily_limit=1,
+            comments_daily_limit=1,
+            records_daily_limit=1000,
+            now=now,
+        )
+    store.complete_brightdata_request(
+        first, status="timed_out", error="provider timeout", now=now,
+    )
+
+    summary = store.brightdata_usage_summary(
+        posts_daily_limit=1,
+        comments_daily_limit=1,
+        records_daily_limit=1000,
+        now=now,
+    )
+    assert summary["posts"]["requests"] == 1
+    assert summary["posts"]["remaining"] == 0
+    assert summary["blocked"] is True
+
+
+def test_brightdata_records_and_estimated_cost_are_persisted(tmp_path):
+    store = trend_radar.TrendRadarStore(tmp_path / "radar.sqlite3")
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=timezone.utc)
+    usage_id = store.reserve_brightdata_request(
+        "comments",
+        posts_daily_limit=6,
+        comments_daily_limit=1,
+        records_daily_limit=1000,
+        trend_id="trend-1",
+        source_url="https://www.tiktok.com/@creator/video/1",
+        now=now,
+    )
+
+    job = store.complete_brightdata_request(
+        usage_id,
+        status="succeeded",
+        records=400,
+        price_per_1000=1.5,
+        now=now,
+    )
+    summary = store.brightdata_usage_summary(
+        posts_daily_limit=6,
+        comments_daily_limit=1,
+        records_daily_limit=1000,
+        price_per_1000=1.5,
+        now=now,
+    )
+
+    assert job["records"] == 400
+    assert job["estimated_cost"] == pytest.approx(0.6)
+    assert summary["records"]["used"] == 400
+    assert summary["estimated_cost"] == pytest.approx(0.6)

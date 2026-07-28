@@ -1,5 +1,41 @@
 # PROJECT_STATE — print-factory-nb
 
+## 2026-07-28 — постоянный предохранитель Bright Data (deploy-кандидат)
+
+### Контракт расхода
+
+- `PANEL_RADAR_AUTO_ENABLED=off` является безопасным default и production
+  значением. Ручной owner-run не зависит от включения расписания.
+- Scheduler больше не использует `PANEL_RADAR_INITIAL_DELAY` для первого прохода:
+  даже при явном включении расписания после рестарта он ждёт полный интервал.
+- Перед каждым платным POST выполняется атомарная резервация в новой таблице
+  `brightdata_usage`. Reserved/failed/timed_out попытки считаются в дневном
+  лимите, поскольку Bright Data мог создать snapshot до клиентского timeout.
+- Лимиты UTC-суток: posts discovery `6`, ручные comments `1`, суммарные записи
+  `1000`; настройки вынесены в `PANEL_BRIGHTDATA_*`.
+- Автоматические комментарии удалены из полного прохода. Старый параметр
+  `PANEL_RADAR_COMMENTS_POSTS_PER_RUN` имеет default/production `0` и не может
+  вернуть старое поведение.
+
+### Ручные комментарии и UI
+
+- `POST /api/radar/trends/{trend_id}/comments` требует `confirmed=true`, выбирает
+  только TikTok-ролик с известными `1..500` комментариями, резервирует единственный
+  дневной слот и запускает persisted job на том же последовательном executor.
+- `GET /api/radar/comments/jobs/{job_id}` показывает terminal status и фактическое
+  число записей. При timeout job получает `timed_out`; автоматического повтора нет.
+- Карточка тренда показывает кнопку ручных комментариев, confirmation с ожидаемым
+  числом записей и максимальной оценкой. Статус радара показывает requests/limits,
+  records и estimated cost.
+
+### Проверка до деплоя
+
+- Профильный набор: **55 passed**.
+- `py_compile` для store/collector/app/settings, JS syntax и `git diff --check` — OK.
+- Полный Windows-набор: **418 passed, 4 failed**; все четыре — прежние ограничения
+  `multiprocessing/spawn` в тестовых monkeypatch генерации, не связанные с радаром.
+  Перед production обязателен полный Linux-кандидат.
+- Production-деплой и импорт исторических 93 Bright Data snapshots ещё не выполнены.
 ## 2026-07-28 — аварийное отключение Bright Data
 
 - После подтверждения владельца `panel/docker-compose.yml` переключает
@@ -42,8 +78,8 @@
 - Current user-token позволяет читать snapshots, но `/customer/balance` отвечает
   403, поэтому точная финансовая проводка доступна только в Cost Explorer либо
   через finance/admin API key.
-- На этом этапе выполнена только read-only диагностика; автоматический сбор и
-  код ещё не менялись.
+- После read-only диагностики автоматическое расписание аварийно отключено;
+  постоянный предохранитель описан в верхнем разделе.
 
 ## 2026-07-28 — обязательный рост не менее +3 000 запросов/месяц
 

@@ -247,8 +247,8 @@
     <section class="view radar-view" id="radarView" style="display:none">
       <div class="radar-head">
         <div>
-          <h2>Автоматический радар мемов</h2>
-          <p>Система сама собирает свежие темы, ищет TikTok-ролики, отслеживает рост и повторяющиеся слова в комментариях. Вам остаётся проверить кандидата, одобрить его и отправить в генерацию принтов.</p>
+          <h2>Радар мемов с контролем расходов</h2>
+          <p>Бесплатные источники собирают темы, а платный TikTok-поиск запускается только вручную и ограничен дневным бюджетом. Комментарии загружаются отдельно — только для выбранной вами темы после подтверждения цены.</p>
         </div>
         <button id="radarRefresh" type="button">Обновить</button>
       </div>
@@ -257,12 +257,13 @@
         <div>
           <div class="collector-title" id="collectorTitle">Проверяю состояние автопоиска…</div>
           <div class="collector-state" id="collectorState"></div>
+          <div class="collector-state" id="collectorBudget"></div>
           <div class="collector-providers" id="collectorProviders"></div>
         </div>
         <div class="collector-actions">
           <button id="collectorRun" type="button">Проверить тренды сейчас</button>
           <button id="collectorStop" class="stop" type="button" hidden>Остановить проверку</button>
-          <div class="collector-note" id="collectorNote">Ручные ссылки для обычной работы не нужны.</div>
+          <div class="collector-note" id="collectorNote">Автоматические платные проверки отключены.</div>
         </div>
       </div>
 
@@ -385,6 +386,9 @@ let previewItems = [], previewIndex = 0;
 let themeOptionalStyleIds = new Set();
 let collectorRefreshKey = null;
 let collectorRunning = false;
+let brightDataPrice = 1.5;
+let manualCommentMax = 500;
+let commentRequestsRemaining = 0;
 let collectorProgressLabel = '';
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');
@@ -813,10 +817,70 @@ function trendCard(trend){
   generate.disabled = !trend.approved || !opportunity.qualified;
   generate.title = trend.approved ? '' : 'Сначала одобрите тренд';
   generate.onclick = () => generateTrend(trend.id, trend.display_name);
-  actions.append(approve, reject, generate);
+  const comments = document.createElement('button');
+  comments.type = 'button';
+  comments.textContent = 'Загрузить комментарии';
+  const eligibleComments = (trend.observations || [])
+    .filter(item => item.source_type === 'tiktok' && Number(item.comments_count) > 0 &&
+      Number(item.comments_count) <= manualCommentMax)
+    .sort((a,b) => Number(b.views || 0) - Number(a.views || 0));
+  comments.disabled = !eligibleComments.length || commentRequestsRemaining <= 0;
+  if(!eligibleComments.length){
+    comments.title = `Нужен ролик с 1–${manualCommentMax} комментариями`;
+  }else if(commentRequestsRemaining <= 0){
+    comments.title = 'Дневной лимит комментариев исчерпан';
+  }
+  comments.onclick = () => collectTrendComments(
+    trend.id, trend.display_name, eligibleComments[0], comments,
+  );
+  actions.append(approve, reject, comments, generate);
 
   card.append(titleRow, body, scores, opportunityBox, hashtags, terms, actions);
   return card;
+}
+
+async function collectTrendComments(trendId, trendName, observation, button){
+  const records = Number(observation.comments_count || 0);
+  const estimate = (records / 1000 * brightDataPrice).toFixed(2);
+  if(!confirm(`Загрузить до ${records.toLocaleString('ru-RU')} комментариев для «${trendName}»?\nОценка максимум: $${estimate}. Повторного запроса при таймауте не будет.`)) return;
+  button.disabled = true;
+  button.textContent = 'Поставлено в очередь…';
+  try{
+    const response = await fetch(`/api/radar/trends/${trendId}/comments`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({confirmed:true}),
+    });
+    const data = await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(data.detail || 'Не удалось запустить сбор комментариев');
+    $('#collectorNote').textContent = `Комментарии для «${trendName}» загружаются. Зарезервирован 1 дневной слот.`;
+    await loadCollectorStatus();
+    pollCommentJob(data.job_id, trendName);
+  }catch(error){
+    button.disabled = false;
+    button.textContent = 'Загрузить комментарии';
+    $('#collectorNote').textContent = error.message;
+  }
+}
+
+async function pollCommentJob(jobId, trendName){
+  for(let attempt = 0; attempt < 40; attempt++){
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    try{
+      const response = await fetch(`/api/radar/comments/jobs/${jobId}`);
+      if(!response.ok) return;
+      const job = await response.json();
+      if(job.status === 'reserved') continue;
+      if(job.status === 'succeeded'){
+        $('#collectorNote').textContent = `Комментарии для «${trendName}» загружены: ${Number(job.records || 0).toLocaleString('ru-RU')}.`;
+        await loadRadar();
+      }else{
+        $('#collectorNote').textContent = `Комментарии не загружены (${job.status}). Дополнительный платный повтор не выполнялся.`;
+        await loadCollectorStatus();
+      }
+      return;
+    }catch(_error){ return; }
+  }
+  $('#collectorNote').textContent = 'Bright Data ещё обрабатывает комментарии. Обновите экран позже — повторный запрос не отправлялся.';
 }
 
 function formatDate(value){
@@ -848,7 +912,7 @@ function refreshOpportunityEmptyState(){
 }
 
 async function loadCollectorStatus(){
-  const title = $('#collectorTitle'), state = $('#collectorState'),
+  const title = $('#collectorTitle'), state = $('#collectorState'), budgetLine = $('#collectorBudget'),
         providers = $('#collectorProviders'), button = $('#collectorRun'), stop = $('#collectorStop'),
         note = $('#collectorNote');
   try{
@@ -859,8 +923,8 @@ async function loadCollectorStatus(){
     collectorRunning = Boolean(data.running);
     collectorProgressLabel = run?.steps_total
       ? `${run.steps_done}/${run.steps_total}` : '';
-    title.textContent = data.running ? 'Автопоиск выполняется…'
-      : (data.enabled ? 'Автопоиск включён' : 'Автопоиск выключен');
+    title.textContent = data.running ? 'Ручная проверка выполняется…'
+      : (data.enabled ? 'Расписание включено (без запуска после рестарта)' : 'Безопасный ручной режим');
     const parts = [];
     if(run) parts.push(`Последняя проверка: ${formatDate(run.finished_at || run.started_at || run.created_at)}`);
     if(run?.status === 'succeeded'){
@@ -881,7 +945,7 @@ async function loadCollectorStatus(){
       parts.push('остановлено владельцем');
     }
     if(data.next_run_at) parts.push(`следующая: ${formatDate(data.next_run_at)}`);
-    state.textContent = parts.join(' · ') || 'Первый автоматический запуск ещё не выполнялся.';
+    state.textContent = parts.join(' · ') || 'Платная проверка ещё не запускалась.';
     providers.innerHTML = '';
     const p = data.providers;
     providers.append(
@@ -889,12 +953,19 @@ async function loadCollectorStatus(){
       providerPill(`Telegram (${p.telegram.channels})`, p.telegram.configured, 'добавьте каналы один раз'),
       providerPill('TikTok', p.tiktok.configured, 'нужен ключ провайдера'),
     );
-    button.disabled = data.running || !data.enabled;
+    const budget = data.budget || {};
+    brightDataPrice = Number(data.manual_comments?.price_per_1000 || budget.price_per_1000 || 1.5);
+    manualCommentMax = Number(data.manual_comments?.max_expected_records || 500);
+    commentRequestsRemaining = Number(budget.comments?.remaining || 0);
+    budgetLine.textContent = budget.posts
+      ? `Сегодня UTC: поиск ${budget.posts.requests}/${budget.posts.limit}; комментарии ${budget.comments.requests}/${budget.comments.limit}; записей ${Number(budget.records.used).toLocaleString('ru-RU')}/${Number(budget.records.limit).toLocaleString('ru-RU')}; оценка $${Number(budget.estimated_cost || 0).toFixed(2)}`
+      : 'Данные дневного бюджета недоступны.';
+    button.disabled = data.running || !p.tiktok.configured || Number(budget.posts?.remaining || 0) <= 0;
     stop.hidden = !data.running;
     stop.disabled = run?.phase === 'stopping';
     note.textContent = p.tiktok.configured
-      ? 'Система сама ищет ролики и комментарии. Ручные ссылки не нужны.'
-      : 'Бесплатные темы уже собираются. Для реального TikTok-поиска нужен один ключ Bright Data в настройках сервера.';
+      ? 'Платный поиск запускается только этой кнопкой. Комментарии — отдельно у выбранной темы после подтверждения цены.'
+      : 'Бесплатные темы доступны. TikTok-поиск выключен: ключ Bright Data не настроен.';
     const nextRefreshKey = run ? `${run.id || ''}:${run.status}:${run.finished_at || ''}` : 'none';
     if(collectorRefreshKey && nextRefreshKey !== collectorRefreshKey &&
        run && ['succeeded','failed','cancelled'].includes(run.status)){
@@ -906,7 +977,7 @@ async function loadCollectorStatus(){
   }catch(e){
     collectorRunning = false;
     collectorProgressLabel = '';
-    title.textContent = 'Не удалось проверить автопоиск';
+    title.textContent = 'Не удалось проверить радар';
     state.textContent = e.message;
     providers.innerHTML = '';
     button.disabled = false;

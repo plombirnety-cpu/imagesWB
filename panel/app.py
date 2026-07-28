@@ -87,6 +87,11 @@ _radar_collector = radar_collector.RadarCollector(
         discovery_terms_per_run=settings.RADAR_DISCOVERY_TERMS_PER_RUN,
         posts_per_term=settings.RADAR_POSTS_PER_TERM,
         comments_posts_per_run=settings.RADAR_COMMENTS_POSTS_PER_RUN,
+        posts_daily_limit=settings.BRIGHTDATA_POSTS_DAILY_LIMIT,
+        comments_daily_limit=settings.BRIGHTDATA_COMMENTS_DAILY_LIMIT,
+        records_daily_limit=settings.BRIGHTDATA_RECORDS_DAILY_LIMIT,
+        comment_max_expected=settings.BRIGHTDATA_COMMENT_MAX_EXPECTED,
+        price_per_1000=settings.BRIGHTDATA_PRICE_PER_1000,
     ),
     google=radar_collector.GoogleTrendsSource(
         geo=settings.RADAR_GOOGLE_TRENDS_GEO,
@@ -136,6 +141,10 @@ class RadarBatchRequest(BaseModel):
 
 class RadarGenerateRequest(BaseModel):
     count: int = Field(default=3, ge=1, le=6)
+
+
+class RadarCommentsRequest(BaseModel):
+    confirmed: bool = False
 
 
 def _auth_enabled() -> bool:
@@ -430,6 +439,30 @@ def api_radar_collector_run():
 @app.post("/api/radar/collector/stop")
 def api_radar_collector_stop():
     return _radar_collector.cancel_run()
+
+
+@app.post("/api/radar/trends/{trend_id}/comments", status_code=202)
+def api_radar_comments(trend_id: str, req: RadarCommentsRequest):
+    try:
+        return _radar_collector.queue_comments(
+            trend_id, confirmed=req.confirmed,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="тренд не найден") from exc
+    except trend_radar.BrightDataBudgetExceeded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/radar/comments/jobs/{job_id}")
+def api_radar_comments_job(job_id: str):
+    job = _radar_collector.comment_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="задание комментариев не найдено")
+    return job
 
 
 @app.get("/api/radar/seeds")
