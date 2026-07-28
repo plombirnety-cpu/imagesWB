@@ -30,10 +30,21 @@
 - В карточке подтверждённой идеи виден текст «расчётно +N запросов/мес.».
 - Добавлены граничные тесты 2 970 / 3 000 и регрессии для нового и ускоряющегося
   Google-сигнала.
-- Профильный набор радара и UI: **42/42 passed**; `py_compile` и
+- Профильный набор радара и UI: **42/42 passed**; `py_compile`, JS syntax и
   `git diff --check` прошли.
-- Четыре старых Windows spawn-теста генератора требуют Linux-проверки, как и в
-  предыдущих релизах; они не затрагивают новую логику.
+- Полный Linux-кандидат: **90/90 passed**. Четыре платформенных Windows spawn-
+  сценария генератора проходят внутри целевого Linux-контейнера.
+
+### Production
+
+- Код: commit `1f744ab`, отправлен в `origin/main`.
+- Image: `sha256:02f84b8e250a2be345fc1466bc75821cf0da3259bdac24f4c6f56b0bc62ab188`;
+  контейнер healthy, 0 рестартов.
+- Live API: две подтверждённые идеи (`Odyssey`, `картаполов`), у обеих
+  `monthly_growth_estimate=15000`, threshold `3000`, подтверждение `true`.
+- Rollback: image `print-factory-panel:backup-pre-monthly-growth-1f744ab`, source
+  `/opt/print-panel-backup-pre-monthly-growth-1f744ab`, DB backup
+  `trend_radar.sqlite3.pre-monthly-growth-1f744ab`.
 
 ## 2026-07-28 — исправление пустой выдачи Google→TikTok
 

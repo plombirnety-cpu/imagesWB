@@ -16,9 +16,16 @@
   сигнал начинается с 500 за сутки (расчётно 15 000/мес.), ускорение — с прироста
   1 000 (расчётно 30 000/мес.). Отдельный порог всё равно зафиксирован в контракте,
   чтобы его можно было независимо менять и тестировать.
-- Профильная проверка: **42/42 passed**, `py_compile` и `git diff --check` чистые.
-  Четыре известные Windows spawn-теста генератора не связаны с радаром и будут
-  перепроверены полным набором внутри Linux-кандидата перед production.
+- Профильная проверка: **42/42 passed**, `py_compile`, JS syntax и
+  `git diff --check` чистые. Полный Linux-кандидат: **90/90 passed**.
+- Production выложен из commit `1f744ab`, image
+  `sha256:02f84b8e250a2be345fc1466bc75821cf0da3259bdac24f4c6f56b0bc62ab188`;
+  контейнер healthy, 0 рестартов.
+- Живой API вернул две подтверждённые идеи; у `Odyssey` и `картаполов` расчётный
+  рост 15 000/мес., threshold 3 000, `monthly_growth_confirmed=true`.
+- Откат: image `print-factory-panel:backup-pre-monthly-growth-1f744ab`, исходники
+  `/opt/print-panel-backup-pre-monthly-growth-1f744ab`, SQLite backup
+  `trend_radar.sqlite3.pre-monthly-growth-1f744ab`.
 
 ## Актуально после исправления пустой выдачи (2026-07-28)
 
