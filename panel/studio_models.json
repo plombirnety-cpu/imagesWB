@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "alisa",
+      "name": "Алиса",
+      "gender": "female",
+      "image": "alisa.png",
+      "description": "Спокойный fashion-образ, каштановые волосы",
+      "identity_prompt": "23-year-old Eastern European woman, softly rounded oval face, large gray-blue eyes, straight glossy chestnut hair just below shoulders with a center part, light warm skin, slim youthful build"
+    },
+    {
+      "id": "maya",
+      "name": "Майя",
+      "gender": "female",
+      "image": "maya.png",
+      "description": "Тёплый типаж, тёмные волнистые волосы",
+      "identity_prompt": "24-year-old woman of mixed Central Asian and Eastern European appearance, large almond dark-brown eyes, soft cheekbones, long dark wavy hair in a loose high ponytail, warm olive skin, slender youthful build"
+    },
+    {
+      "id": "sofia",
+      "name": "София",
+      "gender": "female",
+      "image": "sofia.png",
+      "description": "Рыжий боб, веснушки, яркий editorial-образ",
+      "identity_prompt": "23-year-old Eastern European woman, vivid green eyes, fair skin with light natural freckles, playful chin-length copper bob, petite athletic build"
+    },
+    {
+      "id": "artem",
+      "name": "Артём",
+      "gender": "male",
+      "image": "artem.png",
+      "description": "Сдержанный городской fashion-образ",
+      "identity_prompt": "24-year-old Eastern European man, youthful lean face, hazel eyes, short tousled dark-blond modern textured crop, completely clean-shaven, fair neutral skin, lean athletic build"
+    },
+    {
+      "id": "maksim",
+      "name": "Максим",
+      "gender": "male",
+      "image": "maksim.png",
+      "description": "Атлетичный типаж с тёмными волосами",
+      "identity_prompt": "25-year-old man of mixed Eastern European and Caucasus appearance, youthful oval face, dark-brown eyes, thick brows, short black wavy hair with a modern taper, completely clean-shaven, warm medium skin, athletic build"
+    }
+  ]
+}

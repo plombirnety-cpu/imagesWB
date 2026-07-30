@@ -174,13 +174,34 @@
   .trend-source{color:#83aef2;text-decoration:none;font-size:11px}
   .empty-radar{color:var(--muted);text-align:center;padding:42px 20px;border:1px dashed var(--line);
     border-radius:10px}
+
+  .studio-view{padding:16px;overflow-y:auto;gap:16px}
+  .studio-head h2{font-size:20px;margin:0 0 6px}.studio-head p{margin:0;color:var(--muted);font-size:12px;line-height:1.5;max-width:900px}
+  .studio-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:14px}
+  .studio-label{font-size:12px;font-weight:700;color:#cbd2df;margin-bottom:8px}
+  .model-grid{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px}
+  .model-card{padding:0;overflow:hidden;text-align:left;background:var(--panel2);border:2px solid transparent}
+  .model-card:hover{border-color:#596071}.model-card.selected{border-color:#2b85ef;background:#263b55}
+  .model-card img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;object-position:center top;background:#17181c}
+  .model-card strong,.model-card span{display:block;padding:0 8px}.model-card strong{font-size:13px;margin-top:7px}.model-card span{font-size:10px;color:var(--muted);padding-bottom:8px;line-height:1.3}
+  .studio-controls{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}
+  .studio-upload{border:1px dashed #58739d;border-radius:10px;padding:14px;background:#222a36}
+  .studio-upload input{width:100%;color:var(--muted)}.studio-upload-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .studio-file{font-size:10px;padding:5px 8px;border-radius:999px;background:#34445a;color:#c9ddfa;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .studio-actions{display:flex;gap:8px}.studio-actions button{flex:1}.studio-actions .primary{width:auto}
+  .studio-progress{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .studio-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;align-content:start}
+  .studio-grid .card .th{aspect-ratio:2/3;object-fit:cover;background:#17181c}
+  .studio-empty{color:var(--muted);text-align:center;padding:50px 20px;border:1px dashed var(--line);border-radius:10px}
   @media(max-width:900px){
     .app{display:block}.side{width:100%;min-width:0;max-height:none}.main{min-height:80vh}
     .collector-panel{grid-template-columns:1fr}
+    .model-grid{grid-template-columns:repeat(3,1fr)}.studio-controls{grid-template-columns:1fr 1fr}
     .radar-form{grid-template-columns:1fr 1fr}.radar-form .wide{grid-column:span 2}
   }
   @media(max-width:580px){
     .radar-form{grid-template-columns:1fr}.radar-form .wide,.radar-form .full{grid-column:1}
+    .model-grid{grid-template-columns:1fr 1fr}.studio-controls{grid-template-columns:1fr}
   }
 </style>
 </head>
@@ -227,6 +248,7 @@
   <main class="main">
     <nav class="view-tabs" aria-label="Разделы панели">
       <button id="generationTab" class="active" type="button">Генерация</button>
+      <button id="studioTab" type="button">Виртуальная фотостудия</button>
       <button id="radarTab" type="button">Радар мемов</button>
     </nav>
     <section class="view" id="generationView">
@@ -241,6 +263,53 @@
       </div>
       <div class="grid" id="grid">
         <div class="hint" id="hint">Выбери стили, укажи тему или персонажей и нажми «Генерировать» — превью появятся здесь по мере готовности.</div>
+      </div>
+    </section>
+
+
+    <section class="view studio-view" id="studioView" style="display:none">
+      <div class="studio-head">
+        <h2>Виртуальная фотостудия</h2>
+        <p>Выберите постоянную модель, цвет свободной футболки и сторону печати. Загрузите до шести готовых принтов без фона — фотостудия создаст близкие поясные кадры в разных позах, сохраняя лицо модели и исходный рисунок.</p>
+      </div>
+      <div class="studio-panel">
+        <div>
+          <div class="studio-label">1. Постоянная фотомодель</div>
+          <div class="model-grid" id="studioModels"><div class="studio-empty">Загружаю моделей…</div></div>
+        </div>
+        <div class="studio-controls">
+          <label class="fld">Цвет футболки
+            <select id="studioColor"><option value="black">Чёрная</option><option value="white">Белая</option></select>
+          </label>
+          <label class="fld">Расположение принта
+            <select id="studioPlacement"><option value="front">Спереди</option><option value="back">На спине</option></select>
+          </label>
+          <label class="fld">Поз на каждый принт
+            <select id="studioPoses"><option value="1">1 поза</option><option value="2" selected>2 разные позы</option><option value="3">3 разные позы</option><option value="4">4 разные позы</option></select>
+          </label>
+          <label class="fld">Качество Gemini
+            <select id="studioQuality"><option value="standard" selected>Стандарт — быстрее</option><option value="premium">Премиум — дороже</option></select>
+          </label>
+        </div>
+        <label class="studio-upload">
+          <span class="studio-label">2. Принты PNG/WebP/JPG — до 6 файлов, 15 МБ каждый</span>
+          <input id="studioFiles" type="file" accept="image/png,image/webp,image/jpeg" multiple>
+          <span class="hint-sm">Лучший результат дают прозрачные PNG из Print Factory. Максимум 12 итоговых кадров за запуск.</span>
+          <span class="studio-upload-list" id="studioFileList"></span>
+        </label>
+        <div class="studio-actions">
+          <button class="primary" id="studioRun" type="button">Создать фотосессию</button>
+          <button class="danger" id="studioStop" type="button" style="display:none">Остановить</button>
+          <button class="blue" id="studioDownload" type="button" style="display:none">Скачать ZIP</button>
+        </div>
+        <div class="hint-sm" id="studioError" style="color:var(--danger)"></div>
+      </div>
+      <div class="studio-progress" id="studioProgress" style="display:none">
+        <div class="progbar"><i id="studioProgressBar"></i></div>
+        <div class="progtext" id="studioProgressText">Запускаю фотостудию…</div>
+      </div>
+      <div class="studio-grid" id="studioGrid">
+        <div class="studio-empty">Здесь появятся готовые кадры. Нажмите на результат, чтобы открыть его крупно и скачать отдельно.</div>
       </div>
     </section>
 
@@ -378,10 +447,19 @@ const stylesEl = $('#styles'), themeEl = $('#theme'), charsEl = $('#characters')
       radarTab = $('#radarTab'), generationView = $('#generationView'),
       radarView = $('#radarView'), radarGrid = $('#radarGrid'),
       candidateGrid = $('#candidateGrid'), opportunitySummary = $('#opportunitySummary'),
-      radarForm = $('#radarForm'), radarFormStatus = $('#radarFormStatus');
+      radarForm = $('#radarForm'), radarFormStatus = $('#radarFormStatus'),
+      studioTab = $('#studioTab'), studioView = $('#studioView'),
+      studioModels = $('#studioModels'), studioFiles = $('#studioFiles'),
+      studioFileList = $('#studioFileList'), studioRun = $('#studioRun'),
+      studioStop = $('#studioStop'), studioDownload = $('#studioDownload'),
+      studioProgress = $('#studioProgress'), studioProgressBar = $('#studioProgressBar'),
+      studioProgressText = $('#studioProgressText'), studioGrid = $('#studioGrid'),
+      studioError = $('#studioError');
 
 let pollTimer = null, currentJob = null;
 let radarPollTimer = null;
+let currentStudioJob = null, studioPollTimer = null, selectedStudioModel = null;
+let studioModelsLoaded = false;
 let previewItems = [], previewIndex = 0;
 let themeOptionalStyleIds = new Set();
 let collectorRefreshKey = null;
@@ -395,11 +473,16 @@ function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show'
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
 
 function switchView(view){
+  const generation = view === 'generation';
+  const studio = view === 'studio';
   const radar = view === 'radar';
-  generationView.style.display = radar ? 'none' : 'flex';
+  generationView.style.display = generation ? 'flex' : 'none';
+  studioView.style.display = studio ? 'flex' : 'none';
   radarView.style.display = radar ? 'flex' : 'none';
-  generationTab.classList.toggle('active', !radar);
+  generationTab.classList.toggle('active', generation);
+  studioTab.classList.toggle('active', studio);
   radarTab.classList.toggle('active', radar);
+  if(studio) loadStudioModels();
   if(radar){
     loadRadar();
     clearInterval(radarPollTimer);
@@ -410,6 +493,7 @@ function switchView(view){
   }
 }
 generationTab.onclick = () => switchView('generation');
+studioTab.onclick = () => switchView('studio');
 radarTab.onclick = () => switchView('radar');
 
 async function loadStyles(){
@@ -438,6 +522,127 @@ async function loadStyles(){
   }
 }
 loadStyles();
+
+
+async function loadStudioModels(){
+  if(studioModelsLoaded) return;
+  studioModels.innerHTML = '<div class="studio-empty">Загружаю моделей…</div>';
+  try{
+    const response = await fetch('/api/studio/models');
+    if(!response.ok) throw new Error('не удалось загрузить моделей');
+    const models = await response.json();
+    studioModels.innerHTML = '';
+    models.forEach(model => {
+      const card = document.createElement('button');
+      card.type = 'button'; card.className = 'model-card'; card.disabled = !model.available;
+      const image = document.createElement('img'); image.src = model.image_url; image.alt = model.name;
+      const name = document.createElement('strong'); name.textContent = model.name;
+      const description = document.createElement('span');
+      description.textContent = model.available ? model.description : 'Эталон ещё не установлен';
+      card.append(image, name, description);
+      card.onclick = () => {
+        selectedStudioModel = model.id;
+        studioModels.querySelectorAll('.model-card').forEach(item => item.classList.toggle('selected', item === card));
+      };
+      studioModels.append(card);
+      if(!selectedStudioModel && model.available) card.click();
+    });
+    studioModelsLoaded = true;
+  }catch(error){
+    studioModels.innerHTML = '';
+    const empty = document.createElement('div'); empty.className = 'studio-empty'; empty.textContent = error.message;
+    studioModels.append(empty);
+  }
+}
+
+function renderStudioFiles(){
+  const files = [...studioFiles.files];
+  studioFileList.innerHTML = '';
+  files.forEach(file => {
+    const chip = document.createElement('span'); chip.className = 'studio-file';
+    chip.textContent = file.name; chip.title = file.name; studioFileList.append(chip);
+  });
+}
+studioFiles.addEventListener('change', renderStudioFiles);
+
+function renderStudioItems(items){
+  previewItems = items.filter(item => item.ok);
+  studioGrid.innerHTML = '';
+  if(!items.length){ studioGrid.innerHTML = '<div class="studio-empty">Фотостудия готовит первый кадр…</div>'; return; }
+  items.forEach(item => studioGrid.append(cardFor(item)));
+}
+
+function stopStudioPolling(){
+  if(studioPollTimer){ clearInterval(studioPollTimer); studioPollTimer = null; }
+}
+
+async function pollStudioJob(jobId){
+  try{
+    const response = await fetch('/api/studio/jobs/' + jobId);
+    if(!response.ok) throw new Error('задание фотостудии не найдено');
+    const job = await response.json();
+    const total = job.total || 0;
+    const okCount = (job.items || []).filter(item => item.ok).length;
+    const failCount = (job.items || []).filter(item => !item.ok).length;
+    const percent = total ? Math.round(job.done * 100 / total) : 0;
+    studioProgressBar.style.width = percent + '%';
+    if(job.status === 'queued') studioProgressText.textContent = 'В очереди…';
+    else if(job.status === 'cancelling') studioProgressText.textContent = 'Останавливаю… Готово ' + okCount + ' из ' + total;
+    else if(job.status === 'cancelled') studioProgressText.textContent = 'Остановлено. Сохранено ' + okCount + ' из ' + total;
+    else studioProgressText.textContent = job.done + '/' + total + ' обработано · ' + okCount + ' готово' + (failCount ? ' · ' + failCount + ' с ошибкой' : '');
+    renderStudioItems(job.items || []);
+    studioStop.style.display = job.can_cancel ? 'block' : 'none';
+    studioStop.disabled = job.status === 'cancelling';
+    const terminal = ['done','error','cancelled'].includes(job.status);
+    studioDownload.style.display = terminal && okCount ? 'block' : 'none';
+    if(okCount) studioDownload.onclick = () => { window.location.href = '/api/studio/download/' + jobId; };
+    if(terminal){
+      stopStudioPolling(); studioRun.disabled = false;
+      if(job.status === 'error') toast('Фотостудия: ' + (job.error || 'ошибка'));
+      else if(job.status === 'cancelled') toast('Фотостудия остановлена: ' + okCount + '/' + total);
+      else toast('Фотосессия готова: ' + okCount + '/' + total);
+    }
+  }catch(error){ studioError.textContent = error.message; }
+}
+
+studioRun.onclick = async () => {
+  studioError.textContent = '';
+  const files = [...studioFiles.files];
+  const poseCount = Number($('#studioPoses').value) || 1;
+  if(!selectedStudioModel){ studioError.textContent = 'Выберите фотомодель.'; return; }
+  if(!files.length){ studioError.textContent = 'Загрузите хотя бы один принт.'; return; }
+  if(files.length > 6){ studioError.textContent = 'За один запуск можно загрузить максимум 6 принтов.'; return; }
+  if(files.length * poseCount > 12){ studioError.textContent = 'Максимум 12 кадров: уменьшите число принтов или поз.'; return; }
+  const quality = $('#studioQuality').value;
+  if(quality === 'premium' && !confirm('Премиум-режим использует более дорогую модель Gemini. Продолжить?')) return;
+  const form = new FormData();
+  form.append('model_id', selectedStudioModel);
+  form.append('shirt_color', $('#studioColor').value);
+  form.append('placement', $('#studioPlacement').value);
+  form.append('pose_count', String(poseCount));
+  form.append('quality', quality);
+  files.forEach(file => form.append('prints', file, file.name));
+  studioRun.disabled = true; studioStop.style.display = 'none'; studioDownload.style.display = 'none';
+  studioProgress.style.display = 'block'; studioProgressBar.style.width = '0%';
+  studioProgressText.textContent = 'Загружаю принты и запускаю фотостудию…';
+  studioGrid.innerHTML = '<div class="studio-empty">Подготавливаю фотосессию…</div>';
+  try{
+    const response = await fetch('/api/studio/render', {method:'POST', body:form});
+    if(!response.ok){ const error = await response.json().catch(() => ({detail:'ошибка запуска'})); throw new Error(error.detail || 'ошибка запуска'); }
+    const data = await response.json(); currentStudioJob = data.job_id; studioStop.style.display = 'block';
+    stopStudioPolling(); studioPollTimer = setInterval(() => pollStudioJob(currentStudioJob), 1500); pollStudioJob(currentStudioJob);
+  }catch(error){ studioError.textContent = error.message; studioRun.disabled = false; studioProgress.style.display = 'none'; }
+};
+
+studioStop.onclick = async () => {
+  if(!currentStudioJob || !confirm('Остановить фотосессию? Готовые кадры сохранятся.')) return;
+  studioStop.disabled = true;
+  try{
+    const response = await fetch('/api/studio/jobs/' + currentStudioJob + '/cancel', {method:'POST'});
+    if(!response.ok) throw new Error('не удалось остановить фотостудию');
+    pollStudioJob(currentStudioJob);
+  }catch(error){ studioError.textContent = error.message; studioStop.disabled = false; }
+};
 
 function selectedStyles(){
   return [...stylesEl.querySelectorAll('input:checked')].map(cb=>cb.value);

@@ -18,6 +18,7 @@ import html
 import json
 import multiprocessing
 import queue
+import re
 import shutil
 import sys
 import threading
@@ -31,10 +32,11 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 PANEL_DIR = Path(__file__).resolve().parent
@@ -48,6 +50,7 @@ import settings        # noqa: E402  (panel/settings.py)
 import orchestrator    # noqa: E402  (panel/orchestrator.py)
 import trend_radar     # noqa: E402  (panel/trend_radar.py)
 import radar_collector  # noqa: E402  (panel/radar_collector.py)
+import virtual_studio  # noqa: E402  (panel/virtual_studio.py)
 
 STATIC_DIR = PANEL_DIR / "static"
 
@@ -70,6 +73,11 @@ app = FastAPI(title="Print Factory Panel", version="1.0", lifespan=_lifespan)
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="panel-job")
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
+
+# Фотостудия выполняет дорогие multi-reference рендеры последовательно.
+_studio_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="studio-job")
+_studio_jobs: dict[str, dict] = {}
+_studio_jobs_lock = threading.Lock()
 
 # Внешний TikTok oEmbed выполняется отдельно от платной генерации. Один worker
 # ограничивает нагрузку и сохраняет порядок; состояние каждого задания живёт в
@@ -706,6 +714,318 @@ def _run_job(
         except (AttributeError, OSError, ValueError):
             pass
 
+
+
+# ── Виртуальная фотостудия ───────────────────────────────────────────────────
+
+
+def _prune_studio_jobs_locked() -> None:
+    finished = [
+        (job_id, job)
+        for job_id, job in _studio_jobs.items()
+        if job["status"] in {"done", "error", "cancelled"}
+    ]
+    if len(finished) <= settings.JOB_HISTORY_LIMIT:
+        return
+    finished.sort(key=lambda pair: pair[1]["created"])
+    for job_id, job in finished[: len(finished) - settings.JOB_HISTORY_LIMIT]:
+        shutil.rmtree(job.get("outdir") or "", ignore_errors=True)
+        _studio_jobs.pop(job_id, None)
+
+
+def _studio_process_entry(
+    model_id: str,
+    artworks: list[tuple[str, str]],
+    shirt_color: str,
+    placement: str,
+    pose_count: int,
+    quality: str,
+    outdir_text: str,
+    events,
+) -> None:
+    outdir = Path(outdir_text)
+    results_dir = outdir / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    for artwork_index, (display_name, artwork_path) in enumerate(artworks, start=1):
+        stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", Path(artwork_path).stem).strip("-") or "print"
+        for pose_index in range(pose_count):
+            tag = f"{artwork_index:02d}_{stem}_pose-{pose_index + 1}"
+            output_path = results_dir / f"{tag}.png"
+            try:
+                virtual_studio.render_mockup(
+                    model_id=model_id,
+                    artwork_path=Path(artwork_path),
+                    shirt_color=shirt_color,
+                    placement=placement,
+                    pose_index=pose_index,
+                    output_path=output_path,
+                    quality=quality,
+                )
+                result = {
+                    "tag": tag,
+                    "ok": True,
+                    "path": str(output_path),
+                    "error": None,
+                    "print_name": display_name,
+                    "pose": pose_index + 1,
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(f"studio/{tag}: рендер не удался")
+                result = {
+                    "tag": tag,
+                    "ok": False,
+                    "path": None,
+                    "error": str(exc),
+                    "print_name": display_name,
+                    "pose": pose_index + 1,
+                }
+            events.put({"type": "item", "result": result})
+    events.put({"type": "finished"})
+
+
+def _run_studio_job(
+    job_id: str,
+    model_id: str,
+    artworks: list[tuple[str, str]],
+    shirt_color: str,
+    placement: str,
+    pose_count: int,
+    quality: str,
+) -> None:
+    with _studio_jobs_lock:
+        job = _studio_jobs[job_id]
+        if job["cancel_event"].is_set():
+            job["status"] = "cancelled"
+            return
+        job["status"] = "running"
+        outdir = Path(job["outdir"])
+
+    context = _job_process_context()
+    events = context.Queue()
+    process = context.Process(
+        target=_studio_process_entry,
+        args=(model_id, artworks, shirt_color, placement, pose_count, quality, str(outdir), events),
+        name=f"studio-job-{job_id}",
+    )
+    try:
+        process.start()
+    except Exception as exc:  # noqa: BLE001
+        with _studio_jobs_lock:
+            job["status"] = "error"
+            job["error"] = str(exc)
+        return
+
+    dead_checks = 0
+    try:
+        while True:
+            if job["cancel_event"].is_set():
+                _terminate_job_process(process)
+                with _studio_jobs_lock:
+                    job["status"] = "cancelled"
+                    job["error"] = None
+                return
+            try:
+                event = events.get(timeout=0.2)
+                dead_checks = 0
+            except queue.Empty:
+                if process.is_alive():
+                    continue
+                dead_checks += 1
+                if dead_checks < 5:
+                    continue
+                with _studio_jobs_lock:
+                    job["status"] = "error"
+                    job["error"] = f"процесс фотостудии завершился с кодом {process.exitcode}"
+                return
+
+            if event.get("type") == "item":
+                result = event["result"]
+                with _studio_jobs_lock:
+                    item = {
+                        "tag": result["tag"],
+                        "ok": bool(result["ok"]),
+                        "error": result.get("error"),
+                        "print_name": result.get("print_name"),
+                        "pose": result.get("pose"),
+                    }
+                    job["items"].append(item)
+                    if result["ok"] and result.get("path"):
+                        job["paths"][result["tag"]] = Path(result["path"])
+                    job["done"] += 1
+            elif event.get("type") == "finished":
+                with _studio_jobs_lock:
+                    job["status"] = "done"
+                return
+    finally:
+        process.join(timeout=2)
+        _terminate_job_process(process)
+        try:
+            events.cancel_join_thread()
+            events.close()
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+@app.get("/api/studio/models")
+def api_studio_models():
+    return virtual_studio.public_models()
+
+
+@app.post("/api/studio/render", status_code=202)
+async def api_studio_render(
+    model_id: str = Form(...),
+    shirt_color: str = Form(...),
+    placement: str = Form(...),
+    pose_count: int = Form(2),
+    quality: str = Form("standard"),
+    prints: list[UploadFile] = File(...),
+):
+    try:
+        model = virtual_studio.get_model(model_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail="модель не найдена") from exc
+    model_path = virtual_studio.MODELS_DIR / str(model.get("image") or "")
+    if not model_path.is_file():
+        raise HTTPException(status_code=409, detail="эталон выбранной модели ещё не установлен")
+    if shirt_color not in {"black", "white"}:
+        raise HTTPException(status_code=400, detail="выберите чёрную или белую футболку")
+    if placement not in {"front", "back"}:
+        raise HTTPException(status_code=400, detail="выберите принт спереди или на спине")
+    if quality not in {"standard", "premium"}:
+        raise HTTPException(status_code=400, detail="неизвестный режим качества")
+    if pose_count < 1 or pose_count > 4:
+        raise HTTPException(status_code=400, detail="количество поз: от 1 до 4")
+    if not prints or len(prints) > 6:
+        raise HTTPException(status_code=400, detail="загрузите от 1 до 6 принтов")
+    if len(prints) * pose_count > 12:
+        raise HTTPException(status_code=400, detail="максимум 12 итоговых кадров за один запуск")
+
+    job_id = uuid.uuid4().hex[:12]
+    outdir = settings.OUTPUT_DIR / "studio" / job_id
+    uploads_dir = outdir / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    artworks: list[tuple[str, str]] = []
+    try:
+        for index, upload in enumerate(prints, start=1):
+            original_name = Path(upload.filename or f"print-{index}.png").name
+            raw = await upload.read(15 * 1024 * 1024 + 1)
+            if len(raw) > 15 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail=f"{original_name}: максимум 15 МБ")
+            try:
+                with Image.open(io.BytesIO(raw)) as source:
+                    source.load()
+                    rgba = source.convert("RGBA")
+            except (UnidentifiedImageError, OSError) as exc:
+                raise HTTPException(status_code=400, detail=f"{original_name}: не удалось прочитать изображение") from exc
+            safe_stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", Path(original_name).stem).strip("-") or "print"
+            path = uploads_dir / f"{index:02d}_{safe_stem}.png"
+            rgba.save(path, format="PNG", optimize=True)
+            artworks.append((original_name, str(path)))
+    except Exception:
+        shutil.rmtree(outdir, ignore_errors=True)
+        raise
+
+    with _studio_jobs_lock:
+        _studio_jobs[job_id] = {
+            "status": "queued",
+            "done": 0,
+            "total": len(artworks) * pose_count,
+            "items": [],
+            "paths": {},
+            "outdir": outdir,
+            "error": None,
+            "cancel_event": threading.Event(),
+            "created": time.time(),
+            "model_id": model_id,
+            "shirt_color": shirt_color,
+            "placement": placement,
+        }
+        _prune_studio_jobs_locked()
+    _studio_executor.submit(
+        _run_studio_job,
+        job_id,
+        model_id,
+        artworks,
+        shirt_color,
+        placement,
+        pose_count,
+        quality,
+    )
+    return {"job_id": job_id, "total": len(artworks) * pose_count}
+
+
+@app.get("/api/studio/jobs/{job_id}")
+def api_studio_job(job_id: str):
+    job = _studio_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="задание фотостудии не найдено")
+    with _studio_jobs_lock:
+        return {
+            "status": job["status"],
+            "done": job["done"],
+            "total": job["total"],
+            "error": job["error"],
+            "can_cancel": job["status"] in {"queued", "running", "cancelling"},
+            "items": [
+                {
+                    **item,
+                    "thumb_url": f"/api/studio/thumb/{job_id}/{item['tag']}" if item["ok"] else None,
+                    "file_url": f"/api/studio/file/{job_id}/{item['tag']}" if item["ok"] else None,
+                }
+                for item in job["items"]
+            ],
+        }
+
+
+@app.post("/api/studio/jobs/{job_id}/cancel")
+def api_studio_cancel(job_id: str):
+    job = _studio_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="задание фотостудии не найдено")
+    with _studio_jobs_lock:
+        accepted = job["status"] in {"queued", "running", "cancelling"}
+        if accepted:
+            job["status"] = "cancelling"
+            job["cancel_event"].set()
+        return {"accepted": accepted, "status": job["status"]}
+
+
+@app.get("/api/studio/thumb/{job_id}/{tag}")
+def api_studio_thumb(job_id: str, tag: str):
+    job = _studio_jobs.get(job_id)
+    path = job and job["paths"].get(tag)
+    if path is None or not Path(path).is_file():
+        raise HTTPException(status_code=404, detail="файл не найден")
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/api/studio/file/{job_id}/{tag}")
+def api_studio_file(job_id: str, tag: str):
+    job = _studio_jobs.get(job_id)
+    path = job and job["paths"].get(tag)
+    if path is None or not Path(path).is_file():
+        raise HTTPException(status_code=404, detail="файл не найден")
+    return FileResponse(path, media_type="image/png", filename=f"{tag}.png")
+
+
+@app.get("/api/studio/download/{job_id}")
+def api_studio_download(job_id: str):
+    job = _studio_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="задание фотостудии не найдено")
+    if not job["paths"]:
+        raise HTTPException(status_code=404, detail="нет готовых кадров")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for tag, path in job["paths"].items():
+            if Path(path).is_file():
+                archive.write(path, arcname=f"{tag}.png")
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="studio_{job_id}.zip"'},
+    )
 
 @app.post("/api/job/{job_id}/cancel")
 def api_cancel_job(job_id: str):

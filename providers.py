@@ -179,6 +179,67 @@ def _generate_gemini(prompt: str, seed: int = None, model: str = None,
     raise RuntimeError(f"Gemini (nano-banana) не отдал картинку: {last_err}")
 
 
+def _image_to_inline_part(image: Image.Image, max_side: int = 1536) -> dict:
+    """PNG inline-part для multi-image edit с сохранением alpha принта."""
+    img = image.copy()
+    w, h = img.size
+    scale = max_side / float(max(w, h))
+    if scale < 1.0:
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(buf.getvalue()).decode("ascii")}}
+
+
+def generate_image_with_references(prompt: str, references: list[Image.Image], model: str = None) -> Image.Image:
+    """Gemini multi-image edit: model identity + exact print artwork."""
+    if config.IMAGE_PROVIDER != "gemini":
+        raise RuntimeError("виртуальная фотостудия требует IMAGE_PROVIDER=gemini")
+    if not references:
+        raise ValueError("нужен хотя бы один референс")
+    if not config.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY не задан в .env")
+
+    mdl = model or config.GEMINI_MODEL
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{mdl}:generateContent"
+    headers = {"Content-Type": "application/json", "x-goog-api-key": config.GEMINI_API_KEY}
+    parts = [_image_to_inline_part(reference) for reference in references]
+    parts.append({"text": prompt})
+    generation_config = {"responseModalities": ["IMAGE"]}
+    if getattr(config, "IMAGE_ASPECT_RATIO", ""):
+        generation_config["imageConfig"] = {"aspectRatio": config.IMAGE_ASPECT_RATIO}
+    body = {"contents": [{"parts": parts}], "generationConfig": generation_config}
+
+    last_err = None
+    for attempt in range(2):
+        try:
+            response = requests.post(url, headers=headers, json=body, timeout=180)
+            if response.status_code != 200:
+                last_err = f"HTTP {response.status_code}: {response.text[:300]}"
+            else:
+                data = response.json()
+                for candidate in data.get("candidates", []):
+                    for part in candidate.get("content", {}).get("parts", []):
+                        inline = part.get("inlineData") or part.get("inline_data")
+                        if inline and inline.get("data"):
+                            raw = base64.b64decode(inline["data"])
+                            image = Image.open(io.BytesIO(raw))
+                            image.load()
+                            return image.convert("RGB")
+                for candidate in data.get("candidates", []):
+                    finish_reason = str(candidate.get("finishReason") or "").strip()
+                    if finish_reason in {"IMAGE_OTHER", "PROHIBITED_CONTENT"}:
+                        raise GeminiImageRejected(finish_reason, str(candidate.get("finishMessage") or ""))
+                last_err = f"ответ без inlineData: {str(data)[:300]}"
+        except GeminiImageRejected:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            last_err = str(exc)
+        if attempt == 0:
+            time.sleep(5)
+    raise RuntimeError(f"Gemini multi-reference не отдал картинку: {last_err}")
+
+
 def generate_image(prompt: str, seed: int = None, model: str = None,
                     reference: Image.Image = None) -> Image.Image:
     """Единая точка входа. Провайдер выбирается через config.IMAGE_PROVIDER.

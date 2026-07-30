@@ -1,5 +1,14 @@
 # PROJECT_STATE — print-factory-nb
 
+## 2026-07-30 — виртуальная фотостудия
+
+- Добавлен полный локальный модуль: постоянный каталог из трёх девушек и двух парней 23–25 лет, multipart-загрузка принтов, выбор цвета свободной футболки, стороны печати, 1–4 поз и standard/premium качества.
+- Пять identity-reference PNG находятся в panel/static/studio/models/, метаданные — в panel/studio_models.json. Эти assets входят в Docker image.
+- providers.generate_image_with_references() передаёт Gemini модель и artwork двумя PNG-part; panel/virtual_studio.py фиксирует личность, поясное кадрирование, студийный свет и точность принта.
+- API поддерживает progress, force cancel, отдельные PNG и ZIP. Лимиты: до 6 файлов, 15 МБ на файл, не более 12 итоговых кадров; premium подтверждается в UI.
+- Проверки: профильный набор 6 passed, Python compile и JavaScript syntax — OK. Совместный Windows-набор: 15 passed, 4 прежних spawn/monkeypatch failures существующей генерации.
+- Живой платный Gemini smoke локально не выполнялся. Подробности: docs/VIRTUAL_STUDIO.md.
+
 ## 2026-07-29 — расширение «МЕМЯ» до 60 имён
 
 - Готов локальный производственный набор: 30 мужских и 30 женских именных мем-принтов, включая несколько вариаций наиболее популярных имён.
