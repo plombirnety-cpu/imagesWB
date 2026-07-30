@@ -8,6 +8,11 @@
 - Платный premium-режим требует отдельного подтверждения в интерфейсе. Pollinations запрещён для этого пути, потому что не сохраняет два референса.
 - Фотосессия выполняется в отдельном дочернем процессе: её можно принудительно остановить, готовые кадры скачать отдельно или ZIP.
 - Реализация описана в docs/VIRTUAL_STUDIO.md. Профильные тесты: 6/6; Python compile и JS syntax — OK.
+- Выпущено в production из commit `7d02dc9`: контейнер работает на image
+  `sha256:d51e999a2492e8deca3c65387e2cf5aa63fe4cedc44a83be2b28e062dff1d62e`,
+  `/health` отвечает, restart count — 0, постоянный volume `panel_panel_out` сохранён.
+- Откат: image `print-factory-panel:backup-pre-studio-7d02dc9` и каталог
+  `/opt/print-panel-backup-pre-studio-7d02dc9`.
 
 ## Расширенная серия именных мем-принтов «МЕМЯ» (2026-07-29)
 

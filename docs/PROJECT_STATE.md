@@ -7,6 +7,15 @@
 - providers.generate_image_with_references() передаёт Gemini модель и artwork двумя PNG-part; panel/virtual_studio.py фиксирует личность, поясное кадрирование, студийный свет и точность принта.
 - API поддерживает progress, force cancel, отдельные PNG и ZIP. Лимиты: до 6 файлов, 15 МБ на файл, не более 12 итоговых кадров; premium подтверждается в UI.
 - Проверки: профильный набор 6 passed, Python compile и JavaScript syntax — OK. Совместный Windows-набор: 15 passed, 4 прежних spawn/monkeypatch failures существующей генерации.
+- Linux-кандидат: профильный набор 6 passed; полный набор — 101 passed и 1
+  не связанный с фотостудией date-window failure старого radar-теста.
+- Production обновлён из commit `7d02dc9`. Рабочий image:
+  `sha256:d51e999a2492e8deca3c65387e2cf5aa63fe4cedc44a83be2b28e062dff1d62e`.
+  После переключения контейнер `running`, restart count 0, `/health` — OK,
+  корневой маршрут требует вход, studio API без сессии возвращает 401.
+- Постоянные результаты продолжают жить в volume `panel_panel_out`. Для отката
+  сохранены image `print-factory-panel:backup-pre-studio-7d02dc9` и каталог
+  `/opt/print-panel-backup-pre-studio-7d02dc9`.
 - Живой платный Gemini smoke локально не выполнялся. Подробности: docs/VIRTUAL_STUDIO.md.
 
 ## 2026-07-29 — расширение «МЕМЯ» до 60 имён
