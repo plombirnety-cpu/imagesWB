@@ -55,6 +55,35 @@ def test_render_mockup_uses_identity_and_artwork(monkeypatch, tmp_path):
     assert "same facial identity" in captured["prompt"]
     assert "exact print artwork" in captured["prompt"]
     assert "front chest" in captured["prompt"]
+    assert "physically printed into the cotton" in captured["prompt"]
+    assert "natural convex chest and ribcage" in captured["prompt"]
+    assert "local perspective and gentle foreshortening" in captured["prompt"]
+    assert "Cotton weave, soft highlights and garment shadows" in captured["prompt"]
+    assert "flat sticker" in captured["prompt"]
+
+
+def test_back_mockup_prompt_uses_back_surface_curvature(monkeypatch, tmp_path):
+    artwork_path = tmp_path / "back-print.png"
+    Image.new("RGBA", (300, 500), (255, 255, 255, 255)).save(artwork_path)
+    captured = {}
+
+    def fake_generate(prompt, references, model=None):
+        captured["prompt"] = prompt
+        return Image.new("RGB", (512, 768), (230, 230, 230))
+
+    monkeypatch.setattr(virtual_studio.providers, "generate_image_with_references", fake_generate)
+    virtual_studio.render_mockup(
+        model_id="alisa",
+        artwork_path=artwork_path,
+        shirt_color="black",
+        placement="back",
+        pose_index=0,
+        output_path=tmp_path / "back-result.png",
+    )
+
+    assert "center back" in captured["prompt"]
+    assert "shoulder-blade and upper-back curvature" in captured["prompt"]
+    assert "Folds may pass naturally through the print" in captured["prompt"]
 
 
 def test_studio_process_entry_emits_one_item_per_pose(monkeypatch, tmp_path):

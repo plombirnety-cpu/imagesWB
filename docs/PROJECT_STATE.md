@@ -5,6 +5,7 @@
 - Добавлен полный локальный модуль: постоянный каталог из трёх девушек и двух парней 23–25 лет, multipart-загрузка принтов, выбор цвета свободной футболки, стороны печати, 1–4 поз и standard/premium качества.
 - Пять identity-reference PNG находятся в panel/static/studio/models/, метаданные — в panel/studio_models.json. Эти assets входят в Docker image.
 - providers.generate_image_with_references() передаёт Gemini модель и artwork двумя PNG-part; panel/virtual_studio.py фиксирует личность, поясное кадрирование, студийный свет и точность принта.
+- Prompt-контракт дополнен физикой нанесения: отдельные поверхности для front/back, перспективное сокращение, плавный изгиб, мягкая деформация по складкам, общие свет/тени и видимая фактура хлопка без эффекта наклейки. Регрессионные prompt-тесты: 7 passed.
 - API поддерживает progress, force cancel, отдельные PNG и ZIP. Лимиты: до 6 файлов, 15 МБ на файл, не более 12 итоговых кадров; premium подтверждается в UI.
 - Проверки: профильный набор 6 passed, Python compile и JavaScript syntax — OK. Совместный Windows-набор: 15 passed, 4 прежних spawn/monkeypatch failures существующей генерации.
 - Linux-кандидат: профильный набор 6 passed; полный набор — 101 passed и 1

@@ -81,6 +81,11 @@ def _load_artwork(path: Path) -> Image.Image:
 def _prompt(model: dict, shirt_color: str, placement: str, pose_index: int) -> str:
     color = "deep matte black" if shirt_color == "black" else "clean neutral white"
     side = "front chest" if placement == "front" else "center back"
+    body_surface = (
+        "the natural convex chest and ribcage"
+        if placement == "front"
+        else "the natural shoulder-blade and upper-back curvature"
+    )
     poses = _FRONT_POSES if placement == "front" else _BACK_POSES
     pose = poses[pose_index % len(poses)]
     identity = model.get("identity_prompt", "the same adult fashion model")
@@ -89,11 +94,12 @@ Asset type: premium fashion e-commerce photograph for a T-shirt print listing.
 Input image 1 is the immutable identity reference. Use exactly the same fictional adult person: same facial identity, age, skin tone, eyes, hairstyle, hair color and body proportions. Identity description: {identity}.
 Input image 2 is the exact print artwork. Reproduce that artwork faithfully on the {side}: preserve its composition, Cyrillic spelling, colors, linework and proportions. Do not redesign, paraphrase, crop, mirror or invent any part of the artwork.
 Wardrobe: a plain {color} heavyweight cotton crew-neck T-shirt with a slightly relaxed oversized fit, natural sleeves and realistic fabric folds. No other logos, labels or graphics. The print belongs only on the {side}.
+Fabric integration: the artwork is physically printed into the cotton, never pasted on top as a flat sticker, rigid poster or floating layer. Conform the whole artwork continuously to {body_surface}. Apply realistic local perspective and gentle foreshortening from the camera angle. Let the artwork bend smoothly over broad cloth curvature and deform subtly with natural tension, wrinkles and folds while keeping every supplied element recognizable and correctly ordered. Cotton weave, soft highlights and garment shadows must remain visible through the ink; print brightness and contrast must respond to the same studio light as the shirt. Preserve clean adhered edges with no halo, border, rectangular alpha box, drop shadow or raised sticker thickness. Folds may pass naturally through the print, but must not destroy spelling, faces or essential details.
 Pose: {pose}.
-Composition: vertical photograph cropped from head to hips or upper thighs, never full body. Keep the T-shirt and the entire print close, large, sharp and easy to inspect. Do not let hands, hair, jewelry or folds hide important parts of the print.
+Composition: vertical photograph cropped from head to hips or upper thighs, never full body. Keep the T-shirt and the entire print close, large, sharp and easy to inspect. Do not let hands, hair or jewelry hide important parts of the print.
 Scene: seamless warm light-gray professional studio cyclorama.
 Lighting: premium soft three-point studio lighting, large octabox key, gentle rim light, realistic skin and cotton texture, neutral commercial color grade.
-Constraints: one adult person only; photorealistic; anatomically correct hands; the face must match image 1; the artwork must match image 2; no text outside the supplied artwork; no watermark; no frame; no mockup UI; no extra objects."""
+Constraints: one adult person only; photorealistic; anatomically correct hands; the face must match image 1; the artwork must match image 2; the print must follow the garment surface rather than remain geometrically flat; no text outside the supplied artwork; no watermark; no frame; no mockup UI; no extra objects."""
 
 
 def render_mockup(
