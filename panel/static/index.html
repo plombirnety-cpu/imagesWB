@@ -290,6 +290,9 @@
           <label class="fld">Качество Gemini
             <select id="studioQuality"><option value="standard" selected>Стандарт — быстрее</option><option value="premium">Премиум — дороже</option></select>
           </label>
+          <label class="fld">Освещение
+            <select id="studioLighting"><option value="signature" selected>Print Factory Signature</option><option value="catalog">Нейтральный каталог</option></select>
+          </label>
         </div>
         <label class="studio-upload">
           <span class="studio-label">2. Принты PNG/WebP/JPG — до 6 файлов, 15 МБ каждый</span>
@@ -621,6 +624,7 @@ studioRun.onclick = async () => {
   form.append('placement', $('#studioPlacement').value);
   form.append('pose_count', String(poseCount));
   form.append('quality', quality);
+  form.append('lighting', $('#studioLighting').value);
   files.forEach(file => form.append('prints', file, file.name));
   studioRun.disabled = true; studioStop.style.display = 'none'; studioDownload.style.display = 'none';
   studioProgress.style.display = 'block'; studioProgressBar.style.width = '0%';

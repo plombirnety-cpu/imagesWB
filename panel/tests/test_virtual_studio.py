@@ -60,6 +60,10 @@ def test_render_mockup_uses_identity_and_artwork(monkeypatch, tmp_path):
     assert "local perspective and gentle foreshortening" in captured["prompt"]
     assert "Cotton weave, soft highlights and garment shadows" in captured["prompt"]
     assert "flat sticker" in captured["prompt"]
+    assert "Print Factory Signature lighting" in captured["prompt"]
+    assert "teal rim" in captured["prompt"]
+    assert "amber rim" in captured["prompt"]
+    assert "never tinting the central print area" in captured["prompt"]
 
 
 def test_back_mockup_prompt_uses_back_surface_curvature(monkeypatch, tmp_path):
@@ -86,6 +90,50 @@ def test_back_mockup_prompt_uses_back_surface_curvature(monkeypatch, tmp_path):
     assert "Folds may pass naturally through the print" in captured["prompt"]
 
 
+def test_catalog_lighting_keeps_neutral_studio(monkeypatch, tmp_path):
+    artwork_path = tmp_path / "catalog-print.png"
+    Image.new("RGBA", (300, 500), (255, 255, 255, 255)).save(artwork_path)
+    captured = {}
+
+    def fake_generate(prompt, references, model=None):
+        captured["prompt"] = prompt
+        return Image.new("RGB", (512, 768), (230, 230, 230))
+
+    monkeypatch.setattr(virtual_studio.providers, "generate_image_with_references", fake_generate)
+    virtual_studio.render_mockup(
+        model_id="alisa",
+        artwork_path=artwork_path,
+        shirt_color="white",
+        placement="front",
+        pose_index=0,
+        output_path=tmp_path / "catalog-result.png",
+        lighting="catalog",
+    )
+
+    assert "Classic catalog lighting" in captured["prompt"]
+    assert "teal rim" not in captured["prompt"]
+
+
+def test_unknown_lighting_is_rejected(tmp_path):
+    artwork_path = tmp_path / "print.png"
+    Image.new("RGBA", (300, 500), (255, 255, 255, 255)).save(artwork_path)
+
+    try:
+        virtual_studio.render_mockup(
+            model_id="alisa",
+            artwork_path=artwork_path,
+            shirt_color="black",
+            placement="front",
+            pose_index=0,
+            output_path=tmp_path / "bad-light.png",
+            lighting="unknown",
+        )
+    except ValueError as exc:
+        assert "режим освещения" in str(exc)
+    else:
+        raise AssertionError("неизвестный режим освещения должен быть отклонён")
+
+
 def test_studio_process_entry_emits_one_item_per_pose(monkeypatch, tmp_path):
     artwork = tmp_path / "print.png"
     Image.new("RGBA", (256, 256), (10, 20, 30, 255)).save(artwork)
@@ -105,6 +153,7 @@ def test_studio_process_entry_emits_one_item_per_pose(monkeypatch, tmp_path):
         "back",
         3,
         "standard",
+        "signature",
         str(tmp_path / "job"),
         events,
     )
@@ -135,9 +184,28 @@ def test_studio_api_accepts_upload_and_queues_job(monkeypatch):
     job_id = payload["job_id"]
     job = panel_app._studio_jobs[job_id]
     assert job["status"] == "queued"
+    assert job["lighting"] == "signature"
     assert list((Path(job["outdir"]) / "uploads").glob("*.png"))
     shutil.rmtree(job["outdir"], ignore_errors=True)
     panel_app._studio_jobs.pop(job_id, None)
+
+
+def test_studio_api_rejects_unknown_lighting():
+    client = TestClient(panel_app.app)
+    response = client.post(
+        "/api/studio/render",
+        data={
+            "model_id": "artem",
+            "shirt_color": "black",
+            "placement": "front",
+            "pose_count": "1",
+            "quality": "standard",
+            "lighting": "unknown",
+        },
+        files=[("prints", ("sample.png", _png_bytes(), "image/png"))],
+    )
+    assert response.status_code == 400
+    assert "освещения" in response.json()["detail"]
 
 
 def test_studio_api_validates_batch_cost_before_queueing():

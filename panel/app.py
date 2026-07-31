@@ -740,6 +740,7 @@ def _studio_process_entry(
     placement: str,
     pose_count: int,
     quality: str,
+    lighting: str,
     outdir_text: str,
     events,
 ) -> None:
@@ -760,6 +761,7 @@ def _studio_process_entry(
                     pose_index=pose_index,
                     output_path=output_path,
                     quality=quality,
+                    lighting=lighting,
                 )
                 result = {
                     "tag": tag,
@@ -791,6 +793,7 @@ def _run_studio_job(
     placement: str,
     pose_count: int,
     quality: str,
+    lighting: str,
 ) -> None:
     with _studio_jobs_lock:
         job = _studio_jobs[job_id]
@@ -804,7 +807,7 @@ def _run_studio_job(
     events = context.Queue()
     process = context.Process(
         target=_studio_process_entry,
-        args=(model_id, artworks, shirt_color, placement, pose_count, quality, str(outdir), events),
+        args=(model_id, artworks, shirt_color, placement, pose_count, quality, lighting, str(outdir), events),
         name=f"studio-job-{job_id}",
     )
     try:
@@ -878,6 +881,7 @@ async def api_studio_render(
     placement: str = Form(...),
     pose_count: int = Form(2),
     quality: str = Form("standard"),
+    lighting: str = Form("signature"),
     prints: list[UploadFile] = File(...),
 ):
     try:
@@ -893,6 +897,8 @@ async def api_studio_render(
         raise HTTPException(status_code=400, detail="выберите принт спереди или на спине")
     if quality not in {"standard", "premium"}:
         raise HTTPException(status_code=400, detail="неизвестный режим качества")
+    if lighting not in {"signature", "catalog"}:
+        raise HTTPException(status_code=400, detail="неизвестный режим освещения")
     if pose_count < 1 or pose_count > 4:
         raise HTTPException(status_code=400, detail="количество поз: от 1 до 4")
     if not prints or len(prints) > 6:
@@ -939,6 +945,7 @@ async def api_studio_render(
             "model_id": model_id,
             "shirt_color": shirt_color,
             "placement": placement,
+            "lighting": lighting,
         }
         _prune_studio_jobs_locked()
     _studio_executor.submit(
@@ -950,6 +957,7 @@ async def api_studio_render(
         placement,
         pose_count,
         quality,
+        lighting,
     )
     return {"job_id": job_id, "total": len(artworks) * pose_count}
 
