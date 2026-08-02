@@ -9,6 +9,7 @@
 - UI явно сообщает о двух вызовах Gemini на кадр. Цена исправления: примерно удвоенные время и стоимость фотосессии.
 - Регрессия зафиксирована тестами до исправления. После исправления: `11 passed`, `py_compile` и `git diff --check` — OK. Реальный проблемный artwork после preprocessing имеет alpha `(0, 255)`, фон удалён без потери внутренних белых деталей.
 - Живой платный Gemini-render намеренно не запускался автоматически; финальная визуальная приёмка выполняется повтором пользователя после production deploy.
+- Production развёрнут из commit `e257d17`: image `sha256:69add5f9d7770f510f778a30857bef8b4b8707a6dcd5f314663177e26ce9c2a7`, контейнер healthy, restart count 0, volume `panel_panel_out` сохранён. Smoke: health 200, root 303, studio API без сессии 401. Откат: image `print-factory-panel:backup-pre-two-pass-e257d17`, каталог `/opt/print-panel-backup-pre-two-pass-e257d17`.
 
 ## 2026-07-30 — виртуальная фотостудия
 
