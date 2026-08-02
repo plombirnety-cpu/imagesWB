@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageDraw
 
 import app as panel_app
 import virtual_studio
@@ -26,16 +26,34 @@ def test_model_catalog_has_three_women_and_two_men():
     assert all(model["image_url"].startswith("/static/studio/models/") for model in models)
 
 
-def test_render_mockup_uses_identity_and_artwork(monkeypatch, tmp_path):
+def test_load_artwork_removes_border_connected_white_background(tmp_path):
+    artwork_path = tmp_path / "opaque-white.png"
+    source = Image.new("RGB", (240, 240), "white")
+    draw = ImageDraw.Draw(source)
+    draw.ellipse((40, 40, 200, 200), fill=(220, 20, 20))
+    draw.rectangle((105, 105, 135, 135), fill="white")
+    source.save(artwork_path)
+
+    artwork = virtual_studio._load_artwork(artwork_path)
+
+    assert artwork.mode == "RGBA"
+    assert artwork.size[0] < source.size[0]
+    assert artwork.size[1] < source.size[1]
+    assert artwork.getchannel("A").getextrema() == (0, 255)
+    center = (artwork.width // 2, artwork.height // 2)
+    assert artwork.getpixel(center) == (255, 255, 255, 255)
+
+
+def test_render_mockup_uses_blank_shirt_then_fabric_transfer(monkeypatch, tmp_path):
     artwork_path = tmp_path / "print.png"
     Image.new("RGBA", (300, 500), (255, 30, 30, 220)).save(artwork_path)
-    captured = {}
+    calls = []
+    blank_shirt = Image.new("RGB", (512, 768), (210, 210, 210))
+    finished_mockup = Image.new("RGB", (512, 768), (180, 180, 180))
 
     def fake_generate(prompt, references, model=None):
-        captured["prompt"] = prompt
-        captured["references"] = references
-        captured["model"] = model
-        return Image.new("RGB", (512, 768), (230, 230, 230))
+        calls.append({"prompt": prompt, "references": references, "model": model})
+        return blank_shirt if len(calls) == 1 else finished_mockup
 
     monkeypatch.setattr(virtual_studio.providers, "generate_image_with_references", fake_generate)
     output = virtual_studio.render_mockup(
@@ -49,30 +67,30 @@ def test_render_mockup_uses_identity_and_artwork(monkeypatch, tmp_path):
     )
 
     assert output.is_file()
-    assert len(captured["references"]) == 2
-    assert captured["references"][0].mode == "RGB"
-    assert captured["references"][1].mode == "RGBA"
-    assert "same facial identity" in captured["prompt"]
-    assert "exact print artwork" in captured["prompt"]
-    assert "front chest" in captured["prompt"]
-    assert "physically printed into the cotton" in captured["prompt"]
-    assert "natural convex chest and ribcage" in captured["prompt"]
-    assert "local perspective and gentle foreshortening" in captured["prompt"]
-    assert "Cotton weave, soft highlights and garment shadows" in captured["prompt"]
-    assert "flat sticker" in captured["prompt"]
-    assert "Print Factory Signature lighting" in captured["prompt"]
-    assert "teal rim" in captured["prompt"]
-    assert "amber rim" in captured["prompt"]
-    assert "never tinting the central print area" in captured["prompt"]
+    assert len(calls) == 2
+    assert len(calls[0]["references"]) == 1
+    assert calls[0]["references"][0].mode == "RGB"
+    assert "clean blank T-shirt" in calls[0]["prompt"]
+    assert "same facial identity" in calls[0]["prompt"]
+    assert "Print Factory Signature lighting" in calls[0]["prompt"]
+
+    assert len(calls[1]["references"]) == 2
+    assert calls[1]["references"][0] is blank_shirt
+    assert calls[1]["references"][1].mode == "RGBA"
+    assert "exact print artwork" in calls[1]["prompt"]
+    assert "edit only the T-shirt surface" in calls[1]["prompt"]
+    assert "existing fabric luminance as a displacement and shading map" in calls[1]["prompt"]
+    assert "physically absorbed into the cotton" in calls[1]["prompt"]
+    assert "front chest" in calls[1]["prompt"]
 
 
 def test_back_mockup_prompt_uses_back_surface_curvature(monkeypatch, tmp_path):
     artwork_path = tmp_path / "back-print.png"
     Image.new("RGBA", (300, 500), (255, 255, 255, 255)).save(artwork_path)
-    captured = {}
+    prompts = []
 
     def fake_generate(prompt, references, model=None):
-        captured["prompt"] = prompt
+        prompts.append(prompt)
         return Image.new("RGB", (512, 768), (230, 230, 230))
 
     monkeypatch.setattr(virtual_studio.providers, "generate_image_with_references", fake_generate)
@@ -85,18 +103,20 @@ def test_back_mockup_prompt_uses_back_surface_curvature(monkeypatch, tmp_path):
         output_path=tmp_path / "back-result.png",
     )
 
-    assert "center back" in captured["prompt"]
-    assert "shoulder-blade and upper-back curvature" in captured["prompt"]
-    assert "Folds may pass naturally through the print" in captured["prompt"]
+    assert len(prompts) == 2
+    assert "center back" in prompts[0]
+    assert "center back" in prompts[1]
+    assert "shoulder blades and upper-back curvature" in prompts[1]
+    assert "Existing folds must remain visible through the ink" in prompts[1]
 
 
 def test_catalog_lighting_keeps_neutral_studio(monkeypatch, tmp_path):
     artwork_path = tmp_path / "catalog-print.png"
     Image.new("RGBA", (300, 500), (255, 255, 255, 255)).save(artwork_path)
-    captured = {}
+    prompts = []
 
     def fake_generate(prompt, references, model=None):
-        captured["prompt"] = prompt
+        prompts.append(prompt)
         return Image.new("RGB", (512, 768), (230, 230, 230))
 
     monkeypatch.setattr(virtual_studio.providers, "generate_image_with_references", fake_generate)
@@ -110,8 +130,10 @@ def test_catalog_lighting_keeps_neutral_studio(monkeypatch, tmp_path):
         lighting="catalog",
     )
 
-    assert "Classic catalog lighting" in captured["prompt"]
-    assert "teal rim" not in captured["prompt"]
+    assert len(prompts) == 2
+    assert "Classic catalog lighting" in prompts[0]
+    assert "teal rim" not in prompts[0]
+    assert "base photograph" in prompts[1]
 
 
 def test_unknown_lighting_is_rejected(tmp_path):

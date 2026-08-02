@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import cv2
+import numpy as np
 from PIL import Image
 
 import config
@@ -80,6 +82,47 @@ def public_models() -> list[dict]:
     return result
 
 
+def _remove_connected_light_background(artwork: Image.Image) -> Image.Image:
+    """Убирает только светлый фон, связанный с краями непрозрачного файла."""
+    rgba = np.array(artwork.convert("RGBA"), dtype=np.uint8)
+    alpha = rgba[..., 3]
+    if int(alpha.min()) < 250:
+        return artwork
+
+    rgb = rgba[..., :3]
+    low = rgb.min(axis=2)
+    spread = rgb.max(axis=2) - low
+    light = (low >= 238) & (spread <= 20)
+    if float(light.mean()) < 0.02:
+        return artwork
+
+    _, labels = cv2.connectedComponents(light.astype(np.uint8), connectivity=8)
+    border_labels = np.unique(
+        np.concatenate((labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]))
+    )
+    border_labels = border_labels[border_labels != 0]
+    if not border_labels.size:
+        return artwork
+
+    background = np.isin(labels, border_labels)
+    coverage = float(background.mean())
+    if coverage < 0.02 or coverage > 0.98:
+        return artwork
+
+    new_alpha = alpha.copy()
+    new_alpha[background] = 0
+
+    # Мягко убираем нейтральный белёсый fringe возле найденного фона, не
+    # затрагивая цветные и внутренние белые детали artwork.
+    expanded = cv2.dilate(background.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1).astype(bool)
+    fringe = expanded & ~background & (low >= 205) & (spread <= 45)
+    fade = np.clip((low.astype(np.float32) - 205.0) / 50.0, 0.0, 1.0)
+    fringe_alpha = (255.0 * (1.0 - fade)).astype(np.uint8)
+    new_alpha[fringe] = np.minimum(new_alpha[fringe], fringe_alpha[fringe])
+    rgba[..., 3] = new_alpha
+    return Image.fromarray(rgba, mode="RGBA")
+
+
 def _load_artwork(path: Path) -> Image.Image:
     with Image.open(path) as source:
         source.load()
@@ -88,6 +131,7 @@ def _load_artwork(path: Path) -> Image.Image:
         if source.width * source.height > 40_000_000:
             raise ValueError("принт слишком большой: максимум 40 мегапикселей")
         artwork = source.convert("RGBA")
+    artwork = _remove_connected_light_background(artwork)
     alpha = artwork.getchannel("A")
     bbox = alpha.getbbox()
     if bbox is None:
@@ -98,37 +142,52 @@ def _load_artwork(path: Path) -> Image.Image:
     return artwork
 
 
-def _prompt(
+def _lighting_prompt(lighting: str) -> str:
+    try:
+        return _LIGHTING_PRESETS[lighting]
+    except KeyError as exc:
+        raise ValueError("режим освещения должен быть signature или catalog") from exc
+
+
+def _base_photo_prompt(
     model: dict,
     shirt_color: str,
     placement: str,
     pose_index: int,
-    lighting: str = "signature",
+    lighting: str,
 ) -> str:
     color = "deep matte black" if shirt_color == "black" else "clean neutral white"
     side = "front chest" if placement == "front" else "center back"
-    body_surface = (
-        "the natural convex chest and ribcage"
-        if placement == "front"
-        else "the natural shoulder-blade and upper-back curvature"
-    )
     poses = _FRONT_POSES if placement == "front" else _BACK_POSES
     pose = poses[pose_index % len(poses)]
     identity = model.get("identity_prompt", "the same adult fashion model")
-    try:
-        lighting_prompt = _LIGHTING_PRESETS[lighting]
-    except KeyError as exc:
-        raise ValueError("режим освещения должен быть signature или catalog") from exc
-    return f"""Use case: identity-preserve product-mockup.
-Asset type: premium fashion e-commerce photograph for a T-shirt print listing.
+    lighting_prompt = _lighting_prompt(lighting)
+    return f"""Use case: identity-preserve blank-garment product photograph.
+Asset type: premium fashion e-commerce base photograph prepared for a later print-transfer edit.
 Input image 1 is the immutable identity reference. Use exactly the same fictional adult person: same facial identity, age, skin tone, eyes, hairstyle, hair color and body proportions. Identity description: {identity}.
-Input image 2 is the exact print artwork. Reproduce that artwork faithfully on the {side}: preserve its composition, Cyrillic spelling, colors, linework and proportions. Do not redesign, paraphrase, crop, mirror or invent any part of the artwork.
-Wardrobe: a plain {color} heavyweight cotton crew-neck T-shirt with a slightly relaxed oversized fit, natural sleeves and realistic fabric folds. No other logos, labels or graphics. The print belongs only on the {side}.
-Fabric integration: the artwork is physically printed into the cotton, never pasted on top as a flat sticker, rigid poster or floating layer. Conform the whole artwork continuously to {body_surface}. Apply realistic local perspective and gentle foreshortening from the camera angle. Let the artwork bend smoothly over broad cloth curvature and deform subtly with natural tension, wrinkles and folds while keeping every supplied element recognizable and correctly ordered. Cotton weave, soft highlights and garment shadows must remain visible through the ink; print brightness and contrast must respond to the same studio light as the shirt. Preserve clean adhered edges with no halo, border, rectangular alpha box, drop shadow or raised sticker thickness. Folds may pass naturally through the print, but must not destroy spelling, faces or essential details.
+Wardrobe: a clean blank T-shirt in {color}, heavyweight cotton, crew neck, slightly relaxed oversized fit. Absolutely no print, text, logo, label or graphic anywhere on the shirt.
+Garment geometry: preserve genuine cotton drape, seam tension, broad torso curvature, small natural wrinkles and several soft folds across the {side}. Do not iron or flatten the printable panel. Keep the panel unobstructed but visibly three-dimensional so a later edit can follow its real surface.
 Pose: {pose}.
-Composition: vertical photograph cropped from head to hips or upper thighs, never full body. Keep the T-shirt and the entire print close, large, sharp and easy to inspect. Do not let hands, hair or jewelry hide important parts of the print.
+Composition: vertical photograph cropped from head to hips or upper thighs, never full body. Keep the T-shirt close, large and sharp. Hands, hair and jewelry stay outside the {side}.
 Scene and lighting: {lighting_prompt}
-Constraints: one adult person only; photorealistic; anatomically correct hands; the face must match image 1; the artwork must match image 2; the print must follow the garment surface rather than remain geometrically flat; no text outside the supplied artwork; no watermark; no frame; no mockup UI; no extra objects."""
+Constraints: one adult person only; photorealistic; anatomically correct hands; face must match image 1; clean blank T-shirt; no watermark; no frame; no mockup UI; no extra objects."""
+
+
+def _transfer_prompt(shirt_color: str, placement: str) -> str:
+    color = "black" if shirt_color == "black" else "white"
+    side = "front chest" if placement == "front" else "center back"
+    body_surface = (
+        "convex chest and ribcage"
+        if placement == "front"
+        else "shoulder blades and upper-back curvature"
+    )
+    return f"""Use case: localized photorealistic garment print transfer.
+Input image 1 is the immutable base photograph of a person wearing a blank {color} T-shirt. Preserve the person, facial identity, body, pose, hands, hair, garment silhouette, seams, wrinkles, lighting, shadows, background, crop and camera exactly as supplied.
+Input image 2 is the exact print artwork. Remove no artwork elements and do not redesign, paraphrase, mirror, crop or invent text. Ignore any transparent or border-connected plain white canvas around the design.
+Edit scope: edit only the T-shirt surface at the {side}. Do not regenerate the whole photograph and do not alter pixels outside the garment. Place the complete artwork inside the shirt seams, centered and commercially sized, without bleeding onto skin, sleeves, trousers or background.
+Physical transfer: make the ink physically absorbed into the cotton, never pasted on top as a flat Photoshop layer, sticker, rigid poster or floating rectangle. Use the base photograph’s existing fabric luminance as a displacement and shading map. Warp the artwork continuously around the {body_surface}; compress and stretch it locally with perspective, seam tension, wrinkles and folds. Existing folds must remain visible through the ink and must bend the printed lines. Deep creases may softly darken or partially occlude tiny areas exactly as real printed fabric would.
+Surface realism: preserve cotton weave and microtexture through every printed color. Reuse the base photo’s highlights, midtones, contact shadows and color temperature inside the print. Edges are absorbed and matte with no halo, drop shadow, outline, glossy decal thickness, rectangular alpha box or perfectly planar geometry.
+Priority order: first preserve the base photograph and real garment geometry; second achieve believable cloth integration; third preserve artwork identity and spelling. Return one finished photorealistic e-commerce photograph with no additional text, watermark, frame, UI or objects."""
 
 
 def render_mockup(
@@ -155,9 +214,14 @@ def render_mockup(
         identity_reference = source.convert("RGB")
     artwork = _load_artwork(Path(artwork_path))
     premium_model = getattr(config, "GEMINI_MODEL_PREMIUM", None) if quality == "premium" else None
+    blank_photo = providers.generate_image_with_references(
+        _base_photo_prompt(model, shirt_color, placement, pose_index, lighting),
+        [identity_reference],
+        model=premium_model,
+    )
     image = providers.generate_image_with_references(
-        _prompt(model, shirt_color, placement, pose_index, lighting),
-        [identity_reference, artwork],
+        _transfer_prompt(shirt_color, placement),
+        [blank_photo, artwork],
         model=premium_model,
     )
     output_path = Path(output_path)
