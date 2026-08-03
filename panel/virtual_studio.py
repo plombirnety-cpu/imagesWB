@@ -181,10 +181,26 @@ def _transfer_prompt(shirt_color: str, placement: str) -> str:
         if placement == "front"
         else "shoulder blades and upper-back curvature"
     )
+    placement_contract = (
+        "Placement scale contract (mandatory): use a normalized front print zone measured on the visible "
+        "front torso panel of the T-shirt, from the inner side seams horizontally and from the collar seam "
+        "to the hem vertically. The allowed box spans only 18% to 82% horizontally and 12% to 70% "
+        "vertically. Keep at least 18% blank fabric beside the artwork on both sides and at least 30% of the "
+        "visible shirt length blank below the artwork to the hem. Scale the artwork down uniformly until its "
+        "complete silhouette fits inside both limits; preserve its original aspect ratio. Never enlarge it "
+        "beyond this zone, even on an oversized shirt or when the artwork is tall. The artwork must end around "
+        "the navel/upper abdomen and must never descend into the lower-abdomen or near-hem area."
+        if placement == "front"
+        else (
+            "Placement scale contract: center the complete artwork on the upper and middle back, keep it "
+            "inside the shirt seams and preserve its original aspect ratio."
+        )
+    )
     return f"""Use case: localized photorealistic garment print transfer.
 Input image 1 is the immutable base photograph of a person wearing a blank {color} T-shirt. Preserve the person, facial identity, body, pose, hands, hair, garment silhouette, seams, wrinkles, lighting, shadows, background, crop and camera exactly as supplied.
 Input image 2 is the exact print artwork. Remove no artwork elements and do not redesign, paraphrase, mirror, crop or invent text. Ignore any transparent or border-connected plain white canvas around the design.
-Edit scope: edit only the T-shirt surface at the {side}. Do not regenerate the whole photograph and do not alter pixels outside the garment. Place the complete artwork inside the shirt seams, centered and commercially sized, without bleeding onto skin, sleeves, trousers or background.
+Edit scope: edit only the T-shirt surface at the {side}. Do not regenerate the whole photograph and do not alter pixels outside the garment. Place the complete artwork without bleeding onto skin, sleeves, trousers or background.
+{placement_contract}
 Physical transfer: make the ink physically absorbed into the cotton, never pasted on top as a flat Photoshop layer, sticker, rigid poster or floating rectangle. Use the base photograph’s existing fabric luminance as a displacement and shading map. Warp the artwork continuously around the {body_surface}; compress and stretch it locally with perspective, seam tension, wrinkles and folds. Existing folds must remain visible through the ink and must bend the printed lines. Deep creases may softly darken or partially occlude tiny areas exactly as real printed fabric would.
 Surface realism: preserve cotton weave and microtexture through every printed color. Reuse the base photo’s highlights, midtones, contact shadows and color temperature inside the print. Edges are absorbed and matte with no halo, drop shadow, outline, glossy decal thickness, rectangular alpha box or perfectly planar geometry.
 Priority order: first preserve the base photograph and real garment geometry; second achieve believable cloth integration; third preserve artwork identity and spelling. Return one finished photorealistic e-commerce photograph with no additional text, watermark, frame, UI or objects."""

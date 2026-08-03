@@ -84,6 +84,24 @@ def test_render_mockup_uses_blank_shirt_then_fabric_transfer(monkeypatch, tmp_pa
     assert "front chest" in calls[1]["prompt"]
 
 
+def test_front_transfer_prompt_limits_artwork_to_center_chest_zone():
+    prompt = virtual_studio._transfer_prompt("white", "front")
+    lower_prompt = prompt.lower()
+
+    assert "normalized front print zone" in prompt
+    assert "18% to 82%" in prompt
+    assert "12% to 70%" in prompt
+    assert "at least 30% of the visible shirt length blank below" in prompt
+    assert "scale the artwork down uniformly" in lower_prompt
+    assert "never enlarge it beyond this zone" in lower_prompt
+
+
+def test_back_transfer_prompt_does_not_use_front_size_zone():
+    prompt = virtual_studio._transfer_prompt("black", "back")
+
+    assert "normalized front print zone" not in prompt
+
+
 def test_back_mockup_prompt_uses_back_surface_curvature(monkeypatch, tmp_path):
     artwork_path = tmp_path / "back-print.png"
     Image.new("RGBA", (300, 500), (255, 255, 255, 255)).save(artwork_path)
