@@ -7,6 +7,7 @@
 - Причина прежнего oversize: расплывчатое `commercially sized` без численных границ; высокий artwork масштабировался по ширине и заполнял нижнюю часть футболки. Фраза удалена из front-контракта.
 - Back-placement намеренно не изменён. Подсказка интерфейса сообщает о фиксированной центральной зоне переднего нанесения.
 - Регрессионный тест сначала падал на старом контракте, после исправления профильный набор: `13 passed`; `py_compile` и `git diff --check` — OK. Платный визуальный render автоматически не запускался.
+- Production развёрнут из commit `0c92471`: image `sha256:3a6ed7f3e1a3e5adfce53e2048999da709a7877623337ae1c24af2f578d54081`, контейнер healthy, restart count 0, volume `panel_panel_out` сохранён. Smoke: health 200, root 303, studio API без сессии 401. Откат: image `print-factory-panel:backup-pre-front-zone-0c92471`, каталог `/opt/print-panel-backup-pre-front-zone-0c92471`.
 
 ## 2026-08-02 — реалистичный двухэтапный перенос принта
 
