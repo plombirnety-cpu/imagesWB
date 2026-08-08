@@ -140,6 +140,61 @@ def test_plan_tasks_theme_branch_empty_dossier(monkeypatch):
     assert [t.label for t in tasks] == ["тачки"] * 3
 
 
+def test_plan_tasks_youth_motion_rotates_selected_04_08_05(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator.franchise_scout,
+        "build_dossier",
+        lambda *a, **k: {"characters": []},
+    )
+
+    tasks = orchestrator.plan_tasks(
+        styles=["38_youth_motion_mix"],
+        count=6,
+        theme="кофе после полуночи",
+        characters="",
+    )
+
+    assert [task.label for task in tasks] == ["кофе после полуночи"] * 6
+    assert all(task.style_id == "38_youth_motion_mix" for task in tasks)
+    assert "04 CONTROLLED TYPE CHAOS" in tasks[0].style_brief
+    assert "08 MARKER DOODLE MARGINS" in tasks[1].style_brief
+    assert "05 DIAGONAL MOTION" in tasks[2].style_brief
+    assert len({task.style_brief for task in tasks}) == 6
+    assert all("no rectangular poster" in task.style_brief.lower() for task in tasks)
+
+
+def test_render_task_passes_youth_variant_to_art_director(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_make_ideas(theme, *args, **kwargs):
+        captured["theme"] = theme
+        captured["style_pref"] = kwargs.get("style_pref")
+        return [{"prompt": "test", "chroma": "green"}]
+
+    def fake_render_design(design, tag, outdir, **kwargs):
+        path = outdir / f"{tag}.png"
+        Image.new("RGB", (4, 4), (0, 200, 0)).save(path)
+        return {"ok": True, "green": str(path), "error": None}
+
+    monkeypatch.setattr(orchestrator.art_director, "make_ideas", fake_make_ideas)
+    monkeypatch.setattr(orchestrator.batch_print, "render_design", fake_render_design)
+    task = orchestrator.DesignTask(
+        index=1,
+        label="ночной город",
+        style_id="38_youth_motion_mix",
+        tag="01_night",
+        source="theme",
+        style_brief="ASSIGNED YOUTH VARIANT: 04 CONTROLLED TYPE CHAOS",
+    )
+
+    result = orchestrator.render_task(task, tmp_path)
+
+    assert result["ok"] is True
+    assert captured["style_pref"] == "38_youth_motion_mix"
+    assert captured["theme"].startswith("ночной город\n\n")
+    assert "04 CONTROLLED TYPE CHAOS" in captured["theme"]
+
+
 def test_plan_tasks_theme_branch_dossier_network_failure(monkeypatch):
     def boom(title, kind="auto"):
         raise RuntimeError("сеть недоступна")

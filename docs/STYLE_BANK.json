@@ -460,6 +460,32 @@
       ]
     },
     {
+      "id": "38_youth_motion_mix",
+      "name_ru": "Молодёжный микс / типографика + маркер + динамика",
+      "essence": "A universal youth streetwear PRINT system built from the user's chosen directions 04, 08 and 05. The orchestrator assigns one mandatory variant per slot and rotates them in this order: controlled typographic chaos, marker doodle margins, diagonal motion, followed by distinct hybrids. Preserve the user's subject and turn it into one original short meaningful phrase plus one topic-specific hero symbol or object. The design must feel like contemporary apparel graphics rather than a poster: type and illustration form an open, irregular silhouette directly on the chroma field, with genuine chroma gaps between separated islands and a clean 6-8% moat at every edge. Vary headline geometry, font character, visual hierarchy, accent colour, supporting marks and subject symbol from design to design. Do not repeatedly default to lightning, stars, flames, skulls, wings or city skylines; derive the visual metaphor from the actual topic. Never create a magazine cover, rectangular poster, page, card, full-bleed scene, sticker, badge blob or shared backing. No enclosing white outline, cutline or halo around the whole group.",
+      "text_treatment": "Use one dominant, correctly spelled 2-5 word headline tied to the subject, plus at most one very short supporting line. For Russian subjects use real Cyrillic Russian with no fake glyphs or mixed pseudo-letters. The assigned slot variant determines the treatment: oversized staggered condensed type for CONTROLLED TYPE CHAOS; energetic hand-drawn letters with sparse arrows, circles and underlines for MARKER DOODLE MARGINS; italic or perspective-compressed type on one clear diagonal for DIAGONAL MOTION. Never reproduce the same wording, baseline structure or lettering silhouette across a batch. All lettering must work unchanged on black and white garments: use a coloured, silver-grey or warm-greige fill with a dark charcoal inner keyline and a warm-ivory outer keyline. Never use pure-black-only or pure-white-only type, and never place text inside a rectangular panel.",
+      "palette_rule": "A print-friendly 3-5 ink system: charcoal contour, warm ivory highlight, one neutral midtone and one rotating high-energy accent chosen per slot from acid magenta, signal yellow, electric cyan, hot orange, vivid violet, acid red, lime or cobalt. Avoid rainbow gradients and avoid using a solid black or white field behind the composition. Choose green or blue chroma so neither the hero object nor its accent disappears during extraction.",
+      "mood_tags": [
+        "молодёжный",
+        "стритвир",
+        "типографика",
+        "маркер",
+        "динамика",
+        "универсальный",
+        "графический принт",
+        "streetwear"
+      ],
+      "constraints": [
+        "Обязательная ротация 04 → 08 → 05: типографический хаос, маркерные детали, диагональная динамика; последующие слоты используют отличающиеся гибриды",
+        "Один главный заголовок из 2-5 слов и максимум одна короткая вспомогательная строка; текст связан с темой и написан без ошибок",
+        "Главный объект или символ каждый раз выводится из темы; не использовать молнию, звезду, пламя, череп, крылья или городской силуэт как универсальную заглушку",
+        "Открытый фигурный принт на хромакее с промежутками фона между элементами и чистым отступом 6-8% со всех сторон",
+        "Запрещены прямоугольная обложка, постер, страница, карточка, общий фон, стикерная подложка, белый cutline и общий ореол",
+        "Палитра 3-5 печатных цветов; акцентный цвет, геометрия заголовка, декоративные знаки и композиционная ось меняются в каждом слоте",
+        "Текст читается на чёрной и белой футболке: цветная/среднетоновая заливка + тёмный внутренний и светлый тёплый внешний контур"
+      ]
+    },
+    {
       "id": "37_auto_racing_editorial",
       "name_ru": "Авто-рейсинг / машина + смысловой текст",
       "theme_optional": true,

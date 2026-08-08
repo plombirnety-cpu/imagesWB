@@ -83,6 +83,42 @@ _AUTONOMOUS_STYLE_BRIEFS = {
 
 _AUTOMOTIVE_STYLE_ID = "37_auto_racing_editorial"
 
+_YOUTH_MOTION_STYLE_ID = "38_youth_motion_mix"
+
+# Пользователь выбрал визуальные направления 04, 08 и 05 именно в таком порядке.
+# Ротация задаётся до вызова арт-директора, поэтому независимые Gemini-вызовы не
+# сходятся к одному и тому же безопасному шаблону. Девять слотов дополнительно
+# меняют баланс графики, акцентный цвет и характер типографики.
+_YOUTH_MOTION_VARIANTS = (
+    "04 CONTROLLED TYPE CHAOS / acid magenta — oversized condensed Cyrillic headline, staggered baselines, one crossed-out fragment and sparse registration marks; the theme-derived symbol stays secondary",
+    "08 MARKER DOODLE MARGINS / signal yellow — hand-drawn Cyrillic headline with loose arrows, circles, underlines and only 3-5 small theme-derived doodles; keep the centre strong and uncluttered",
+    "05 DIAGONAL MOTION / electric cyan — italic headline and one theme-derived hero object moving on a single rising diagonal with speed bars and broken trailing fragments",
+    "04 CONTROLLED TYPE CHAOS / hot orange — wide grotesk headline split across unequal levels, one rotated word and compact editorial microtype; use a different subject symbol from every other slot",
+    "08 MARKER DOODLE MARGINS / vivid violet — bold clean headline interrupted by dry-brush notes, brackets and hand-written emphasis; no sticker bubbles and no all-over doodle wallpaper",
+    "05 DIAGONAL MOTION / acid red — compressed type stretched by perspective, two sharp direction changes and a theme-specific motion trace; preserve open chroma gaps",
+    "04+08 TYPE AND MARKER HYBRID / lime accent — disciplined block lettering with one hand-written correction layer and a single symbolic sketch derived from the topic",
+    "08+05 DOODLE IN MOTION / cobalt accent — loose marker headline carried by a curved motion path, with tiny arrows and impact marks that never form an enclosing badge",
+    "04+05 TYPE IMPACT / warm yellow accent — giant asymmetric word pair cut by one diagonal speed axis, with a compact theme-specific object breaking the letter rhythm",
+)
+
+_YOUTH_MOTION_COMMON_CONTRACT = (
+    "YOUTH MOTION COMMON CONTRACT: preserve the user's subject and invent an original, "
+    "short, meaningful phrase connected to it. For a Russian subject use correctly "
+    "spelled Cyrillic, never pseudo-letters. Derive the hero object and marks from the "
+    "subject; DO NOT default to lightning bolts, stars, flames, skulls or city skylines. "
+    "Build an open irregular apparel-print silhouette directly on chroma with visible "
+    "chroma gaps and a clean 6-8% moat. Absolutely no rectangular poster, magazine "
+    "cover, page, card, shared backing, sticker cutline, white halo or enclosing blob. "
+    "Use 3-5 print-friendly inks. Main lettering must remain readable on both black "
+    "and white shirts through a coloured or midtone fill plus dark inner keyline and "
+    "warm-light outer keyline; never pure-black-only or pure-white-only type."
+)
+
+
+def _youth_motion_variant_brief(slot: int) -> str:
+    variant = _YOUTH_MOTION_VARIANTS[slot % len(_YOUTH_MOTION_VARIANTS)]
+    return f"ASSIGNED YOUTH VARIANT: {variant}. {_YOUTH_MOTION_COMMON_CONTRACT}"
+
 # A brand-only request used to be repeated verbatim for every slot.  Each
 # independent image call consequently converged on the same best-known model
 # (for Mercedes this was almost always the 190E).  For the most common marques
@@ -395,6 +431,7 @@ class DesignTask:
     # "characters"/"theme" (там character_en решает арт-директор, как раньше).
     char_en: str = ""       # name_en персонажа из досье (для character_ref)
     title_hint: str = ""     # тайтл франшизы из досье (для character_ref, fallback)
+    style_brief: str = ""    # принудительная вариация внутри выбранного стиля
 
 
 def plan_tasks(
@@ -469,10 +506,18 @@ def plan_tasks(
             title_hint = ""
 
     style_cycle = itertools.cycle(style_list)
+    style_occurrences: dict[str, int] = {}
     tasks: list[DesignTask] = []
     used_tags: set[str] = set()
     for i, (label, char_en) in enumerate(entries, start=1):
         style_id = next(style_cycle)
+        style_occurrence = style_occurrences.get(style_id, 0)
+        style_occurrences[style_id] = style_occurrence + 1
+        style_brief = (
+            _youth_motion_variant_brief(style_occurrence)
+            if style_id == _YOUTH_MOTION_STYLE_ID
+            else ""
+        )
         base = sanitize_slug(label, fallback="item")
         tag = f"{i:02d}_{base}_{style_id}"[:120]
         suffix = 2
@@ -484,6 +529,7 @@ def plan_tasks(
             index=i, label=label, style_id=style_id, tag=tag, source=source,
             char_en=char_en,
             title_hint=(title_hint if source == "franchise" else ""),
+            style_brief=style_brief,
         ))
     return tasks
 
@@ -504,8 +550,11 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
         # `auto` означает именно отсутствие принудительного банковского стиля:
         # арт-директор выбирает композицию по теме, а не получает буквальный id.
         style_pref = None if task.style_id == "auto" else task.style_id
+        idea_theme = task.label
+        if task.style_brief:
+            idea_theme = f"{idea_theme}\n\n{task.style_brief}"
         designs = art_director.make_ideas(
-            task.label, 1, fmt="cutout", style_pref=style_pref
+            idea_theme, 1, fmt="cutout", style_pref=style_pref
         )
         design = designs[0]
     except Exception as e:  # noqa: BLE001

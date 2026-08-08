@@ -106,6 +106,8 @@ def test_api_styles_reads_real_bank():
     assert any(s["id"] == "34_anime_magazine_cover" for s in styles)
     automotive = next(s for s in styles if s["id"] == "37_auto_racing_editorial")
     assert automotive["theme_optional"] is True
+    youth = next(s for s in styles if s["id"] == "38_youth_motion_mix")
+    assert youth["theme_optional"] is False
 
 
 def test_generate_rejects_empty_theme_and_characters():
