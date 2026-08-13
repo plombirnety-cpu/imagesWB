@@ -85,6 +85,46 @@ _AUTOMOTIVE_STYLE_ID = "37_auto_racing_editorial"
 
 _YOUTH_MOTION_STYLE_ID = "38_youth_motion_mix"
 
+_ROCK_BAND_STYLE_ID = "39_rock_band_print"
+
+# Три композиционные семьи извлечены из пользовательских референсов: крупный
+# фронтмен с инструментом, цветовой коллаж всего состава и сюжетный metal-маскот.
+# Их назначает код ДО вызова арт-директора, иначе независимые генерации быстро
+# сходятся к одному безопасному шаблону с гитаристом и круглым диском.
+_ROCK_BAND_VARIANTS = (
+    "A FRONTMAN IMPACT / crimson + antique gold — one iconic lead performer from the requested band, waist-up or three-quarter view, one real instrument cutting the composition on a strong diagonal, and one offset circular stage-light disc; keep the silhouette open",
+    "B COLOURIZED LINEUP COLLAGE / acid lime + cyan + magenta + violet ON BLUE CHROMA — the requested band's recognizable lineup grouped in one candid editorial moment, each member treated with a distinct flat colour channel; because one member may be green-tinted, force a uniform BLUE chroma field and use one irregular acid-lime support field, not a rectangular page",
+    "C METAL MASCOT NARRATIVE / inferno red + ember orange + steel blue — one original genre-appropriate mascot or fantasy scene derived from the requested band's themes, with layered action and a large sun or moon disc; do not copy existing album artwork or an existing mascot pose",
+    "A FRONTMAN IMPACT / bone + electric blue + scarlet — one vocalist in a peak live gesture, microphone cable or instrument creating the diagonal; use broken rays and a partial disc instead of a complete badge",
+    "B COLOURIZED LINEUP COLLAGE / cobalt + warm yellow + vermilion ON BLUE CHROMA — full band in an informal backstage or rehearsal interaction, posterized into separate colour zones with genuine chroma gaps between bodies and accents; force blue chroma if any person or accent uses green",
+    "C METAL MASCOT NARRATIVE / toxic violet + flame orange + cold silver — an original symbolic creature, relic or mythic confrontation connected to the band's lyrical world; asymmetrical action and no generic skull-only shortcut",
+    "A+B LIVE COLLAGE HYBRID / red + cream + cyan — one dominant performer in front with two or three smaller bandmates behind, diagonal instrument and torn geometric stage-light fragments; no duplicated person",
+    "B+C LINEUP MYTH HYBRID / lime + magenta + charcoal — the band lineup integrated with one symbolic creature or emblem as a secondary layer, with each human still readable and correctly counted",
+    "A+C HERO AND MASCOT HYBRID / antique gold + crimson + steel — one performer confronting or overlapping an original mascot silhouette, with the instrument forming the compositional spine and an incomplete disc behind them",
+)
+
+_ROCK_BAND_COMMON_CONTRACT = (
+    "ROCK BAND PRINT COMMON CONTRACT: the user's theme is the band name and must stay "
+    "the subject of this design. Create fresh merchandise artwork, not a copy of an "
+    "album cover, photograph, official logo or the supplied reference. Put one huge, "
+    "correctly spelled band-name wordmark at the top; preserve the exact requested "
+    "spelling but design new letterforms appropriate to the genre. Use an open, "
+    "irregular apparel-print silhouette directly on flat chroma, real chroma gaps "
+    "between separated elements and a clean 6-8% moat. No rectangular poster, page, "
+    "card, full-bleed scene, sticker cutline, shared white backing or enclosing halo. "
+    "IGNORE halftone as a style feature: use clean flat print shading, painterly poster "
+    "colour blocks and controlled grain only. Never reproduce the references' white "
+    "rectangles, broken extraction patches, horizontal striping, pixel smears or torn "
+    "digital artefacts. Keep anatomy and instrument geometry correct. Use 3-6 strong "
+    "inks and make the wordmark readable on both black and white shirts with coloured "
+    "fill, dark inner keyline and warm-light outer keyline. No tiny fake tour text."
+)
+
+
+def _rock_band_variant_brief(slot: int) -> str:
+    variant = _ROCK_BAND_VARIANTS[slot % len(_ROCK_BAND_VARIANTS)]
+    return f"ASSIGNED ROCK VARIANT: {variant}. {_ROCK_BAND_COMMON_CONTRACT}"
+
 # Пользователь выбрал визуальные направления 04, 08 и 05 именно в таком порядке.
 # Ротация задаётся до вызова арт-директора, поэтому независимые Gemini-вызовы не
 # сходятся к одному и тому же безопасному шаблону. Девять слотов дополнительно
@@ -461,6 +501,19 @@ def plan_tasks(
     if free_prompt:
         entries = [(free_prompt, "")] * count
         source = "free"
+    elif style_list == [_ROCK_BAND_STYLE_ID] and theme:
+        # Название рок-группы — самостоятельная тема, а не тайтл аниме/фильма.
+        # Не запускаем franchise_scout и не превращаем найденных музыкантов в
+        # отдельные несвязанные слоты. Если владелец перечислил состав вручную,
+        # сохраняем его как один общий reference-блок для каждой композиции.
+        band_reference = theme
+        if characters:
+            band_reference = (
+                f"ROCK BAND: {theme}. REFERENCE LINEUP (use only when the assigned "
+                f"composition needs members): {characters}"
+            )
+        entries = [(band_reference, "")] * count
+        source = "rock_band"
     elif names and style_list == [_AUTOMOTIVE_STYLE_ID]:
         entries = [(brief, "") for brief in _automotive_slot_briefs(names, count)]
         source = "automotive_subject"
@@ -513,11 +566,12 @@ def plan_tasks(
         style_id = next(style_cycle)
         style_occurrence = style_occurrences.get(style_id, 0)
         style_occurrences[style_id] = style_occurrence + 1
-        style_brief = (
-            _youth_motion_variant_brief(style_occurrence)
-            if style_id == _YOUTH_MOTION_STYLE_ID
-            else ""
-        )
+        if style_id == _YOUTH_MOTION_STYLE_ID:
+            style_brief = _youth_motion_variant_brief(style_occurrence)
+        elif style_id == _ROCK_BAND_STYLE_ID:
+            style_brief = _rock_band_variant_brief(style_occurrence)
+        else:
+            style_brief = ""
         base = sanitize_slug(label, fallback="item")
         tag = f"{i:02d}_{base}_{style_id}"[:120]
         suffix = 2

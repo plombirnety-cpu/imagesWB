@@ -195,6 +195,52 @@ def test_render_task_passes_youth_variant_to_art_director(tmp_path, monkeypatch)
     assert "04 CONTROLLED TYPE CHAOS" in captured["theme"]
 
 
+def test_plan_tasks_rock_band_rotates_three_reference_families_without_dossier(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator.franchise_scout,
+        "build_dossier",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("рок-стиль не должен запускать поиск аниме-франшизы")
+        ),
+    )
+
+    tasks = orchestrator.plan_tasks(
+        styles=["39_rock_band_print"],
+        count=6,
+        theme="КИНО",
+        characters="",
+    )
+
+    assert [task.label for task in tasks] == ["КИНО"] * 6
+    assert all(task.source == "rock_band" for task in tasks)
+    assert all(task.style_id == "39_rock_band_print" for task in tasks)
+    assert "A FRONTMAN IMPACT" in tasks[0].style_brief
+    assert "B COLOURIZED LINEUP COLLAGE" in tasks[1].style_brief
+    assert "C METAL MASCOT NARRATIVE" in tasks[2].style_brief
+    assert len({task.style_brief for task in tasks}) == 6
+    assert all("ignore halftone" in task.style_brief.lower() for task in tasks)
+    assert all("white rectangles" in task.style_brief.lower() for task in tasks)
+
+
+def test_plan_tasks_rock_band_keeps_optional_lineup_as_one_reference_block(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator.franchise_scout,
+        "build_dossier",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("dossier must not run")),
+    )
+
+    tasks = orchestrator.plan_tasks(
+        styles=["39_rock_band_print"],
+        count=3,
+        theme="СЕВЕР",
+        characters="Антон, Борис, Вера, Глеб",
+    )
+
+    assert all(task.source == "rock_band" for task in tasks)
+    assert all("ROCK BAND: СЕВЕР" in task.label for task in tasks)
+    assert all("Антон, Борис, Вера, Глеб" in task.label for task in tasks)
+
+
 def test_plan_tasks_theme_branch_dossier_network_failure(monkeypatch):
     def boom(title, kind="auto"):
         raise RuntimeError("сеть недоступна")

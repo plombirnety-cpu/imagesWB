@@ -11,3 +11,4 @@ __pycache__/
 tools/
 trends_queue.jsonl
 trends_queue.done.jsonl
+rock_style_tests_*/

@@ -108,6 +108,8 @@ def test_api_styles_reads_real_bank():
     assert automotive["theme_optional"] is True
     youth = next(s for s in styles if s["id"] == "38_youth_motion_mix")
     assert youth["theme_optional"] is False
+    rock = next(s for s in styles if s["id"] == "39_rock_band_print")
+    assert rock["theme_optional"] is False
 
 
 def test_generate_rejects_empty_theme_and_characters():
