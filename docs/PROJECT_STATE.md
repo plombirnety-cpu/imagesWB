@@ -9,6 +9,7 @@
 - Профильные офлайн-тесты: **37 passed**. Полный выбранный набор дал 71 passed / 4 failed из-за старых сетевых тестов панели, которые попытались вызвать Gemini без ключа; новые тесты рока прошли. JSON валиден, Python компилируется, `git diff --check` чист.
 - Визуальная проверка: три вымышленные группы (`ГРОМ`, `СЕВЕР`, `ЖЕЛЕЗНЫЙ ЗВЕРЬ`), четыре image-вызова с учётом коррекции зелёного фона на синий для lineup-ветки. GreenKey: все три финала RGBA 1024×1536, alpha extrema 0–255; ключи green/blue/green.
 - Из-за недокументированного production image `sha256:3e98ee...` подготовлен точечный overlay-кандидат `print-factory-panel:candidate-rock-20260813` поверх `print-factory-panel:backup-pre-rock-20260813`. Кандидат проверен на `127.0.0.1:18046`: health 200, restart count 0, локальный план выдаёт `rock_band` и A→B→C. Production переключается только после этих проверок с сохранением volume `panel_panel_out`.
+- Production переключён на overlay из commit `ed971e5`: image `sha256:f390352e190f966216bc445ab2b688504f6cc4ad98cfbe0a3cc4aa155bc3a8a4`, health 200, root 303, restart count 0, Python compile OK, style 39 подтверждён внутри контейнера. Откат: image `print-factory-panel:backup-pre-rock-20260813`, каталог `/opt/print-panel-backup-pre-rock-ed971e5`; persistent volume не изменялся.
 
 ## 2026-08-12 — 20 мемных принтов по профессиям
 
