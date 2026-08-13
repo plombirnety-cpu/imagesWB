@@ -15,6 +15,7 @@
 | `ArchivoBlack-Regular.ttf` | Archivo Black | OFL 1.1 | `archivo` — v1 `tag`, v2 `under` |
 | `Bangers-Regular.ttf` | Bangers | OFL 1.1 | `bangers` — v1 `comic` |
 | `NotoSansJP[wght].ttf` | Noto Sans JP (variable) | OFL 1.1 | `notojp`/`jp` — катакана/кандзи, ось `wght` фиксируется на 900 (Black) кодом (`font.set_variation_by_axes([900])`) |
+| `FreeSansBold.ttf` | GNU FreeFont / FreeSans Bold | GPLv3+ with Font Exception | Точная кириллическая типографика для рок-серии; извлечён из Debian-пакета fonts-freefont-ttf рабочего контейнера |
 
 ## v3 (новые, этот заход)
 

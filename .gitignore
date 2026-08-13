@@ -12,3 +12,4 @@ tools/
 trends_queue.jsonl
 trends_queue.done.jsonl
 rock_style_tests_*/
+rock_top40_*/
