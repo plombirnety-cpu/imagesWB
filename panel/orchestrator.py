@@ -92,9 +92,9 @@ _ROCK_BAND_STYLE_ID = "39_rock_band_print"
 # Их назначает код ДО вызова арт-директора, иначе независимые генерации быстро
 # сходятся к одному безопасному шаблону с гитаристом и круглым диском.
 _ROCK_BAND_VARIANTS = (
-    "A FRONTMAN IMPACT / crimson + antique gold — one iconic lead performer from the requested band, waist-up or three-quarter view, one real instrument cutting the composition on a strong diagonal, and one offset circular stage-light disc; keep the silhouette open",
-    "B COLOURIZED LINEUP COLLAGE / acid lime + cyan + magenta + violet ON BLUE CHROMA — the requested band's recognizable lineup grouped in one candid editorial moment, each member treated with a distinct flat colour channel; because one member may be green-tinted, force a uniform BLUE chroma field and use one irregular acid-lime support field, not a rectangular page",
-    "C METAL MASCOT NARRATIVE / inferno red + ember orange + steel blue — one original genre-appropriate mascot or fantasy scene derived from the requested band's themes, with layered action and a large sun or moon disc; do not copy existing album artwork or an existing mascot pose",
+    "A FRONTMAN IMPACT / crimson + antique gold — one iconic lead performer from the requested band, waist-up or three-quarter view, one real instrument cutting the composition on a strong diagonal, and one offset circular stage-light disc; render as a hand-inked 1970s gig-print with broad gouache colour masses and economical contour lines",
+    "B COLOURIZED LINEUP COLLAGE / acid lime + cyan + magenta + violet ON BLUE CHROMA — the requested band's recognizable lineup grouped in one candid editorial moment, each member treated like a real cut-paper photo silkscreen in one distinct flat colour channel; because one member may be green-tinted, force a uniform BLUE chroma field and use one irregular acid-lime support field, not a rectangular page",
+    "C METAL MASCOT NARRATIVE / inferno red + ember orange + steel blue — one original genre-appropriate mascot or fantasy scene derived from the requested band's themes, simplified into a hand-painted 1980s metal screenprint with two large silhouettes and a large sun or moon disc; no micro-detailed armour and no copied album artwork",
     "A FRONTMAN IMPACT / bone + electric blue + scarlet — one vocalist in a peak live gesture, microphone cable or instrument creating the diagonal; use broken rays and a partial disc instead of a complete badge",
     "B COLOURIZED LINEUP COLLAGE / cobalt + warm yellow + vermilion ON BLUE CHROMA — full band in an informal backstage or rehearsal interaction, posterized into separate colour zones with genuine chroma gaps between bodies and accents; force blue chroma if any person or accent uses green",
     "C METAL MASCOT NARRATIVE / toxic violet + flame orange + cold silver — an original symbolic creature, relic or mythic confrontation connected to the band's lyrical world; asymmetrical action and no generic skull-only shortcut",
@@ -112,8 +112,14 @@ _ROCK_BAND_COMMON_CONTRACT = (
     "irregular apparel-print silhouette directly on flat chroma, real chroma gaps "
     "between separated elements and a clean 6-8% moat. No rectangular poster, page, "
     "card, full-bleed scene, sticker cutline, shared white backing or enclosing halo. "
-    "IGNORE halftone as a style feature: use clean flat print shading, painterly poster "
-    "colour blocks and controlled grain only. Never reproduce the references' white "
+    "IGNORE halftone as a style feature. HUMAN-MADE PRINT RULE: use 3-5 broad flat "
+    "ink masses, decisive hand-drawn contour, a few deliberate shadow shapes and "
+    "slightly imperfect screenprint registration. Faces stay natural and specific, "
+    "not beautified. Surfaces stay graphic and quiet. No photorealistic rendering, "
+    "no CGI, 3D bevelled objects, HDR glow, glossy fantasy concept art, hyper-sharp "
+    "microtexture, pores on every face, ornate noise on every surface, generic epic "
+    "armour, random sparks or swirling effect overload. The design must be readable "
+    "from two metres and visibly printable with real separated inks. Never reproduce the references' white "
     "rectangles, broken extraction patches, horizontal striping, pixel smears or torn "
     "digital artefacts. Keep anatomy and instrument geometry correct. Use 3-6 strong "
     "inks and make the wordmark readable on both black and white shirts with coloured "

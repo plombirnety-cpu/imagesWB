@@ -119,6 +119,20 @@ def test_style_bank_ring_medallion_is_marked_hybrid():
     assert ring.get("hybrid_ring_text") is True
 
 
+def test_rock_style_requires_human_printmaking_and_rejects_ai_gloss():
+    data = json.loads(STYLE_BANK_PATH.read_text(encoding="utf-8"))
+    rock = next(s for s in data["styles"] if s["id"] == "39_rock_band_print")
+    contract = " ".join([
+        rock["essence"], rock["palette_rule"], *rock["constraints"],
+    ]).lower()
+    assert "human-made" in contract
+    assert "3-5 broad flat ink masses" in contract
+    assert "no photorealism" in contract
+    assert "hdr" in contract
+    assert "hyper-sharp microtexture" in contract
+    assert "two metres" in contract
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2. Ротация (RecentStyles + _pick_style_candidates)
 # ═══════════════════════════════════════════════════════════════════════════════

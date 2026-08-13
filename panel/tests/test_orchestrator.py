@@ -220,6 +220,8 @@ def test_plan_tasks_rock_band_rotates_three_reference_families_without_dossier(m
     assert len({task.style_brief for task in tasks}) == 6
     assert all("ignore halftone" in task.style_brief.lower() for task in tasks)
     assert all("white rectangles" in task.style_brief.lower() for task in tasks)
+    assert all("no photorealistic rendering" in task.style_brief.lower() for task in tasks)
+    assert all("3-5 broad flat" in task.style_brief.lower() for task in tasks)
 
 
 def test_plan_tasks_rock_band_keeps_optional_lineup_as_one_reference_block(monkeypatch):
