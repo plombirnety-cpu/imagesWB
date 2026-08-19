@@ -99,6 +99,11 @@ RGBA PNG алгоритмом актуального GreenKey (`sharp=True`, б�
 Сам пароль не хранится в конфигурации — только его SHA-256. На обычном HTTP это
 лёгкая защита от случайного доступа, а не замена HTTPS.
 
+Для доверенных машинных интеграций можно задать `PRINT_FACTORY_SERVICE_TOKEN`.
+Запрос с `Authorization: Bearer <token>` получает доступ только к маршрутам
+`/api/*`; веб-интерфейс по этому ключу не открывается. Ключ должен содержать не
+меньше 32 символов и храниться только в `.env`, отдельно от Git.
+
 ## Локальный запуск
 
 ```bash
@@ -180,6 +185,7 @@ docker compose -f panel/docker-compose.yml up -d --build
 | `PANEL_STYLE_BANK` | `../docs/STYLE_BANK.json` | путь к банку стилей |
 | `PANEL_JOB_HISTORY_LIMIT` | `20` | сколько завершённых job-ов держим (старые чистятся) |
 | `PANEL_ACCESS_PASSWORD_SHA256` | пусто | SHA-256 пароля в hex; пусто отключает экран входа |
+| `PRINT_FACTORY_SERVICE_TOKEN` | пусто | Bearer-ключ 32+ символа для машинного доступа только к `/api/*` |
 | `PANEL_AUTH_COOKIE_SECURE` | `off` | `on` только после включения HTTPS |
 | `PANEL_AUTH_COOKIE_MAX_AGE` | `2592000` | срок сессии в секундах (30 дней) |
 | `PANEL_AUTH_FAILURE_LIMIT` | `5` | число неверных попыток до временной блокировки |

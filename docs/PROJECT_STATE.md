@@ -1,5 +1,15 @@
 # PROJECT_STATE — print-factory-nb
 
+## 2026-08-19 — сервисный доступ для Telegram/ИИ-ассистента
+
+- Устранён простой production: после перезапуска сервера контейнер `print-factory-panel` оставался в состоянии `Exited (0)`, потому что фактическая restart policy была `no`. Контейнер запущен, политика изменена на `unless-stopped`; внешний `/health` снова отвечает HTTP 200.
+- Добавлена отдельная машинная авторизация `Authorization: Bearer <PRINT_FACTORY_SERVICE_TOKEN>` только для маршрутов `/api/*`. Токен не открывает веб-панель и сравнивается через `hmac.compare_digest`; существующий вход по паролю сохранён.
+- Пустой токен отключает машинный доступ; непустой токен короче 32 символов останавливает запуск с понятной ошибкой. Значение секрета не хранится в git и не записывается в документацию.
+- Обновлены `.env.example` и `panel/README.md`, добавлен регрессионный тест правильного, неправильного и UI-применения Bearer-токена.
+- Изолированный Docker-кандидат `print-factory-panel:service-auth-20260819` прошёл полный набор `panel/tests/test_app.py`: **14 passed**. Проверены health 200, анонимный API 401, правильный Bearer 200, неправильный Bearer 401 и запрет входа в UI по сервисному токену.
+- Production развёрнут минимальным overlay поверх точного прежнего image, чтобы сохранить недокументированные серверные функции радара: image `sha256:36693d867e18d10d89f5a64b008bf4040846d29ffb5845002a1a2b69789915e6`. Внешний health 200; production-коды: anonymous API 401, service API 200, wrong token 401, UI с service token 303.
+- Volume `panel_panel_out` сохранён, restart policy — `unless-stopped`, `PANEL_RADAR_AUTO_ENABLED=off`. Откат: image `print-factory-panel:backup-pre-service-auth-20260819`, остановленный контейнер `print-factory-panel-pre-service-auth-20260819`, резервный `.env.backup-pre-service-auth-20260819`.
+
 ## 2026-08-13 — завершена индивидуальная ROCK SIGNATURE 40
 
 - Создана вторая серия 8×5: ещё 40 принтов, каждый пул следует собственному визуальному языку конкретной группы, а не общей рок-сетке.

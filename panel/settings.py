@@ -109,6 +109,12 @@ ACCESS_PASSWORD_SHA256 = os.getenv("PANEL_ACCESS_PASSWORD_SHA256", "").strip().l
 if ACCESS_PASSWORD_SHA256 and not re.fullmatch(r"[0-9a-f]{64}", ACCESS_PASSWORD_SHA256):
     raise RuntimeError("PANEL_ACCESS_PASSWORD_SHA256 должен быть SHA-256 в hex (64 символа)")
 
+# Отдельный машинный ключ для Telegram-бота и других доверенных сервисов.
+# Он открывает только /api/* и не заменяет парольную сессию веб-интерфейса.
+SERVICE_TOKEN = os.getenv("PRINT_FACTORY_SERVICE_TOKEN", "").strip()
+if SERVICE_TOKEN and len(SERVICE_TOKEN) < 32:
+    raise RuntimeError("PRINT_FACTORY_SERVICE_TOKEN должен содержать не меньше 32 символов")
+
 AUTH_COOKIE_SECURE = os.getenv("PANEL_AUTH_COOKIE_SECURE", "off").strip().lower() in {
     "1", "true", "yes", "on",
 }

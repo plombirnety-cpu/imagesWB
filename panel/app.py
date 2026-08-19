@@ -174,6 +174,19 @@ def _has_access(request: Request) -> bool:
     return bool(supplied) and hmac.compare_digest(supplied, _session_token())
 
 
+def _has_service_access(request: Request) -> bool:
+    """Разрешает доверенному сервису Bearer-доступ только к HTTP API."""
+    if not settings.SERVICE_TOKEN or not request.url.path.startswith("/api/"):
+        return False
+    scheme, separator, credential = request.headers.get("authorization", "").partition(" ")
+    if not separator or scheme.lower() != "bearer" or not credential:
+        return False
+    return hmac.compare_digest(
+        credential.encode("utf-8"),
+        settings.SERVICE_TOKEN.encode("utf-8"),
+    )
+
+
 def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
@@ -237,7 +250,11 @@ border-radius:8px;background:#4a2226;color:#ffb3b8;font-size:13px}}
 
 @app.middleware("http")
 async def require_panel_access(request: Request, call_next):
-    if not _auth_enabled() or request.url.path in {"/health", "/login"}:
+    if request.url.path in {"/health", "/login"}:
+        return await call_next(request)
+    if _has_service_access(request):
+        return await call_next(request)
+    if not _auth_enabled():
         return await call_next(request)
     if _has_access(request):
         return await call_next(request)

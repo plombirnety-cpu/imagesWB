@@ -58,6 +58,7 @@ def test_password_gate_protects_ui_and_api(monkeypatch):
     password = "test-panel-password"
     password_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
     monkeypatch.setattr(panel_app.settings, "ACCESS_PASSWORD_SHA256", password_hash)
+    monkeypatch.setattr(panel_app.settings, "SERVICE_TOKEN", "")
     panel_app._auth_failures.clear()
     client = TestClient(panel_app.app)
 
@@ -94,6 +95,28 @@ def test_password_gate_protects_ui_and_api(monkeypatch):
     logged_out = client.get("/logout", follow_redirects=False)
     assert logged_out.status_code == 303
     assert client.get("/", follow_redirects=False).status_code == 303
+
+
+def test_service_bearer_token_opens_only_api(monkeypatch):
+    password_hash = hashlib.sha256(b"test-panel-password").hexdigest()
+    monkeypatch.setattr(panel_app.settings, "ACCESS_PASSWORD_SHA256", password_hash)
+    monkeypatch.setattr(panel_app.settings, "SERVICE_TOKEN", "service-token-for-tests")
+    client = TestClient(panel_app.app)
+
+    valid_headers = {"Authorization": "Bearer service-token-for-tests"}
+    assert client.get("/api/styles", headers=valid_headers).status_code == 200
+
+    wrong = client.get(
+        "/api/styles",
+        headers={"Authorization": "Bearer wrong-service-token"},
+    )
+    assert wrong.status_code == 401
+    assert wrong.json()["detail"] == "требуется вход"
+
+    # Сервисный ключ предназначен только для API и не заменяет вход в веб-панель.
+    root = client.get("/", headers=valid_headers, follow_redirects=False)
+    assert root.status_code == 303
+    assert root.headers["location"].startswith("/login")
 
 
 def test_api_styles_reads_real_bank():
