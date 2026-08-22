@@ -6,6 +6,7 @@
 по-прежнему читает config.py движка при импорте art_director/providers/
 franchise_scout, панель их не дублирует и не переопределяет.
 """
+import ipaddress
 import os
 import re
 from pathlib import Path
@@ -114,6 +115,17 @@ if ACCESS_PASSWORD_SHA256 and not re.fullmatch(r"[0-9a-f]{64}", ACCESS_PASSWORD_
 SERVICE_TOKEN = os.getenv("PRINT_FACTORY_SERVICE_TOKEN", "").strip()
 if SERVICE_TOKEN and len(SERVICE_TOKEN) < 32:
     raise RuntimeError("PRINT_FACTORY_SERVICE_TOKEN должен содержать не меньше 32 символов")
+
+# Необязательный сетевой allowlist для сервисного Bearer-ключа. Поддерживаются
+# отдельные IPv4/IPv6 и CIDR через запятую. Пустой список сохраняет прежнее
+# поведение; парольная веб-сессия этим ограничением не затрагивается.
+try:
+    SERVICE_ALLOWED_NETWORKS = tuple(
+        ipaddress.ip_network(item, strict=False)
+        for item in _env_csv("PRINT_FACTORY_SERVICE_ALLOWED_IPS")
+    )
+except ValueError as exc:
+    raise RuntimeError("PRINT_FACTORY_SERVICE_ALLOWED_IPS содержит неверный IP/CIDR") from exc
 
 AUTH_COOKIE_SECURE = os.getenv("PANEL_AUTH_COOKIE_SECURE", "off").strip().lower() in {
     "1", "true", "yes", "on",

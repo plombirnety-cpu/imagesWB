@@ -67,12 +67,42 @@ RGBA PNG алгоритмом актуального GreenKey (`sharp=True`, б�
 Ошибка одного дизайна не роняет весь job. Сбой GreenKey не запускает повторную
 платную генерацию Gemini и не повреждает исходный хромакейный файл.
 
-## Эндпоинты
+## Машинный API
 
-- `GET  /` — интерфейс
+Актуальная машиночитаемая схема доступна в `GET /openapi.json`, интерактивная
+Swagger UI — в `GET /docs`. Оба адреса защищены так же, как `/api/*`: сервисный
+клиент передаёт Bearer-токен и должен находиться в разрешённой сети, если
+allowlist включён. Схема описывает только машинный API и `/health`, а не
+внутренние HTML-маршруты панели.
+
+Основные маршруты генерации и фотостудии:
+
+- `GET  /api/capabilities` — версия API, доступные функции и действующие лимиты
 - `GET  /api/styles` — `[{id, name_ru, theme_optional}, ...]` из `STYLE_BANK.json`
-- `POST /api/generate` — `{styles, count, theme, characters, free_prompt}` → `{job_id}`
-  (запускает генерацию в фоне)
+- `POST /api/generate` — `{styles, count, theme, characters, free_prompt}` →
+  `{job_id}`; запускает обычную либо свободную генерацию в фоне
+- `GET  /api/jobs?kind=all&limit=20` — последние job-ы генерации и фотостудии;
+  `kind` принимает `all`, `generation` или `studio`
+- `GET  /api/job/{job_id}` — прогресс и готовые позиции генерации
+- `POST /api/job/{job_id}/cancel` — принудительная остановка генерации
+- `GET  /api/thumb/{job_id}/{tag}` — превью готового принта
+- `GET  /api/file/{job_id}/{tag}` — отдельный прозрачный PNG
+- `GET  /api/download/{job_id}` — ZIP всех готовых PNG job-а
+- `GET  /api/studio/models` — постоянный каталог фотомоделей; `image_url` каждой
+  модели указывает на защищённый API-маршрут, а не на публичный `/static/`
+- `GET  /api/studio/models/{model_id}/image` — защищённое preview модели
+- `POST /api/studio/render` — multipart-запуск фотосессии: `model_id`,
+  `shirt_color=black|white`, `placement=front|back`, `pose_count=1..4`,
+  `quality=standard|premium`, `lighting=signature|catalog` и 1–6 файлов `prints`;
+  не более 12 итоговых кадров, каждый файл не более 15 МБ
+- `GET  /api/studio/jobs/{job_id}` — прогресс и готовые кадры фотосессии
+- `POST /api/studio/jobs/{job_id}/cancel` — принудительная остановка фотосессии
+- `GET  /api/studio/thumb/{job_id}/{tag}` — превью кадра
+- `GET  /api/studio/file/{job_id}/{tag}` — отдельный PNG кадра
+- `GET  /api/studio/download/{job_id}` — ZIP фотосессии
+
+Маршруты радара:
+
 - `POST /api/radar/signals` — принять публичную TikTok/Telegram/YouTube-ссылку,
   дату, метрики и комментарии; TikTok oEmbed запускается в отдельном фоне
 - `GET  /api/radar/collector/status` — состояние автоматического поиска,
@@ -87,10 +117,6 @@ RGBA PNG алгоритмом актуального GreenKey (`sharp=True`, б�
 - `POST /api/radar/trends/{trend_id}/approve|reject` — ручное решение владельца
 - `POST /api/radar/trends/{trend_id}/generate` — 1–6 вариантов принта; до
   одобрения возвращает `409`
-- `GET  /api/job/{job_id}` — `{status, done, total, items:[{tag, thumb_url, ok,
-  error}], error}` — статусы `queued|running|done|error`
-- `GET  /api/thumb/{job_id}/{tag}` — PNG одного готового дизайна
-- `GET  /api/download/{job_id}` — ZIP всех готовых PNG job-а
 - `GET  /health` — статус
 
 При заданном `PANEL_ACCESS_PASSWORD_SHA256` все маршруты, кроме `/health` и
@@ -99,10 +125,82 @@ RGBA PNG алгоритмом актуального GreenKey (`sharp=True`, б�
 Сам пароль не хранится в конфигурации — только его SHA-256. На обычном HTTP это
 лёгкая защита от случайного доступа, а не замена HTTPS.
 
-Для доверенных машинных интеграций можно задать `PRINT_FACTORY_SERVICE_TOKEN`.
-Запрос с `Authorization: Bearer <token>` получает доступ только к маршрутам
-`/api/*`; веб-интерфейс по этому ключу не открывается. Ключ должен содержать не
-меньше 32 символов и храниться только в `.env`, отдельно от Git.
+Для доверенных машинных интеграций задаются `PRINT_FACTORY_SERVICE_TOKEN` и,
+рекомендуется, `PRINT_FACTORY_SERVICE_ALLOWED_IPS`. Доступ к `/api/*`,
+`/openapi.json`, `/docs`, `/redoc` и `/docs/oauth2-redirect` требует одновременно:
+
+1. `Authorization: Bearer <token>` с токеном длиной не менее 32 символов;
+2. адрес TCP-клиента из allowlist, если список не пуст.
+
+Список принимает отдельные IP и CIDR через запятую, например
+`72.56.67.18,127.0.0.1,::1`. Заголовок `X-Forwarded-For` намеренно не считается
+доказательством адреса, поэтому его нельзя подделать для обхода allowlist. Пустой
+allowlist сохраняет доступ по одному Bearer-токену; пустой сервисный токен целиком
+отключает машинную авторизацию. Правильный токен с запрещённого адреса получает
+`403`, отсутствующий или неправильный токен — `401`. Сервисный ключ не открывает
+`/` и другие HTML-страницы панели.
+
+Токен хранится только в `.env` сервера: его нельзя коммитить, писать в логи,
+документацию или чат. IP-allowlist ограничивает источник запроса, но **не шифрует
+трафик**. Передавать Bearer через публичный `http://` допустимо только как
+временную меру; для постоянной интеграции нужен HTTPS, VPN или SSH-туннель.
+
+### Примеры `curl`
+
+Во всех примерах значения условные; реальный токен в команду подставляет окружение
+Telegram-бота.
+
+```bash
+BASE_URL="http://195.133.66.37:8040"
+TOKEN="<PRINT_FACTORY_SERVICE_TOKEN>"
+
+# Проверить контракт и скачать OpenAPI-схему.
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE_URL}/api/capabilities"
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE_URL}/openapi.json" -o print-factory-openapi.json
+
+# Создать четыре принта. Из ответа взять job_id.
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"styles":["34_anime_magazine_cover"],"count":4,"theme":"Клинок, рассекающий демонов","characters":"","free_prompt":""}' \
+  "${BASE_URL}/api/generate"
+
+# Опросить job, скачать отдельный PNG и ZIP (JOB_ID/TAG — из ответа API).
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE_URL}/api/job/<JOB_ID>"
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE_URL}/api/file/<JOB_ID>/<TAG>" -o print.png
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE_URL}/api/download/<JOB_ID>" -o prints.zip
+
+# Получить каталог моделей и защищённое preview Алисы.
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE_URL}/api/studio/models"
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${BASE_URL}/api/studio/models/alisa/image" -o alisa.png
+
+# Наложить готовый print.png на чёрную футболку, спереди, в двух позах.
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -F "model_id=alisa" -F "shirt_color=black" -F "placement=front" \
+  -F "pose_count=2" -F "quality=standard" -F "lighting=signature" \
+  -F "prints=@print.png" \
+  "${BASE_URL}/api/studio/render"
+```
+
+Job-ы выполняются асинхронно. Бот должен опрашивать соответствующий status-route,
+пока `status` не станет `done`, `error` или `cancelled`, и не считать один долгий
+HTTP-запрос зависшей генерацией. Список job-ов хранится в памяти процесса и после
+рестарта контейнера очищается; готовые файлы в persistent volume остаются.
 
 ## Локальный запуск
 
@@ -185,7 +283,8 @@ docker compose -f panel/docker-compose.yml up -d --build
 | `PANEL_STYLE_BANK` | `../docs/STYLE_BANK.json` | путь к банку стилей |
 | `PANEL_JOB_HISTORY_LIMIT` | `20` | сколько завершённых job-ов держим (старые чистятся) |
 | `PANEL_ACCESS_PASSWORD_SHA256` | пусто | SHA-256 пароля в hex; пусто отключает экран входа |
-| `PRINT_FACTORY_SERVICE_TOKEN` | пусто | Bearer-ключ 32+ символа для машинного доступа только к `/api/*` |
+| `PRINT_FACTORY_SERVICE_TOKEN` | пусто | Bearer-ключ 32+ символа для машинного доступа к `/api/*` и документации API |
+| `PRINT_FACTORY_SERVICE_ALLOWED_IPS` | пусто | IP/CIDR через запятую; при непустом значении сервисному клиенту одновременно нужны правильный Bearer и разрешённый TCP-адрес |
 | `PANEL_AUTH_COOKIE_SECURE` | `off` | `on` только после включения HTTPS |
 | `PANEL_AUTH_COOKIE_MAX_AGE` | `2592000` | срок сессии в секундах (30 дней) |
 | `PANEL_AUTH_FAILURE_LIMIT` | `5` | число неверных попыток до временной блокировки |

@@ -15,6 +15,7 @@ import io
 import hashlib
 import hmac
 import html
+import ipaddress
 import json
 import multiprocessing
 import queue
@@ -33,6 +34,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -119,6 +121,12 @@ _AUTH_COOKIE = "print_factory_access"
 _AUTH_TOKEN_MESSAGE = b"print-factory-panel-session-v1"
 _auth_failures: dict[str, deque[float]] = {}
 _auth_failures_lock = threading.Lock()
+_SERVICE_DOCUMENTATION_PATHS = {
+    "/openapi.json",
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+}
 
 
 class GenerateRequest(BaseModel):
@@ -127,6 +135,101 @@ class GenerateRequest(BaseModel):
     theme: str = ""
     characters: str = ""
     free_prompt: str = Field(default="", max_length=4000)
+
+
+class StyleResponse(BaseModel):
+    id: str
+    name_ru: str
+    theme_optional: bool
+
+
+class JobCreatedResponse(BaseModel):
+    job_id: str
+
+
+class JobItemResponse(BaseModel):
+    tag: str
+    ok: bool
+    error: str | None = None
+    thumb_url: str | None = None
+    file_url: str | None = None
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    kind: str = "generation"
+    status: str
+    done: int
+    total: int
+    items: list[JobItemResponse]
+    error: str | None = None
+    can_cancel: bool
+    created_at: float
+    download_url: str | None = None
+
+
+class CancelResponse(BaseModel):
+    accepted: bool
+    status: str
+
+
+class StudioModelResponse(BaseModel):
+    id: str
+    name: str
+    gender: str
+    description: str
+    image_url: str
+    available: bool
+
+
+class StudioJobCreatedResponse(BaseModel):
+    job_id: str
+    total: int
+
+
+class StudioJobItemResponse(JobItemResponse):
+    print_name: str | None = None
+    pose: int | None = None
+
+
+class StudioJobResponse(BaseModel):
+    job_id: str
+    kind: str = "studio"
+    status: str
+    done: int
+    total: int
+    items: list[StudioJobItemResponse]
+    error: str | None = None
+    can_cancel: bool
+    created_at: float
+    download_url: str | None = None
+
+
+class JobSummaryResponse(BaseModel):
+    job_id: str
+    kind: str
+    status: str
+    done: int
+    total: int
+    successful: int
+    failed: int
+    created_at: float
+    can_cancel: bool
+    status_url: str
+    download_url: str | None = None
+
+
+class JobListResponse(BaseModel):
+    items: list[JobSummaryResponse]
+
+
+class CapabilitiesResponse(BaseModel):
+    service: str
+    api_version: str
+    authentication: dict
+    documentation: dict
+    limits: dict
+    features: dict
 
 
 class RadarSignalRequest(BaseModel):
@@ -174,9 +277,14 @@ def _has_access(request: Request) -> bool:
     return bool(supplied) and hmac.compare_digest(supplied, _session_token())
 
 
-def _has_service_access(request: Request) -> bool:
-    """Разрешает доверенному сервису Bearer-доступ только к HTTP API."""
-    if not settings.SERVICE_TOKEN or not request.url.path.startswith("/api/"):
+def _is_service_path(path: str) -> bool:
+    """Пути, к которым машинный клиент может обратиться без browser-cookie."""
+    return path.startswith("/api/") or path in _SERVICE_DOCUMENTATION_PATHS
+
+
+def _has_service_token(request: Request) -> bool:
+    """Проверяет сервисный Bearer без сетевого решения."""
+    if not settings.SERVICE_TOKEN or not _is_service_path(request.url.path):
         return False
     scheme, separator, credential = request.headers.get("authorization", "").partition(" ")
     if not separator or scheme.lower() != "bearer" or not credential:
@@ -184,6 +292,23 @@ def _has_service_access(request: Request) -> bool:
     return hmac.compare_digest(
         credential.encode("utf-8"),
         settings.SERVICE_TOKEN.encode("utf-8"),
+    )
+
+
+def _service_client_allowed(request: Request) -> bool:
+    """Сверяет фактический peer IP с allowlist, не доверяя spoofable headers."""
+    networks = settings.SERVICE_ALLOWED_NETWORKS
+    if not networks:
+        return True
+    if request.client is None:
+        return False
+    try:
+        address = ipaddress.ip_address(request.client.host)
+    except ValueError:
+        return False
+    return any(
+        address.version == network.version and address in network
+        for network in networks
     )
 
 
@@ -252,14 +377,24 @@ border-radius:8px;background:#4a2226;color:#ffb3b8;font-size:13px}}
 async def require_panel_access(request: Request, call_next):
     if request.url.path in {"/health", "/login"}:
         return await call_next(request)
-    if _has_service_access(request):
+    if _has_service_token(request):
+        if not _service_client_allowed(request):
+            return JSONResponse(
+                {"detail": "IP-адрес не разрешён для сервисного доступа"},
+                status_code=403,
+            )
+        request.state.service_client = True
         return await call_next(request)
     if not _auth_enabled():
         return await call_next(request)
     if _has_access(request):
         return await call_next(request)
-    if request.url.path.startswith("/api/"):
-        return JSONResponse({"detail": "требуется вход"}, status_code=401)
+    if _is_service_path(request.url.path):
+        return JSONResponse(
+            {"detail": "требуется Bearer-токен или вход в панель"},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     next_path = request.url.path
     if request.url.query:
         next_path += "?" + request.url.query
@@ -336,12 +471,47 @@ def health():
     return {"status": "ok", "service": "print-factory-panel"}
 
 
-@app.get("/api/styles")
+@app.get("/api/capabilities", response_model=CapabilitiesResponse)
+def api_capabilities():
+    """Машиночитаемая точка входа для Telegram-бота и других клиентов."""
+    return {
+        "service": "print-factory-panel",
+        "api_version": "1.1",
+        "authentication": {
+            "type": "http_bearer",
+            "ip_allowlist_enabled": bool(settings.SERVICE_ALLOWED_NETWORKS),
+            "browser_cookie_supported": True,
+        },
+        "documentation": {
+            "openapi_url": "/openapi.json",
+            "swagger_url": "/docs",
+        },
+        "limits": {
+            "generation_count": settings.MAX_COUNT,
+            "studio_prints": 6,
+            "studio_file_bytes": 15 * 1024 * 1024,
+            "studio_poses": 4,
+            "studio_frames": 12,
+        },
+        "features": {
+            "generation": True,
+            "free_generation": True,
+            "generation_cancel": True,
+            "individual_png": True,
+            "zip_download": True,
+            "virtual_studio": True,
+            "trend_radar": True,
+            "job_listing": True,
+        },
+    }
+
+
+@app.get("/api/styles", response_model=list[StyleResponse])
 def api_styles():
     return _style_bank()
 
 
-@app.post("/api/generate")
+@app.post("/api/generate", response_model=JobCreatedResponse, status_code=202)
 def api_generate(req: GenerateRequest):
     if req.count < 1:
         raise HTTPException(status_code=400, detail="count должен быть не меньше 1")
@@ -733,6 +903,86 @@ def _run_job(
 
 
 
+def _generation_job_payload(job_id: str) -> dict:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job не найден")
+        items = [
+            {
+                "tag": item["tag"],
+                "ok": item["ok"],
+                "error": item["error"],
+                "thumb_url": f"/api/thumb/{job_id}/{item['tag']}" if item["ok"] else None,
+                "file_url": f"/api/file/{job_id}/{item['tag']}" if item["ok"] else None,
+            }
+            for item in job["items"]
+        ]
+        return {
+            "job_id": job_id,
+            "kind": "generation",
+            "status": job["status"],
+            "done": job["done"],
+            "total": job["total"],
+            "items": items,
+            "error": job["error"],
+            "can_cancel": job["status"] in {"queued", "running", "cancelling"},
+            "created_at": float(job["created"]),
+            "download_url": f"/api/download/{job_id}" if job["paths"] else None,
+        }
+
+
+def _studio_job_payload(job_id: str) -> dict:
+    with _studio_jobs_lock:
+        job = _studio_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="задание фотостудии не найдено")
+        items = [
+            {
+                **item,
+                "thumb_url": f"/api/studio/thumb/{job_id}/{item['tag']}" if item["ok"] else None,
+                "file_url": f"/api/studio/file/{job_id}/{item['tag']}" if item["ok"] else None,
+            }
+            for item in job["items"]
+        ]
+        return {
+            "job_id": job_id,
+            "kind": "studio",
+            "status": job["status"],
+            "done": job["done"],
+            "total": job["total"],
+            "items": items,
+            "error": job["error"],
+            "can_cancel": job["status"] in {"queued", "running", "cancelling"},
+            "created_at": float(job["created"]),
+            "download_url": f"/api/studio/download/{job_id}" if job["paths"] else None,
+        }
+
+
+def _job_summary_payload(job_id: str, kind: str, job: dict) -> dict:
+    items = job["items"]
+    is_generation = kind == "generation"
+    status_url = f"/api/job/{job_id}" if is_generation else f"/api/studio/jobs/{job_id}"
+    download_url = (
+        f"/api/download/{job_id}"
+        if is_generation
+        else f"/api/studio/download/{job_id}"
+    )
+    return {
+        "job_id": job_id,
+        "kind": kind,
+        "status": job["status"],
+        "done": job["done"],
+        "total": job["total"],
+        "successful": sum(1 for item in items if item.get("ok")),
+        "failed": sum(1 for item in items if not item.get("ok")),
+        "created_at": float(job["created"]),
+        "can_cancel": job["status"] in {"queued", "running", "cancelling"},
+        "status_url": status_url,
+        "download_url": download_url if job["paths"] else None,
+    }
+
+
 # ── Виртуальная фотостудия ───────────────────────────────────────────────────
 
 
@@ -886,12 +1136,40 @@ def _run_studio_job(
             pass
 
 
-@app.get("/api/studio/models")
+def _studio_model_image_path(model_id: str) -> Path:
+    try:
+        model = virtual_studio.get_model(model_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="модель не найдена") from exc
+    models_dir = virtual_studio.MODELS_DIR.resolve()
+    image_path = (models_dir / str(model.get("image") or "")).resolve()
+    if models_dir not in image_path.parents or not image_path.is_file():
+        raise HTTPException(status_code=404, detail="эталон модели ещё не установлен")
+    return image_path
+
+
+@app.get("/api/studio/models", response_model=list[StudioModelResponse])
 def api_studio_models():
-    return virtual_studio.public_models()
+    models = virtual_studio.public_models()
+    return [
+        {
+            **model,
+            "image_url": f"/api/studio/models/{model['id']}/image",
+        }
+        for model in models
+    ]
 
 
-@app.post("/api/studio/render", status_code=202)
+@app.get("/api/studio/models/{model_id}/image")
+def api_studio_model_image(model_id: str):
+    return FileResponse(_studio_model_image_path(model_id))
+
+
+@app.post(
+    "/api/studio/render",
+    status_code=202,
+    response_model=StudioJobCreatedResponse,
+)
 async def api_studio_render(
     model_id: str = Form(...),
     shirt_color: str = Form(...),
@@ -905,9 +1183,12 @@ async def api_studio_render(
         model = virtual_studio.get_model(model_id)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail="модель не найдена") from exc
-    model_path = virtual_studio.MODELS_DIR / str(model.get("image") or "")
-    if not model_path.is_file():
-        raise HTTPException(status_code=409, detail="эталон выбранной модели ещё не установлен")
+    try:
+        _studio_model_image_path(model_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(status_code=409, detail="эталон выбранной модели ещё не установлен") from exc
+        raise
     if shirt_color not in {"black", "white"}:
         raise HTTPException(status_code=400, detail="выберите чёрную или белую футболку")
     if placement not in {"front", "back"}:
@@ -979,30 +1260,12 @@ async def api_studio_render(
     return {"job_id": job_id, "total": len(artworks) * pose_count}
 
 
-@app.get("/api/studio/jobs/{job_id}")
+@app.get("/api/studio/jobs/{job_id}", response_model=StudioJobResponse)
 def api_studio_job(job_id: str):
-    job = _studio_jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="задание фотостудии не найдено")
-    with _studio_jobs_lock:
-        return {
-            "status": job["status"],
-            "done": job["done"],
-            "total": job["total"],
-            "error": job["error"],
-            "can_cancel": job["status"] in {"queued", "running", "cancelling"},
-            "items": [
-                {
-                    **item,
-                    "thumb_url": f"/api/studio/thumb/{job_id}/{item['tag']}" if item["ok"] else None,
-                    "file_url": f"/api/studio/file/{job_id}/{item['tag']}" if item["ok"] else None,
-                }
-                for item in job["items"]
-            ],
-        }
+    return _studio_job_payload(job_id)
 
 
-@app.post("/api/studio/jobs/{job_id}/cancel")
+@app.post("/api/studio/jobs/{job_id}/cancel", response_model=CancelResponse)
 def api_studio_cancel(job_id: str):
     job = _studio_jobs.get(job_id)
     if job is None:
@@ -1052,7 +1315,33 @@ def api_studio_download(job_id: str):
         headers={"Content-Disposition": f'attachment; filename="studio_{job_id}.zip"'},
     )
 
-@app.post("/api/job/{job_id}/cancel")
+@app.get("/api/jobs", response_model=JobListResponse)
+def api_jobs(kind: str = "all", limit: int = 50):
+    """Возвращает недавние задания, чтобы бот мог восстановить свой polling."""
+    kind = kind.strip().lower()
+    if kind not in {"all", "generation", "studio"}:
+        raise HTTPException(status_code=400, detail="kind: all, generation или studio")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit: от 1 до 100")
+
+    items: list[dict] = []
+    if kind in {"all", "generation"}:
+        with _jobs_lock:
+            items.extend(
+                _job_summary_payload(job_id, "generation", job)
+                for job_id, job in _jobs.items()
+            )
+    if kind in {"all", "studio"}:
+        with _studio_jobs_lock:
+            items.extend(
+                _job_summary_payload(job_id, "studio", job)
+                for job_id, job in _studio_jobs.items()
+            )
+    items.sort(key=lambda item: item["created_at"], reverse=True)
+    return {"items": items[:limit]}
+
+
+@app.post("/api/job/{job_id}/cancel", response_model=CancelResponse)
 def api_cancel_job(job_id: str):
     job = _jobs.get(job_id)
     if job is None:
@@ -1065,27 +1354,9 @@ def api_cancel_job(job_id: str):
         return {"accepted": accepted, "status": job["status"]}
 
 
-@app.get("/api/job/{job_id}")
+@app.get("/api/job/{job_id}", response_model=JobResponse)
 def api_job(job_id: str):
-    job = _jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job не найден")
-    with _jobs_lock:
-        items = [
-            {
-                "tag": it["tag"],
-                "ok": it["ok"],
-                "error": it["error"],
-                "thumb_url": f"/api/thumb/{job_id}/{it['tag']}" if it["ok"] else None,
-                "file_url": f"/api/file/{job_id}/{it['tag']}" if it["ok"] else None,
-            }
-            for it in job["items"]
-        ]
-        return {
-            "status": job["status"], "done": job["done"], "total": job["total"],
-            "items": items, "error": job["error"],
-            "can_cancel": job["status"] in ("queued", "running", "cancelling"),
-        }
+    return _generation_job_payload(job_id)
 
 
 @app.get("/api/thumb/{job_id}/{tag}")
@@ -1137,3 +1408,47 @@ def index():
 
 # статика — монтируем в конце, чтобы не перехватывать / и /api (как в GreenKey/web/app.py)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def _machine_openapi() -> dict:
+    """Публикует только машинный контракт, без login/cookie-внутренностей панели."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    routes = [
+        route
+        for route in app.routes
+        if getattr(route, "path", "") == "/health"
+        or getattr(route, "path", "").startswith("/api/")
+    ]
+    schema = get_openapi(
+        title="Print Factory API",
+        version="1.1.0",
+        description=(
+            "API генерации принтов, виртуальной фотостудии и радара трендов. "
+            "Для /api/* передавайте сервисный Bearer-токен; в production "
+            "дополнительно проверяется IP-allowlist."
+        ),
+        routes=routes,
+    )
+    components = schema.setdefault("components", {})
+    components.setdefault("securitySchemes", {})["ServiceBearer"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque",
+        "description": "PRINT_FACTORY_SERVICE_TOKEN",
+    }
+    for path, operations in schema.get("paths", {}).items():
+        if not path.startswith("/api/"):
+            continue
+        for method, operation in operations.items():
+            if method.lower() not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            operation["security"] = [{"ServiceBearer": []}]
+            responses = operation.setdefault("responses", {})
+            responses.setdefault("401", {"description": "Bearer-токен отсутствует или неверен"})
+            responses.setdefault("403", {"description": "IP-адрес не входит в allowlist"})
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _machine_openapi

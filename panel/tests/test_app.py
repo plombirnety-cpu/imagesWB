@@ -4,9 +4,11 @@
 монкипатчатся — НИ ОДНОГО платного вызова."""
 import io
 import hashlib
+import ipaddress
 import multiprocessing
 import time
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,6 +49,29 @@ def _wait_job_done(client, job_id, timeout=10.0):
     raise TimeoutError(f"job {job_id} не завершился за {timeout}s")
 
 
+def _configure_service_access(monkeypatch, client_ip="72.56.67.18"):
+    """Включает веб-пароль, Bearer и IP allowlist без реального .env.
+
+    TestClient в Starlette 0.41 жёстко задаёт адрес ``testclient``,
+    поэтому в тесте подменяем только ASGI client address.
+    """
+    password_hash = hashlib.sha256(b"test-panel-password").hexdigest()
+    monkeypatch.setattr(panel_app.settings, "ACCESS_PASSWORD_SHA256", password_hash)
+    monkeypatch.setattr(panel_app.settings, "SERVICE_TOKEN", "service-token-for-tests")
+    monkeypatch.setattr(
+        panel_app.settings,
+        "SERVICE_ALLOWED_NETWORKS",
+        (ipaddress.ip_network("72.56.67.18/32"),),
+    )
+    remote = {"host": client_ip}
+    monkeypatch.setattr(
+        panel_app.Request,
+        "client",
+        property(lambda _request: SimpleNamespace(host=remote["host"], port=50000)),
+    )
+    return remote, {"Authorization": "Bearer service-token-for-tests"}
+
+
 def test_health():
     client = TestClient(panel_app.app)
     res = client.get("/health")
@@ -69,7 +94,7 @@ def test_password_gate_protects_ui_and_api(monkeypatch):
     assert root.headers["location"].startswith("/login")
     api = client.get("/api/styles")
     assert api.status_code == 401
-    assert api.json()["detail"] == "требуется вход"
+    assert api.json()["detail"].startswith("требуется")
     assert "Введите пароль" in client.get("/login").text
 
     wrong = client.post(
@@ -97,10 +122,11 @@ def test_password_gate_protects_ui_and_api(monkeypatch):
     assert client.get("/", follow_redirects=False).status_code == 303
 
 
-def test_service_bearer_token_opens_only_api(monkeypatch):
+def test_service_bearer_token_opens_machine_routes_but_not_ui(monkeypatch):
     password_hash = hashlib.sha256(b"test-panel-password").hexdigest()
     monkeypatch.setattr(panel_app.settings, "ACCESS_PASSWORD_SHA256", password_hash)
     monkeypatch.setattr(panel_app.settings, "SERVICE_TOKEN", "service-token-for-tests")
+    monkeypatch.setattr(panel_app.settings, "SERVICE_ALLOWED_NETWORKS", ())
     client = TestClient(panel_app.app)
 
     valid_headers = {"Authorization": "Bearer service-token-for-tests"}
@@ -111,12 +137,149 @@ def test_service_bearer_token_opens_only_api(monkeypatch):
         headers={"Authorization": "Bearer wrong-service-token"},
     )
     assert wrong.status_code == 401
-    assert wrong.json()["detail"] == "требуется вход"
+    assert wrong.json()["detail"].startswith("требуется")
 
     # Сервисный ключ предназначен только для API и не заменяет вход в веб-панель.
     root = client.get("/", headers=valid_headers, follow_redirects=False)
     assert root.status_code == 303
     assert root.headers["location"].startswith("/login")
+
+
+def test_service_bearer_requires_allowlisted_ip(monkeypatch):
+    remote, valid_headers = _configure_service_access(monkeypatch)
+    client = TestClient(panel_app.app)
+
+    # Один и тот же Bearer работает только с разрешённого сервера.
+    allowed = client.get("/api/styles", headers=valid_headers)
+    assert allowed.status_code == 200
+
+    remote["host"] = "203.0.113.45"
+    denied = client.get("/api/styles", headers=valid_headers)
+    assert denied.status_code == 403
+    assert "ip" in denied.json()["detail"].lower()
+
+    # Allowlist не заменяет секрет: неверный Bearer всё равно 401.
+    remote["host"] = "72.56.67.18"
+    wrong = client.get(
+        "/api/styles",
+        headers={"Authorization": "Bearer wrong-service-token"},
+    )
+    assert wrong.status_code == 401
+
+
+def test_service_bearer_opens_openapi_schema(monkeypatch):
+    _, valid_headers = _configure_service_access(monkeypatch)
+    client = TestClient(panel_app.app)
+
+    response = client.get("/openapi.json", headers=valid_headers)
+
+    assert response.status_code == 200
+    schema = response.json()
+    assert {"/api/generate", "/api/jobs", "/api/studio/render"} <= set(schema["paths"])
+    security_schemes = schema["components"]["securitySchemes"]
+    assert any(
+        item.get("type") == "http" and item.get("scheme") == "bearer"
+        for item in security_schemes.values()
+    )
+    assert schema["paths"]["/api/generate"]["post"].get("security")
+
+
+def test_capabilities_describes_machine_contract():
+    client = TestClient(panel_app.app)
+
+    response = client.get("/api/capabilities")
+
+    assert response.status_code == 200
+    capabilities = response.json()
+    assert capabilities["service"] == "print-factory-panel"
+    assert capabilities["api_version"]
+    assert "bearer" in str(capabilities["authentication"]).lower()
+    assert "/openapi.json" in capabilities["documentation"].values()
+    assert capabilities["limits"]["generation_count"] == panel_app.settings.MAX_COUNT
+    assert capabilities["features"]["generation"] is True
+    assert capabilities["features"]["virtual_studio"] is True
+
+
+def test_studio_models_use_protected_api_images(monkeypatch):
+    _, valid_headers = _configure_service_access(monkeypatch)
+    client = TestClient(panel_app.app)
+
+    models_response = client.get("/api/studio/models", headers=valid_headers)
+
+    assert models_response.status_code == 200
+    models = models_response.json()
+    assert models
+    assert all(
+        model["image_url"].startswith(f"/api/studio/models/{model['id']}/")
+        and model["image_url"].endswith("/image")
+        for model in models
+    )
+    available = next(model for model in models if model["available"])
+
+    # Превью больше не обходит защиту через /static.
+    assert client.get(available["image_url"]).status_code == 401
+    image_response = client.get(available["image_url"], headers=valid_headers)
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"] == "image/png"
+    assert image_response.content
+
+
+def test_job_list_combines_and_filters_generation_and_studio_jobs():
+    generation_id = "test-generation-list"
+    studio_id = "test-studio-list"
+    with panel_app._jobs_lock:
+        panel_app._jobs[generation_id] = {
+            "status": "done",
+            "done": 2,
+            "total": 2,
+            "items": [
+                {"tag": "ok", "ok": True, "error": None},
+                {"tag": "failed", "ok": False, "error": "test failure"},
+            ],
+            "paths": {"ok": panel_app.STATIC_DIR / "index.html"},
+            "outdir": None,
+            "error": None,
+            "cancel_event": None,
+            "created": 100.0,
+        }
+    with panel_app._studio_jobs_lock:
+        panel_app._studio_jobs[studio_id] = {
+            "status": "running",
+            "done": 1,
+            "total": 3,
+            "items": [{"tag": "studio-ok", "ok": True, "error": None}],
+            "paths": {},
+            "outdir": None,
+            "error": None,
+            "cancel_event": None,
+            "created": 200.0,
+        }
+
+    try:
+        client = TestClient(panel_app.app)
+        combined_response = client.get("/api/jobs?kind=all&limit=20")
+        generation_response = client.get("/api/jobs?kind=generation&limit=20")
+
+        assert combined_response.status_code == 200
+        combined = {item["job_id"]: item for item in combined_response.json()["items"]}
+        assert {generation_id, studio_id} <= set(combined)
+        assert combined[generation_id]["successful"] == 1
+        assert combined[generation_id]["failed"] == 1
+        assert combined[generation_id]["status_url"] == f"/api/job/{generation_id}"
+        assert combined[generation_id]["download_url"] == f"/api/download/{generation_id}"
+        assert combined[studio_id]["can_cancel"] is True
+        assert combined[studio_id]["status_url"] == f"/api/studio/jobs/{studio_id}"
+
+        assert generation_response.status_code == 200
+        generation_items = generation_response.json()["items"]
+        assert generation_items
+        assert all(item["kind"] == "generation" for item in generation_items)
+        assert studio_id not in {item["job_id"] for item in generation_items}
+    finally:
+        with panel_app._jobs_lock:
+            panel_app._jobs.pop(generation_id, None)
+        with panel_app._studio_jobs_lock:
+            panel_app._studio_jobs.pop(studio_id, None)
 
 
 def test_api_styles_reads_real_bank():
@@ -157,7 +320,7 @@ def test_generate_accepts_empty_theme_for_autonomous_car_style(monkeypatch):
         "characters": "",
     })
 
-    assert res.status_code == 200
+    assert res.status_code == 202
     assert submitted
     job_id = res.json()["job_id"]
     with panel_app._jobs_lock:
@@ -202,7 +365,7 @@ def test_free_prompt_runs_as_separate_auto_mode(monkeypatch):
         "characters": "",
         "free_prompt": "Космический тигр из электрических дуг",
     })
-    assert res.status_code == 200
+    assert res.status_code == 202
     job = _wait_job_done(client, res.json()["job_id"])
     assert job["status"] == "done"
     assert job["done"] == 1
@@ -218,7 +381,7 @@ def test_full_job_progress_thumbs_and_zip(monkeypatch):
     res = client.post("/api/generate", json={
         "styles": ["01_baroque_frame"], "count": 3, "theme": "тачки", "characters": "",
     })
-    assert res.status_code == 200
+    assert res.status_code == 202
     job_id = res.json()["job_id"]
 
     job = _wait_job_done(client, job_id)

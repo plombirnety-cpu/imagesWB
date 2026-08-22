@@ -1,5 +1,36 @@
 # Память проекта Print Factory
 
+## Машинный API Telegram-бота: Bearer + IP allowlist (2026-08-22)
+
+- Канонический IP сервера Telegram-бота группы «Маркетплейсы» — `72.56.67.18`.
+  Production allowlist должен также сохранять `127.0.0.1` и `::1` для локального
+  smoke-теста и аварийной диагностики.
+- Машинная авторизация двухуровневая: при заданном
+  `PRINT_FACTORY_SERVICE_ALLOWED_IPS` запрос обязан одновременно прийти с адреса
+  из allowlist и содержать правильный `Authorization: Bearer
+  <PRINT_FACTORY_SERVICE_TOKEN>`. Не принимать `X-Forwarded-For` от публичного
+  клиента как доказательство IP.
+- Сервисному клиенту разрешены все `/api/*`, а также защищённые `/openapi.json`,
+  `/docs`, `/redoc` и `/docs/oauth2-redirect`. Токен не является паролем владельца
+  и никогда не должен открывать HTML-панель `/`.
+- Точка первичной диагностики интеграции — `GET /api/capabilities`; последние
+  generation/studio job-ы доступны через `GET /api/jobs`. Job-регистр остаётся
+  in-memory: после рестарта бот начинает новый job, а не полагается на старый
+  статус.
+- Preview постоянных фотомоделей нельзя отдавать через незащищённый `/static/`:
+  `image_url` каталога ведёт на `/api/studio/models/{model_id}/image` и требует ту
+  же авторизацию.
+- Не передавать реальный сервисный токен в Git, документацию, логи или чат.
+  Allowlist уменьшает поверхность атаки, но не скрывает Bearer в публичном HTTP;
+  для постоянной эксплуатации нужен HTTPS, VPN или SSH-туннель.
+- Функциональность развёрнута в production образом
+  `sha256:ff9163e8c6f14a470714498eb15f58d7acf1e8be713ec778166863bb2e6b5224`;
+  volume результатов сохранён, автопарсер выключен, restart policy
+  `unless-stopped`. Быстрый откат: контейнер
+  `print-factory-panel-pre-api-allowlist-20260822`, image
+  `print-factory-panel:backup-pre-api-allowlist-20260822` и `.env`-backup
+  `/opt/print-panel/.env.backup-pre-api-allowlist-20260822`.
+
 ## Сервисный доступ для внешнего ИИ-ассистента (2026-08-19)
 
 - Production восстановлен после чистой остановки контейнера при перезапуске сервера: `print-factory-panel` запущен, restart policy закреплена как `unless-stopped`, внешний `/health` отвечает 200.
