@@ -87,6 +87,8 @@ _YOUTH_MOTION_STYLE_ID = "38_youth_motion_mix"
 
 _ROCK_BAND_STYLE_ID = "39_rock_band_print"
 
+_PROFESSION_ARCHIVE_STYLE_ID = "40_profession_technical_archive"
+
 # Три композиционные семьи извлечены из пользовательских референсов: крупный
 # фронтмен с инструментом, цветовой коллаж всего состава и сюжетный metal-маскот.
 # Их назначает код ДО вызова арт-директора, иначе независимые генерации быстро
@@ -164,6 +166,41 @@ _YOUTH_MOTION_COMMON_CONTRACT = (
 def _youth_motion_variant_brief(slot: int) -> str:
     variant = _YOUTH_MOTION_VARIANTS[slot % len(_YOUTH_MOTION_VARIANTS)]
     return f"ASSIGNED YOUTH VARIANT: {variant}. {_YOUTH_MOTION_COMMON_CONTRACT}"
+
+
+# Один и тот же набор инструментов не должен каждый раз складываться в симметричную
+# «иконку из четырёх углов». Композиционная семья назначается кодом до LLM-вызова,
+# а предметы арт-директор уже подбирает по конкретной профессии.
+_PROFESSION_ARCHIVE_VARIANTS = (
+    "A RISING S-CURVE / cyan accent — one large authentic hero tool rises from lower-left to upper-centre; three smaller tools follow an open S-shaped rhythm around the title",
+    "B FALLING DIAGONAL / amber accent — one large hero object cuts from upper-right toward lower-left; the title interrupts that diagonal while three supports form unequal counterweights",
+    "C OFFSET VERTICAL ARCHIVE / cobalt accent — one tall hero tool occupies the left third; the title and three small objects cascade down the open right side on an asymmetric technical grid",
+    "D BROKEN ARC INVENTORY / burgundy accent — one hero object anchors the lower centre; three supports describe an incomplete arc above it without closing into a badge or frame",
+    "E CROSS-AXIS OVERLAP / orange accent — one wide hero object runs behind no more than 8% of the central title; three small objects sit on a crossing vertical axis with generous chroma gaps",
+    "F ASYMMETRIC CASCADE / violet accent — one hero object occupies the upper zone and three progressively smaller tools descend toward the opposite corner; no mirrored balance",
+)
+
+_PROFESSION_ARCHIVE_COMMON_CONTRACT = (
+    "PROFESSION TECHNICAL ARCHIVE COMMON CONTRACT: interpret the user's label as one "
+    "real profession, never as a fictional character, franchise, logo or person. Use "
+    "exactly four authentic profession-specific objects: one hero object at 38-45% of "
+    "the artwork and exactly three unequal supporting objects. Add exactly four tiny "
+    "numeric callouts 1, 2, 3 and 4, each once, with fine leader lines and sparse "
+    "measurement ticks. Put the exact Russian profession title once in the centre. "
+    "Build a premium open technical-archive collage with engraved metal detail, "
+    "controlled overlap and 20-30% bare chroma visible between elements. No equal "
+    "four-corner icon grid, clip art, sticker set, badge, poster, rectangular backing, "
+    "full scene, extra words or pseudo-text. Use print-safe line weight, a clean 7% "
+    "chroma moat and no green ink because this style always uses green chroma."
+)
+
+
+def _profession_archive_variant_brief(slot: int) -> str:
+    variant = _PROFESSION_ARCHIVE_VARIANTS[slot % len(_PROFESSION_ARCHIVE_VARIANTS)]
+    return (
+        f"ASSIGNED PROFESSION ARCHIVE VARIANT: {variant}. "
+        f"{_PROFESSION_ARCHIVE_COMMON_CONTRACT}"
+    )
 
 # A brand-only request used to be repeated verbatim for every slot.  Each
 # independent image call consequently converged on the same best-known model
@@ -468,7 +505,7 @@ class DesignTask:
     label: str           # что передаём в art_director.make_ideas как theme
     style_id: str         # style_pref
     tag: str              # уникальное имя файла (без расширения)
-    source: str            # "free" | "characters" | "franchise" | "theme"
+    source: str            # "free" | "characters" | "franchise" | "theme" | special
     # Протяжка из досье franchise_scout (ветка "franchise"): надёжные имя ЛАТИНИЦЕЙ и
     # тайтл персонажа, которыми ПЕРЕЗАПИСЫВАЕМ character_en/title_en в дизайне ПОСЛЕ
     # арт-директора — тот на нишевых/свежих тайтлах не узнаёт персонажа и оставляет
@@ -507,6 +544,14 @@ def plan_tasks(
     if free_prompt:
         entries = [(free_prompt, "")] * count
         source = "free"
+    elif style_list == [_PROFESSION_ARCHIVE_STYLE_ID]:
+        # Профессия — самостоятельная товарная тема. Не отправляем её в
+        # franchise_scout: «хирург»/«юрист» не должны превращаться в персонажей.
+        professions = names or ([theme] if theme else [])
+        if not professions:
+            raise ValueError("для стиля профессий нужно указать профессию")
+        entries = [(name, "") for name in _expand_round_robin(professions, count)]
+        source = "profession"
     elif style_list == [_ROCK_BAND_STYLE_ID] and theme:
         # Название рок-группы — самостоятельная тема, а не тайтл аниме/фильма.
         # Не запускаем franchise_scout и не превращаем найденных музыкантов в
@@ -576,6 +621,8 @@ def plan_tasks(
             style_brief = _youth_motion_variant_brief(style_occurrence)
         elif style_id == _ROCK_BAND_STYLE_ID:
             style_brief = _rock_band_variant_brief(style_occurrence)
+        elif style_id == _PROFESSION_ARCHIVE_STYLE_ID:
+            style_brief = _profession_archive_variant_brief(style_occurrence)
         else:
             style_brief = ""
         base = sanitize_slug(label, fallback="item")
@@ -619,6 +666,30 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
         design = designs[0]
     except Exception as e:  # noqa: BLE001
         return {"tag": task.tag, "ok": False, "path": None, "error": f"арт-директор: {e}"}
+
+    if task.style_id == _PROFESSION_ARCHIVE_STYLE_ID:
+        # Название профессии — единственный видимый текст. Арт-директор может вернуть
+        # лишний слоган или ошибочно решить, что предметная раскладка «фигуративна»;
+        # кодовый контракт делает утверждённый v2 воспроизводимым.
+        profession_title = task.label.strip().upper()
+        design.update({
+            "style_id": _PROFESSION_ARCHIVE_STYLE_ID,
+            "style_mix": "",
+            "quote": profession_title,
+            "slogan": "",
+            "type_spec": (
+                "One central uppercase Cyrillic profession title in a custom narrow "
+                "industrial grotesk, warm ivory metal fill with charcoal inner keyline; "
+                "single placement, readable, integrated through slight object overlap"
+            ),
+            "name_jp": "",
+            "kana": "",
+            "character_en": "",
+            "title_en": "",
+            "signature_props": "",
+            "has_human_figure": False,
+            "chroma": "green",
+        })
 
     # Протяжка из досье (ветка franchise): перезаписываем character_en/title_en
     # НАДЁЖНЫМИ значениями досье поверх догадки арт-директора — иначе на нишевых

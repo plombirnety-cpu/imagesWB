@@ -669,6 +669,34 @@ def _automotive_editorial_quality_hint(style_pref: str) -> str:
     return ""
 
 
+_PROFESSION_ARCHIVE_STYLE_ID = "40_profession_technical_archive"
+_PROFESSION_ARCHIVE_QUALITY_HINT = (
+    " ДЛЯ ЭТОГО дизайна трактуй запрос как ОДНУ реальную профессию, не персонажа, "
+    "франшизу, человека или сцену. Верни quote РОВНО равным названию профессии из "
+    "запроса в ВЕРХНЕМ РЕГИСТРЕ; это единственный видимый текст и он встречается один "
+    "раз. type_spec обязательно описывает одно центральное размещение этого точного "
+    "кириллического заголовка. slogan, kana, name_jp, character_en, title_en, "
+    "signature_props и style_mix оставь пустыми; has_human_figure=false. Выбери ровно "
+    "четыре узнаваемых рабочих предмета именно этой профессии: один крупный hero-object "
+    "38-45% композиции и три неравных вспомогательных. Добавь маленькие номера 1, 2, 3, "
+    "4 — каждый ровно один раз — с тонкими выносками, засечками измерительной шкалы и "
+    "фрагментом технической схемы. Рендер — дорогая предметная гравюра: трёхтоновый "
+    "brushed metal, точные грани, локальное печатное зерно, но без глянцевого CGI. "
+    "Композиция открытая, асимметричная, с управляемыми перекрытиями и 20-30% чистого "
+    "хромакея между элементами. НЕЛЬЗЯ делать равную сетку из четырёх иконок, clip art, "
+    "набор стикеров, badge, постер, прямоугольный фон, сцену или лишний псевдотекст. "
+    "Используй green chroma и ни одного зелёного элемента внутри принта; линии обязаны "
+    "иметь печатно-безопасную толщину."
+)
+
+
+def _profession_archive_quality_hint(style_pref: str) -> str:
+    """Жёсткий предметно-типографический контракт утверждённого profession v2."""
+    if style_pref == _PROFESSION_ARCHIVE_STYLE_ID:
+        return _PROFESSION_ARCHIVE_QUALITY_HINT
+    return ""
+
+
 # Цвет фона сам регулярно попадает в prose-промпт, хотя SYSTEM просит отдавать
 # prompt "без цвета фона". Поэтому искать голое слово green во всём prompt нельзя:
 # "green chroma-key background" ложно превращало практически каждый green в blue.
@@ -762,6 +790,7 @@ def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
         + _gym_variety_hint(style_pref)
         + _magazine_cover_quality_hint(style_pref)
         + _automotive_editorial_quality_hint(style_pref)
+        + _profession_archive_quality_hint(style_pref)
     )
     system_fn = _SYSTEMS_FN.get(fmt, system_cutout)
     # Щедрый бюджет токенов: gemini-pro-latest тратит часть на рассуждение, а

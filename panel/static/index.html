@@ -465,6 +465,7 @@ let currentStudioJob = null, studioPollTimer = null, selectedStudioModel = null;
 let studioModelsLoaded = false;
 let previewItems = [], previewIndex = 0;
 let themeOptionalStyleIds = new Set();
+const PROFESSION_STYLE_ID = '40_profession_technical_archive';
 let collectorRefreshKey = null;
 let collectorRunning = false;
 let brightDataPrice = 1.5;
@@ -658,13 +659,22 @@ function allowsEmptyTheme(){
 }
 
 function updateThemeHint(){
+  const selected = selectedStyles();
+  const profession = selected.length === 1 && selected[0] === PROFESSION_STYLE_ID;
   const optional = allowsEmptyTheme();
-  $('#themeHint').textContent = optional
-    ? 'Для выбранного авто-стиля тему можно не вводить — арт-директор сам соберёт разные сюжеты.'
-    : '';
-  themeEl.placeholder = optional
-    ? 'необязательно — автомобиль и смысловой текст выберет арт-директор'
-    : 'напр. «поднятие уровня в одиночку», «тачки»';
+  $('#themeHint').textContent = profession
+    ? 'Введите одну профессию. Для нескольких профессий перечислите их в поле ниже.'
+    : (optional
+      ? 'Для выбранного авто-стиля тему можно не вводить — арт-директор сам соберёт разные сюжеты.'
+      : '');
+  themeEl.placeholder = profession
+    ? 'например: хирург, юрист, стоматолог'
+    : (optional
+      ? 'необязательно — автомобиль и смысловой текст выберет арт-директор'
+      : 'напр. «поднятие уровня в одиночку», «тачки»');
+  charsEl.placeholder = profession
+    ? 'несколько профессий — через запятую или с новой строки'
+    : 'через запятую или с новой строки, если пусто — берём из темы (тайтла) или саму тему';
 }
 
 function cardFor(item){
@@ -860,11 +870,16 @@ genBtn.onclick = () => {
   const theme = themeEl.value.trim();
   const characters = charsEl.value.trim();
   const count = parseInt(countEl.value, 10) || 1;
+  const selected = selectedStyles();
+  if(selected.length === 1 && selected[0] === PROFESSION_STYLE_ID && !theme && !characters){
+    formErr.textContent = 'Укажите профессию.';
+    return;
+  }
   if(!theme && !characters && !allowsEmptyTheme()){
     formErr.textContent = 'Укажи тему/персонажей или выбери автономный авто-стиль.';
     return;
   }
-  startGeneration({styles:selectedStyles(), count, theme, characters, free_prompt:''}, formErr);
+  startGeneration({styles:selected, count, theme, characters, free_prompt:''}, formErr);
 };
 
 freeBtn.onclick = () => {

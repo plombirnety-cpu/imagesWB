@@ -60,6 +60,7 @@ _REFERENCE_PREFIX = (
 )
 
 _MAGAZINE_PRINT_STYLE_ID = "34_anime_magazine_cover"
+_PROFESSION_ARCHIVE_STYLE_ID = "40_profession_technical_archive"
 _MAGAZINE_PRINT_PROMPT_SUFFIX = (
     " STREETWEAR OPEN-EDGE PRINT COMPOSITION — NOT A STICKER AND NOT A RECTANGULAR "
     "MAGAZINE COVER: treat the "
@@ -92,6 +93,20 @@ def _is_magazine_print_style(design: dict) -> bool:
         str(design.get("style_id") or "").strip(),
         str(design.get("style_mix") or "").strip(),
     }
+
+
+def _generation_model_for_design(design: dict) -> str | None:
+    """Премиальная image-модель только для утверждённого детального profession v2."""
+    styles = {
+        str(design.get("style_id") or "").strip(),
+        str(design.get("style_mix") or "").strip(),
+    }
+    if (
+        config.IMAGE_PROVIDER == "gemini"
+        and _PROFESSION_ARCHIVE_STYLE_ID in styles
+    ):
+        return config.GEMINI_MODEL_PREMIUM
+    return None
 
 
 def _recover_image_other(
@@ -1007,6 +1022,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
         if ring_medallion else ""
 
     magazine_print = _is_magazine_print_style(design)
+    generation_model = _generation_model_for_design(design)
     prompt = art_director.build_prompt(design)
     if magazine_print:
         # Code-level контракт после арт-директора: LLM не может забыть фигурный низ.
@@ -1119,6 +1135,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
             attempt_img = providers.generate_image(
                 attempt_prompt,
                 seed=try_seed,
+                model=generation_model,
                 reference=attempt_reference,
             )
         except providers.GeminiImageRejected as e:
@@ -1342,6 +1359,7 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                 fb_img = providers.generate_image(
                     fallback_prompt,
                     seed=fb_seed,
+                    model=generation_model,
                     reference=fallback_reference,
                 )
             except providers.GeminiImageRejected as e:

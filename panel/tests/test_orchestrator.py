@@ -224,6 +224,106 @@ def test_plan_tasks_rock_band_rotates_three_reference_families_without_dossier(m
     assert all("3-5 broad flat" in task.style_brief.lower() for task in tasks)
 
 
+def test_plan_tasks_profession_archive_rotates_without_franchise_dossier(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator.franchise_scout,
+        "build_dossier",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("стиль профессий не должен запускать поиск франшизы")
+        ),
+    )
+
+    tasks = orchestrator.plan_tasks(
+        styles=["40_profession_technical_archive"],
+        count=6,
+        theme="хирург",
+        characters="",
+    )
+
+    assert [task.label for task in tasks] == ["хирург"] * 6
+    assert all(task.source == "profession" for task in tasks)
+    assert "RISING S-CURVE" in tasks[0].style_brief
+    assert "FALLING DIAGONAL" in tasks[1].style_brief
+    assert "OFFSET VERTICAL ARCHIVE" in tasks[2].style_brief
+    assert len({task.style_brief for task in tasks}) == 6
+    assert all("exactly four authentic" in task.style_brief.lower() for task in tasks)
+
+
+def test_plan_tasks_profession_archive_accepts_multiple_professions(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator.franchise_scout,
+        "build_dossier",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("dossier must not run")),
+    )
+
+    tasks = orchestrator.plan_tasks(
+        styles=["40_profession_technical_archive"],
+        count=4,
+        theme="",
+        characters="терапевт, стоматолог",
+    )
+
+    assert [task.label for task in tasks] == [
+        "терапевт", "стоматолог", "терапевт", "стоматолог",
+    ]
+    assert all(task.source == "profession" for task in tasks)
+
+
+def test_render_profession_archive_forces_exact_title_and_non_figurative_design(
+    tmp_path, monkeypatch,
+):
+    captured = {}
+
+    def fake_make_ideas(theme, *args, **kwargs):
+        captured["theme"] = theme
+        captured["style_pref"] = kwargs.get("style_pref")
+        return [{
+            "prompt": "generic clip art",
+            "chroma": "blue",
+            "style_id": "01_baroque_frame",
+            "style_mix": "39_rock_band_print",
+            "quote": "wrong",
+            "slogan": "extra",
+            "character_en": "Surgeon Character",
+            "title_en": "Some Franchise",
+            "signature_props": "sword",
+            "has_human_figure": True,
+        }]
+
+    def fake_render_design(design, tag, outdir, **kwargs):
+        captured["design"] = dict(design)
+        path = outdir / f"{tag}.png"
+        Image.new("RGB", (4, 4), (0, 200, 0)).save(path)
+        return {"ok": True, "green": str(path), "error": None}
+
+    monkeypatch.setattr(orchestrator.art_director, "make_ideas", fake_make_ideas)
+    monkeypatch.setattr(orchestrator.batch_print, "render_design", fake_render_design)
+    task = orchestrator.DesignTask(
+        index=1,
+        label="акушер-гинеколог",
+        style_id="40_profession_technical_archive",
+        tag="01_obgyn",
+        source="profession",
+        style_brief="ASSIGNED PROFESSION ARCHIVE VARIANT: test",
+    )
+
+    result = orchestrator._render_once(task, tmp_path)
+    design = captured["design"]
+
+    assert result["ok"] is True
+    assert captured["style_pref"] == "40_profession_technical_archive"
+    assert "ASSIGNED PROFESSION ARCHIVE VARIANT" in captured["theme"]
+    assert design["quote"] == "АКУШЕР-ГИНЕКОЛОГ"
+    assert design["slogan"] == ""
+    assert design["style_mix"] == ""
+    assert design["character_en"] == ""
+    assert design["title_en"] == ""
+    assert design["signature_props"] == ""
+    assert design["has_human_figure"] is False
+    assert design["chroma"] == "green"
+    assert design["type_spec"]
+
+
 def test_plan_tasks_rock_band_keeps_optional_lineup_as_one_reference_block(monkeypatch):
     monkeypatch.setattr(
         orchestrator.franchise_scout,

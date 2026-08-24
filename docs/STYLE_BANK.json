@@ -548,6 +548,39 @@
         "Весь текст читается и на чёрной, и на белой футболке: нейтральная серебристая/серая/greige заливка + двойной контрастный контур (charcoal inner stroke и warm-ivory outer keyline); цвет кузова только в мелких акцентах",
         "Чистое плоское зелёное или синее хромакей-поле по всем краям под автоматическую вырезку"
       ]
+    },
+    {
+      "id": "40_profession_technical_archive",
+      "name_ru": "Профессия / технический архив",
+      "theme_optional": false,
+      "essence": "A premium PROFESSION TECHNICAL ARCHIVE APPAREL PRINT built from the authentic tools and visual language of exactly one profession. It is a designed editorial object study, not a person, workplace scene or generic set of icons. Use exactly FOUR profession-specific objects: one unmistakable hero object occupies 38-45% of the artwork and three unequal supporting objects establish depth and rhythm. Every object must be technically plausible and distinct, with accurate working geometry, brushed-metal highlights, engraved hatching, controlled screen-print grain and selected three-tone detail. Arrange them as an open asymmetric collage along the composition family assigned by the orchestrator: rising S-curve, falling diagonal, offset vertical archive, broken arc, cross-axis overlap or asymmetric cascade. The exact Russian profession title forms the central typographic spine. Add exactly four tiny numbered callouts 1, 2, 3 and 4, each once, with restrained leader lines, measurement ticks, registration marks and one partial technical-diagram fragment. These marks are decorative visual language, not extra copy. Preserve 20-30% real bare chroma between separated objects and a clean 7% chroma moat on every edge. No equal four-corner layout, clip-art collection, sticker sheet, badge, emblem, rectangular poster, page, card, catalogue grid, full workplace background or enclosing shape. A cropped working hand may appear only as a small supporting graphic fragment when essential, never as a portrait or full human figure. Lines must remain thick enough for garment printing and the entire composition must read from two metres.",
+      "text_treatment": "Use exactly ONE visible phrase: the profession title supplied by the user, converted to correctly spelled uppercase Cyrillic and written once only. Place it through the centre in a custom narrow industrial grotesk or precision technical display face; it may overlap a hero object by no more than 8%, but every letter stays reconstructable. No slogan, English translation, fake specification copy, pseudo-letters, dates, brand marks or repeated title. Use a warm-ivory/light-metal fill, a thin charcoal inner keyline and restrained profession-accent details so the title remains usable on both black and white garments. Numbers 1, 2, 3 and 4 are the only other glyphs, tiny and each appearing exactly once beside its own callout.",
+      "palette_rule": "Use 3-5 controlled print inks: warm ivory, steel silver, deep charcoal and exactly one profession-appropriate accent selected per composition family (cyan, cobalt, amber, burgundy, orange or violet). Model metal through three broad tonal steps and engraved linework, not glossy 3D gradients. No rainbow palette, neon wash, photographic full colour, pure-white page or black rectangular backing. This style always renders on green chroma, therefore green, emerald, lime and olive are forbidden anywhere inside the artwork.",
+      "mood_tags": [
+        "профессия",
+        "работа",
+        "инструменты",
+        "техническая графика",
+        "архив",
+        "гравюра",
+        "хирург",
+        "врач",
+        "юрист",
+        "инженер",
+        "profession"
+      ],
+      "constraints": [
+        "Ровно одна профессия; не персонаж, не франшиза, не портрет и не полноценная рабочая сцена",
+        "Ровно четыре достоверных предмета профессии: один hero-object 38-45% и три неравных вспомогательных, без дублей",
+        "Ровно четыре маленькие цифровые метки 1, 2, 3, 4 — каждая один раз — с тонкими выносками; никаких других цифр и псевдотекста",
+        "Единственная словесная надпись — точное русское название профессии ВЕРХНИМ РЕГИСТРОМ один раз; без слоганов, перевода и повторов",
+        "Композиционная ротация назначается кодом: S-дуга, падающая диагональ, смещённая вертикаль, незамкнутая дуга, перекрёстная ось, асимметричный каскад",
+        "Запрещена равная сетка из четырёх углов, клипарт, набор иконок/стикеров, badge, герб, постер, карточка, каталог и прямоугольная подложка",
+        "Предметная детализация премиальная: правильная геометрия, гравюрная штриховка, три крупных тона металла и локальное печатное зерно; без дешёвого CGI-глянца",
+        "20-30% чистого хромакея видно между элементами; чистый отступ 7% со всех сторон, никакой общей обводки, ореола или замкнутого фона",
+        "Линии, засечки и штриховка печатно-безопасной толщины, не исчезают после удаления GreenKey и читаются с двух метров",
+        "Только зелёный хромакей; в самом принте запрещены зелёный, изумрудный, лаймовый и оливковый цвета"
+      ]
     }
   ]
 }
