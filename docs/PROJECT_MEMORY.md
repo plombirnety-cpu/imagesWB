@@ -10,6 +10,17 @@
   в `/opt/print-panel/manual-results/tshirt-flatlay-20260824`.
 - Контроль качества: заголовок `PROTECTED WITNESS` сохранён, watermark и UI
   отсутствуют, четыре результата различаются фоном и размещением футболки.
+- Для белой футболки создана вторая ручная партия из 3 премиальных Gemini I2I
+  вариантов: тёплый травертин, тёмный графит и глубокий бордовый фон. Менялись
+  только фон и небольшое положение изделия.
+- Файлы `05_white_hoodbyair_warm_travertine.png`,
+  `06_white_hoodbyair_dark_graphite.png` и
+  `07_white_hoodbyair_deep_burgundy.png` лежат в
+  `C:\Users\Man99\OneDrive\Рабочий стол\готовые`; резервная серверная копия —
+  `/opt/print-panel/manual-results/white-tee-backgrounds-20260824`.
+- Проверено визуально: `CLASSICS`, `HOOD BY AIR`, череп, звёзды и оба знака на
+  рукавах сохранены, watermark Avito и точка карусели удалены. Было ровно 3
+  успешных платных image outputs; первый технический запуск остановился до API.
 - Это отдельная ручная партия результатов: production-код и deploy не менялись.
 
 ## Handoff Telegram → товар → Диск → фотостудия → выкладка (2026-08-22)
