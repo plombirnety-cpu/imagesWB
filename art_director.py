@@ -146,7 +146,10 @@ def _pick_style_candidates(theme: str, recent_styles: list = None,
     bank = _load_style_bank()
     if not bank:
         return []
-    styles = bank["styles"]
+    # Стили с manual_only доступны при явном style_pref (панельный чекбокс), но не
+    # участвуют в автоматическом выборе/миксе. Для style 40 это защищает от случайного
+    # дорогого Pro-вызова без его панельной нормализации точного названия профессии.
+    styles = [s for s in bank["styles"] if not s.get("manual_only")]
     recent = set(recent_styles or [])
     theme_low = theme.lower()
 
@@ -1244,7 +1247,13 @@ def _text_render_block(design: dict) -> str:
             f"Also include a vertical Japanese calligraphy column with the kanji "
             f"{name_jp} placed beside the figure."
         )
-    parts.append("No other text anywhere.")
+    if str(design.get("style_id") or "").strip() == _PROFESSION_ARCHIVE_STYLE_ID:
+        parts.append(
+            "No other letters or words anywhere. The only other permitted glyphs are "
+            "the four tiny technical callout numerals 1, 2, 3 and 4, each exactly once."
+        )
+    else:
+        parts.append("No other text anywhere.")
     return " ".join(parts)
 
 

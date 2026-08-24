@@ -225,7 +225,7 @@
       <span class="hint-sm" id="themeHint"></span>
     </label>
 
-    <label class="fld">Персонажи (опционально)
+    <label class="fld"><span id="charactersLabel">Персонажи (опционально)</span>
       <textarea id="characters" placeholder="через запятую или с новой строки, если пусто — берём из темы (тайтла) или саму тему"></textarea>
     </label>
 
@@ -439,6 +439,7 @@
 <script>
 const $ = s => document.querySelector(s);
 const stylesEl = $('#styles'), themeEl = $('#theme'), charsEl = $('#characters'),
+      charactersLabel = $('#charactersLabel'),
       countEl = $('#count'), genBtn = $('#genBtn'), formErr = $('#formErr'),
       freePromptEl = $('#freePrompt'), freeBtn = $('#freeBtn'), freeErr = $('#freeErr'),
       progwrap = $('#progwrap'), progbarInner = $('#progbarInner'), progtext = $('#progtext'),
@@ -675,6 +676,9 @@ function updateThemeHint(){
   charsEl.placeholder = profession
     ? 'несколько профессий — через запятую или с новой строки'
     : 'через запятую или с новой строки, если пусто — берём из темы (тайтла) или саму тему';
+  charactersLabel.textContent = profession
+    ? 'Дополнительные профессии (опционально)'
+    : 'Персонажи (опционально)';
 }
 
 function cardFor(item){

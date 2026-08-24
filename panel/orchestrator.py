@@ -547,7 +547,13 @@ def plan_tasks(
     elif style_list == [_PROFESSION_ARCHIVE_STYLE_ID]:
         # Профессия — самостоятельная товарная тема. Не отправляем её в
         # franchise_scout: «хирург»/«юрист» не должны превращаться в персонажей.
-        professions = names or ([theme] if theme else [])
+        professions: list[str] = []
+        seen_professions: set[str] = set()
+        for profession in (([theme] if theme else []) + names):
+            key = profession.casefold()
+            if key not in seen_professions:
+                professions.append(profession)
+                seen_professions.add(key)
         if not professions:
             raise ValueError("для стиля профессий нужно указать профессию")
         entries = [(name, "") for name in _expand_round_robin(professions, count)]
@@ -679,8 +685,9 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
             "slogan": "",
             "type_spec": (
                 "One central uppercase Cyrillic profession title in a custom narrow "
-                "industrial grotesk, warm ivory metal fill with charcoal inner keyline; "
-                "single placement, readable, integrated through slight object overlap"
+                "industrial grotesk, mid-silver or warm-greige fill with charcoal inner "
+                "keyline and warm-ivory outer keyline; single placement, readable, "
+                "integrated through slight object overlap"
             ),
             "name_jp": "",
             "kana": "",

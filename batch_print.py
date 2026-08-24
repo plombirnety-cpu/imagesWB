@@ -97,13 +97,10 @@ def _is_magazine_print_style(design: dict) -> bool:
 
 def _generation_model_for_design(design: dict) -> str | None:
     """Премиальная image-модель только для утверждённого детального profession v2."""
-    styles = {
-        str(design.get("style_id") or "").strip(),
-        str(design.get("style_mix") or "").strip(),
-    }
     if (
         config.IMAGE_PROVIDER == "gemini"
-        and _PROFESSION_ARCHIVE_STYLE_ID in styles
+        and str(design.get("style_id") or "").strip()
+        == _PROFESSION_ARCHIVE_STYLE_ID
     ):
         return config.GEMINI_MODEL_PREMIUM
     return None
@@ -761,7 +758,10 @@ def _verify_text(image: Image.Image, expected_phrases: list) -> bool:
     return ok
 
 
-def _transcript_has_no_significant_text(transcript: str) -> bool:
+def _transcript_has_no_significant_text(
+    transcript: str,
+    allowed_tokens: set[str] | None = None,
+) -> bool:
     """Эвристика "OCR-транскрипт говорит, что на картинке текста нет" — используется
     _verify_no_text для text-fallback ветки (пятнадцатый заход поймал регресс: фолбэк-
     генерация без текст-блока в промпте может ВСЁ РАВНО прийти С художественным текстом,
@@ -789,6 +789,13 @@ def _transcript_has_no_significant_text(transcript: str) -> bool:
     )
     if any(neg in low for neg in _NEGATIVE_PHRASES):
         return True
+    if allowed_tokens:
+        # Некоторые предметные стили сохраняют в fallback законные технические
+        # цифры. Они не должны блокировать исправление неверного заголовка кодовой
+        # типографикой, но любая буква/чужая цифра по-прежнему означает «текст есть».
+        tokens = _re.findall(r"\w+", t, flags=_re.UNICODE)
+        if tokens and all(token.casefold() in allowed_tokens for token in tokens):
+            return True
     # Убираем пунктуацию/пробелы, оставляем только буквы/цифры/CJK — если после этого
     # пусто ИЛИ строка сама по себе "none"/"n/a"-подобный служебный ответ без единой
     # содержательной буквы естественного алфавита, считаем что текста нет.
@@ -804,7 +811,10 @@ _NO_TEXT_MAX_CHARS = 40  # см. _transcript_has_no_significant_text — не и
                           # ужесточения (например ограничить длину "почти пустого" ответа).
 
 
-def _verify_no_text(image: Image.Image) -> bool:
+def _verify_no_text(
+    image: Image.Image,
+    allowed_tokens: set[str] | None = None,
+) -> bool:
     """Проверка ОБРАТНАЯ _verify_text — используется ТОЛЬКО в text-fallback ветке
     render_design (design["type_spec"]="" запросил картинку БЕЗ текста): подтверждает,
     что на fallback-картинке ДЕЙСТВИТЕЛЬНО нет значимого встроенного текста — модель
@@ -820,7 +830,10 @@ def _verify_no_text(image: Image.Image) -> bool:
     except Exception as e:  # noqa: BLE001
         print(f"  !! OCR-контроль отсутствия текста (fallback) упал: {e}", flush=True)
         return False
-    no_text = _transcript_has_no_significant_text(transcript)
+    no_text = _transcript_has_no_significant_text(
+        transcript,
+        allowed_tokens=allowed_tokens,
+    )
     if not no_text:
         print(f"  OCR-контроль отсутствия текста (fallback): транскрипт={transcript!r} "
               f"— НА FALLBACK-КАРТИНКЕ ЕСТЬ ТЕКСТ (модель проигнорировала запрет)",
@@ -1432,7 +1445,21 @@ def render_design(design: dict, tag: str, outdir: Path, timeout_retries: int = 2
                       f"прерываем fallback-цикл", flush=True)
                 break
 
-            fb_no_text_ok = _verify_no_text(fb_img)
+            allowed_fallback_tokens = (
+                {"1", "2", "3", "4"}
+                if str(design.get("style_id") or "").strip()
+                == _PROFESSION_ARCHIVE_STYLE_ID
+                else None
+            )
+            if allowed_fallback_tokens:
+                fb_no_text_ok = _verify_no_text(
+                    fb_img,
+                    allowed_tokens=allowed_fallback_tokens,
+                )
+            else:
+                # Сохраняем старую одноаргументную точку вызова для обычных стилей
+                # и совместимость существующих monkeypatch-тестов.
+                fb_no_text_ok = _verify_no_text(fb_img)
             print(f"{p} OCR-контроль отсутствия текста (fallback): "
                   f"{'подтверждено — текста нет' if fb_no_text_ok else 'провал — текст ЕСТЬ'}",
                   flush=True)

@@ -259,12 +259,12 @@ def test_plan_tasks_profession_archive_accepts_multiple_professions(monkeypatch)
     tasks = orchestrator.plan_tasks(
         styles=["40_profession_technical_archive"],
         count=4,
-        theme="",
+        theme="хирург",
         characters="терапевт, стоматолог",
     )
 
     assert [task.label for task in tasks] == [
-        "терапевт", "стоматолог", "терапевт", "стоматолог",
+        "хирург", "терапевт", "стоматолог", "хирург",
     ]
     assert all(task.source == "profession" for task in tasks)
 

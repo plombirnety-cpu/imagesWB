@@ -30,6 +30,7 @@ def test_profession_archive_style_has_approved_v2_contract():
     ).lower()
 
     assert style["theme_optional"] is False
+    assert style["manual_only"] is True
     assert "exactly four" in contract
     assert "38-45%" in contract
     assert "1, 2, 3 and 4" in contract
@@ -85,7 +86,8 @@ def test_build_prompt_reinforces_open_archive_and_exact_title():
 
     assert "profession technical archive apparel print" in prompt
     assert "spell the phrase exactly, letter by letter: хирург" in prompt
-    assert "no other text anywhere" in prompt
+    assert "no other letters or words anywhere" in prompt
+    assert "callout numerals 1, 2, 3 and 4" in prompt
     assert "solid, perfectly uniform bright green chroma-key" in prompt
 
 
@@ -99,10 +101,34 @@ def test_profession_archive_uses_premium_gemini_only(monkeypatch):
     assert batch_print._generation_model_for_design({
         "style_id": "01_baroque_frame",
         "style_mix": STYLE_ID,
-    }) == "premium-test-model"
+    }) is None
     assert batch_print._generation_model_for_design({
         "style_id": "39_rock_band_print",
     }) is None
 
     monkeypatch.setattr(config, "IMAGE_PROVIDER", "pollinations")
     assert batch_print._generation_model_for_design({"style_id": STYLE_ID}) is None
+
+
+def test_profession_archive_is_manual_only_for_auto_style_selection():
+    automatic_ids = {
+        item["id"] for item in ad._pick_style_candidates("хирург профессия", k=100)
+    }
+    forced = ad._pick_style_candidates(
+        "хирург профессия", style_pref=STYLE_ID,
+    )
+
+    assert STYLE_ID not in automatic_ids
+    assert [item["id"] for item in forced] == [STYLE_ID]
+
+
+def test_profession_callout_digits_are_allowed_in_text_fallback():
+    assert batch_print._transcript_has_no_significant_text(
+        "1 2 3 4", allowed_tokens={"1", "2", "3", "4"},
+    )
+    assert not batch_print._transcript_has_no_significant_text(
+        "ХИРУГ 1 2 3 4", allowed_tokens={"1", "2", "3", "4"},
+    )
+    assert not batch_print._transcript_has_no_significant_text(
+        "1 2 3 4 5", allowed_tokens={"1", "2", "3", "4"},
+    )
