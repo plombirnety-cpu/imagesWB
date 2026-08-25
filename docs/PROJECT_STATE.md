@@ -1,5 +1,36 @@
 # PROJECT_STATE — print-factory-nb
 
+## 2026-08-25 — style 42 «Русский стиль» в production
+
+- Реализация зафиксирована коммитом `c0b12e5` и собрана в образ
+  `print-factory-panel:candidate-russian42-c0b12e5`, digest
+  `sha256:f2b8a7b0f0f9fe0220f563ebe81367855561907211e8117e17412d8fb37ff004`.
+- В read-only Linux test-container без сети, `.env` и production-volume прошёл
+  профильный набор `120 passed`; он включает 14 новых тестов style 42, прежние
+  style-bank/auto/profession/city-регрессии, весь `panel/tests/test_orchestrator.py`,
+  `panel/tests/test_app.py` и четыре fork/process-сценария.
+- Изолированный HTTP-кандидат на `127.0.0.1:18049` подтвердил health `200`, UI
+  redirect `303`, закрытый API `401`, authenticated style payload
+  `{id: 42_russian_style, name_ru: Русский стиль, theme_optional: true}`, нулевой
+  restart count, ротацию четырёх art-directions и primary-only premium-routing.
+- Перед переключением защищённый production API показал `0` активных задач.
+  Production запущен через compose как `print-factory-panel:latest`; его image id
+  точно совпадает с candidate digest. Итог: Docker health `healthy`, HTTP `200`,
+  restart count `0`, root `303`, unauthenticated styles API `401`.
+- Постоянный volume `panel_panel_out` сохранён без замены: размер около `1.3G`,
+  каталог прежнего задания `12870d67ef32` и `trend_radar.sqlite3` присутствуют.
+  Активный `/opt/print-panel/.env` не выводился, права после переноса — `600`.
+- На момент deploy локальный радар не содержал ни одной темы, одновременно прошедшей
+  owner-approved + qualified + confidence/lifecycle/freshness-фильтр. Проверен
+  бесплатный fallback-план: «Жар-птица в ночном саду» и «Лиса в зимней тайге».
+- Откат: остановленный контейнер
+  `print-factory-panel-pre-russian42-c0b12e5`, image-tag
+  `print-factory-panel:backup-pre-russian42-c0b12e5`, прежний исходный образ
+  `print-factory-panel:candidate-city41-rich-07921bf` и исходники
+  `/opt/print-panel-backup-pre-russian42-c0b12e5`.
+- Временный smoke-контейнер, пустой candidate-volume, test-image и транспортные ZIP
+  удалены после успешного healthcheck. Платных art-director/image-вызовов не было.
+
 ## 2026-08-25 — style 42 «Русский стиль»: реализация перед deploy
 
 - Семь пользовательских референсов разобраны не как один шаблон, а как зонтичная

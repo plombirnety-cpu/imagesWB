@@ -1,5 +1,26 @@
 # Память проекта Print Factory
 
+## Style 42 — production deploy (2026-08-25)
+
+- Коммит реализации: `c0b12e5`. Production image id:
+  `sha256:f2b8a7b0f0f9fe0220f563ebe81367855561907211e8117e17412d8fb37ff004`,
+  совпадает с `print-factory-panel:candidate-russian42-c0b12e5` и активным
+  `print-factory-panel:latest`.
+- Linux candidate без сети, `.env` и production-volume: `120 passed`. HTTP/auth/
+  style/plan/premium smokes прошли без платных генераций.
+- Production: health `healthy`, HTTP `200`, restart count `0`, style API возвращает
+  «Русский стиль» и `theme_optional=true`; перед переключением активных задач было
+  `0`.
+- Volume `panel_panel_out` сохранён (`~1.3G`), каталог `12870d67ef32` и radar DB на
+  месте; `.env` перенесён без вывода содержимого и имеет mode `600`.
+- Сейчас безопасных свежих owner-approved + qualified тем радара `0`; автономный
+  style 42 корректно использует evergreen, не ослабляя фильтр ради заполнения.
+- Быстрый откат готов: container
+  `print-factory-panel-pre-russian42-c0b12e5`, image
+  `print-factory-panel:backup-pre-russian42-c0b12e5`, source
+  `/opt/print-panel-backup-pre-russian42-c0b12e5`.
+- Временные candidate/test артефакты удалены; production и rollback оставлены.
+
 ## Style 42 — «Русский стиль» (2026-08-25, реализация перед deploy)
 
 - ID `42_russian_style`; точное UI-имя «Русский стиль»; стиль ручной, но допускает
