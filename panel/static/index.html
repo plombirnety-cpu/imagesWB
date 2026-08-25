@@ -31,13 +31,17 @@
     background:var(--panel2);color:var(--text);border:1px solid var(--line);transition:.12s}
   button:hover{background:#363843}
   button:disabled{opacity:.45;cursor:not-allowed}
+  a.button-link{font:inherit;border-radius:8px;padding:9px 12px;cursor:pointer;background:var(--panel2);
+    color:var(--text);border:1px solid var(--line);transition:.12s;text-decoration:none;
+    display:inline-flex;align-items:center;justify-content:center;text-align:center}
+  a.button-link:hover{background:#363843}
   button.primary{background:var(--accent);border-color:transparent;color:#fff;font-weight:600;width:100%}
   button.primary:hover{filter:brightness(1.08)}
-  button.blue{background:var(--accent2);border-color:transparent;color:#fff;width:100%}
+  button.blue,a.button-link.blue{background:var(--accent2);border-color:transparent;color:#fff;width:100%}
   button.danger{background:#a92c32;border-color:#d9534f;color:#fff;font-weight:600}
   button.danger:hover{background:#c0343c}
   .run-actions{display:flex;gap:8px;margin-top:8px}
-  .run-actions button{width:auto;flex:1}
+  .run-actions button,.run-actions a.button-link{width:auto;flex:1}
   .grp{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;
     display:flex;flex-direction:column;gap:8px}
   .grp .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
@@ -84,9 +88,9 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#000a;
     padding:8px 16px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:9}
   .toast.show{opacity:1}
-  .view-tabs{display:flex;gap:8px;padding:10px 16px;background:var(--panel);
+  .view-tabs{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;background:var(--panel);
     border-bottom:1px solid var(--line)}
-  .view-tabs button{padding:7px 14px}
+  .view-tabs button,.view-tabs a.button-link{padding:7px 14px}
   .view-tabs button.active{background:var(--accent2);border-color:#367bd6;color:#fff}
   .view{flex:1;display:flex;flex-direction:column;min-height:0}
   .radar-view{padding:16px;overflow-y:auto;gap:14px}
@@ -250,6 +254,7 @@
       <button id="generationTab" class="active" type="button">Генерация</button>
       <button id="studioTab" type="button">Виртуальная фотостудия</button>
       <button id="radarTab" type="button">Радар мемов</button>
+      <a class="button-link" id="mockupTab" href="/static/mockup-batcher/index.html" target="_blank" rel="noopener">Мокап-мастер ↗</a>
     </nav>
     <section class="view" id="generationView">
       <div class="progwrap" id="progwrap" style="display:none">
@@ -258,6 +263,7 @@
         <div class="run-actions">
           <button class="danger" id="stopBtn" style="display:none">Остановить генерацию</button>
           <button class="blue" id="dlBtn" style="display:none">Скачать ZIP</button>
+          <a class="button-link blue" id="mockupJobBtn" href="/static/mockup-batcher/index.html" target="_blank" rel="noopener" style="display:none">Передать в мокап-мастер ↗</a>
         </div>
         <div class="preview-note" id="previewNote" style="display:none">Готовые принты уже без фона. Нажмите, чтобы открыть крупно и скачать PNG.</div>
       </div>
@@ -443,7 +449,8 @@ const stylesEl = $('#styles'), themeEl = $('#theme'), charsEl = $('#characters')
       countEl = $('#count'), genBtn = $('#genBtn'), formErr = $('#formErr'),
       freePromptEl = $('#freePrompt'), freeBtn = $('#freeBtn'), freeErr = $('#freeErr'),
       progwrap = $('#progwrap'), progbarInner = $('#progbarInner'), progtext = $('#progtext'),
-      stopBtn = $('#stopBtn'), dlBtn = $('#dlBtn'), previewNote = $('#previewNote'),
+      stopBtn = $('#stopBtn'), dlBtn = $('#dlBtn'), mockupJobBtn = $('#mockupJobBtn'),
+      previewNote = $('#previewNote'),
       grid = $('#grid'), hint = $('#hint'), previewModal = $('#previewModal'),
       previewTitle = $('#previewTitle'), previewImage = $('#previewImage'),
       previewDownload = $('#previewDownload'), previewPrev = $('#previewPrev'),
@@ -788,10 +795,15 @@ async function pollJob(jobId){
     stopBtn.style.display = job.can_cancel ? 'block' : 'none';
     stopBtn.disabled = job.status === 'cancelling';
     stopBtn.textContent = job.status === 'cancelling' ? 'Останавливаю…' : 'Остановить генерацию';
-    dlBtn.style.display = okCount && ['done','error','cancelled'].includes(job.status) ? 'block' : 'none';
+    const terminal = ['done','error','cancelled'].includes(job.status);
+    dlBtn.style.display = okCount && terminal ? 'block' : 'none';
     if(okCount) dlBtn.onclick = () => { window.location.href = `/api/download/${jobId}`; };
+    mockupJobBtn.style.display = okCount && terminal ? 'inline-flex' : 'none';
+    if(okCount && terminal){
+      mockupJobBtn.href = `/static/mockup-batcher/index.html?job=${encodeURIComponent(jobId)}`;
+    }
 
-    if(['done','error','cancelled'].includes(job.status)){
+    if(terminal){
       stopPoll();
       genBtn.disabled = false;
       freeBtn.disabled = false;
@@ -833,6 +845,8 @@ function prepareGenerationUi(){
   progwrap.style.display = 'block';
   stopBtn.style.display = 'none';
   dlBtn.style.display = 'none';
+  mockupJobBtn.style.display = 'none';
+  mockupJobBtn.href = '/static/mockup-batcher/index.html';
   previewNote.style.display = 'none';
   previewItems = [];
   closePreview();

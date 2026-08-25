@@ -1,0 +1,999 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup Batcher — принты на мокапы пачками</title>
+<style>
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{height:100%;margin:0}
+  body{display:flex;flex-direction:column;background:#16181d;color:#e7e9ee;font:14px/1.4 "Segoe UI",sans-serif;overflow:hidden}
+  header{display:flex;gap:8px;align-items:center;padding:8px 12px;background:#1f232b;border-bottom:1px solid #2c313b;flex-wrap:wrap}
+  .logo{font-weight:700;margin-right:6px;white-space:nowrap}
+  #cnt{font-size:12px;color:#8b93a3;white-space:nowrap}
+  .factory-link{color:#9eb7ff;text-decoration:none;border:1px solid #3a4150;border-radius:7px;padding:5px 8px;font-size:12px;white-space:nowrap}
+  .factory-link:hover{background:#2a303b;color:#c8d5ff}
+  #importStatus{font-size:12px;color:#d7e2ff;background:#27314a;border:1px solid #4664e4;border-radius:7px;padding:5px 8px;white-space:nowrap}
+  #importStatus.ok{color:#b7f1ca;border-color:#368052;background:#21382a}
+  #importStatus.err{color:#ffb8bd;border-color:#94434a;background:#41252a}
+  button{background:#2a303b;color:#e7e9ee;border:1px solid #3a4150;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit}
+  button:hover{background:#343b48}
+  button.primary{background:#4664e4;border-color:#5571e8}
+  button.primary:hover{background:#5571e8}
+  button:disabled{opacity:.45;cursor:default}
+  .modesw{display:inline-flex;border:1px solid #3a4150;border-radius:8px;overflow:hidden;flex:none}
+  .modesw .seg{border:none;border-radius:0;background:#23272f;color:#aab1bf;padding:6px 11px}
+  .modesw .seg.active{background:#4664e4;color:#fff}
+  .modesw .seg:hover:not(.active){background:#2f3440}
+  select{background:#2a303b;color:#e7e9ee;border:1px solid #3a4150;border-radius:8px;padding:6px 8px;font:inherit}
+  input[type=text]{background:#2a303b;color:#e7e9ee;border:1px solid #3a4150;border-radius:8px;padding:6px 8px;font:inherit;width:150px}
+  input[type=text]:focus{border-color:#4664e4;outline:none}
+  .linklbl{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#cfd6e4;cursor:pointer;white-space:nowrap;user-select:none;background:#23272f;border:1px solid #3a4150;border-radius:8px;padding:5px 9px}
+  .linklbl input{accent-color:#4664e4;cursor:pointer;margin:0}
+  input[type=range]{accent-color:#6c8cff;vertical-align:middle}
+  .spacer{flex:1}
+  main{flex:1;display:flex;min-height:0}
+  #printsPanel{width:232px;overflow-y:auto;background:#1b1f26;border-right:1px solid #2c313b;padding:6px;flex:none}
+  #printsPanel.drop,#stage.drop,#tabs.drop{outline:2px dashed #6c8cff;outline-offset:-3px}
+  .pitem{display:flex;gap:8px;align-items:center;padding:4px 6px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .pitem:hover{background:#232936}
+  .pitem.active{background:#27314a;border-color:#4664e4}
+  .pitem img{width:42px;height:42px;object-fit:contain;background:#ffffff14;border-radius:6px;flex:none}
+  .pitem .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+  .pitem .dot{width:8px;height:8px;border-radius:50%;background:#f5b941;flex:none;visibility:hidden}
+  .pitem.edited .dot{visibility:visible}
+  .rm{color:#7b8294;flex:none;padding:0 4px;border-radius:4px}
+  .rm:hover{color:#ff7b7b;background:#ffffff10}
+  #center{flex:1;display:flex;flex-direction:column;min-width:0}
+  #tabs{display:flex;gap:6px;padding:6px 10px;flex-wrap:wrap;min-height:30px}
+  .tab{display:flex;gap:6px;align-items:center;background:#2a303b;border:1px solid #3a4150;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}
+  .tab.active{background:#27314a;border-color:#4664e4}
+  #stage{flex:1;position:relative;min-height:0;background-color:#1a1d23;
+    background-image:linear-gradient(45deg,#262b33 25%,transparent 25%),linear-gradient(-45deg,#262b33 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#262b33 75%),linear-gradient(-45deg,transparent 75%,#262b33 75%);
+    background-size:22px 22px;background-position:0 0,0 11px,11px -11px,-11px 0}
+  #cv{position:absolute;inset:0;touch-action:none;cursor:grab}
+  #cv:active{cursor:grabbing}
+  #grid{position:absolute;inset:0;overflow-y:auto;display:flex;flex-wrap:wrap;gap:10px;padding:10px;align-content:flex-start}
+  .cell{background:#1f232b;border:1px solid #2c313b;border-radius:8px;padding:6px;cursor:pointer;width:232px}
+  .cell:hover{border-color:#3a4150}
+  .cell.active{border-color:#4664e4}
+  .cell.edited{border-color:#f5b941}
+  .cell canvas{width:100%;border-radius:4px;display:block}
+  .cell .lab{font-size:11px;color:#aab1bf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px}
+  #ctrl{display:flex;gap:14px;align-items:center;padding:8px 12px;background:#1f232b;border-top:1px solid #2c313b;flex-wrap:wrap}
+  .cg{display:flex;gap:6px;align-items:center;font-size:12px;color:#aab1bf;white-space:nowrap}
+  .cg b{color:#e7e9ee;font-weight:600;min-width:38px;text-align:right}
+  #status{font-size:12px;color:#8b93a3;margin-left:auto;white-space:nowrap}
+  footer{padding:4px 12px;font-size:11px;color:#6b7280;background:#14161b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:10}
+  #modal[hidden]{display:none}
+  #modal .box{background:#1f232b;border:1px solid #3a4150;padding:24px 32px;border-radius:12px;min-width:320px;text-align:center}
+  #modal progress{width:100%;margin-top:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🖼️ Mockup Batcher</div>
+  <a class="factory-link" href="/">← Print Factory</a>
+  <div id="modeSw" class="modesw" title="Выбери режим перед началом">
+    <button id="mCompose" class="seg active" title="Загружаешь принты — они накладываются на мокапы">Принт → мокап</button>
+    <button id="mReady" class="seg" title="Загружаешь уже готовые мокапы — только экспорт (размер/формат/имя)">Готовые мокапы</button>
+  </div>
+  <span id="cnt">Мокапы: 0/20 · Принты: 0/100</span>
+  <span id="importStatus" hidden></span>
+  <label id="linkWrap" class="linklbl printctl" title="Изменения размера, положения и поворота принта повторяются на всех мокапах одинаково (с учётом их пропорций)">
+    <input type="checkbox" id="linkChk" checked> 🔗 Синхр. мокапы
+  </label>
+  <button id="btnMock">+ Мокапы</button>
+  <button id="btnPrints">+ Принты</button>
+  <input type="file" id="fileMock" accept="image/*" multiple hidden>
+  <input type="file" id="filePrints" accept="image/*" multiple hidden>
+  <div class="spacer"></div>
+  <button id="btnView">Сетка</button>
+  <select id="expScope">
+    <option value="active">Экспорт: активный мокап</option>
+    <option value="all">Экспорт: все мокапы</option>
+  </select>
+  <select id="expFmt" title="PNG сохраняет прозрачность (без фона). JPG не умеет прозрачность — для него выбери цвет фона.">
+    <option value="png-transparent">PNG — без фона (прозрачный)</option>
+    <option value="png-white">PNG — белый фон</option>
+    <option value="jpg-white">JPG — белый фон</option>
+    <option value="jpg-black">JPG — чёрный фон</option>
+  </select>
+  <select id="expSize">
+    <option value="0">Размер: оригинал</option>
+    <option value="3000">Размер: до 3000px</option>
+    <option value="2000">Размер: до 2000px</option>
+    <option value="1500">Размер: до 1500px</option>
+    <option value="900">Размер: до 900px</option>
+  </select>
+  <button id="btnExport" class="primary">Экспорт</button>
+</header>
+<main>
+  <aside id="printsPanel"></aside>
+  <section id="center">
+    <div id="tabs"></div>
+    <div id="stage">
+      <canvas id="cv"></canvas>
+      <div id="grid" hidden></div>
+    </div>
+    <div id="ctrl">
+      <span class="cg printctl">Ширина <input type="range" id="sW" min="3" max="95" step="0.5" value="35"> <b id="wVal">—</b></span>
+      <span class="cg printctl">Поворот <input type="range" id="sR" min="-180" max="180" step="1" value="0"> <b id="rVal">—</b></span>
+      <span class="cg printctl">Непрозр. <input type="range" id="sO" min="20" max="100" step="1" value="100"> <b id="oVal">—</b></span>
+      <span class="cg printctl">Наложение
+        <select id="sB">
+          <option value="source-over">Обычное</option>
+          <option value="multiply">Умножение (ткань)</option>
+        </select>
+      </span>
+      <span class="cg" title="Подпись мокапа в имени файла при экспорте: принт__подпись.jpg. Пусто — имя файла мокапа (при нескольких мокапах) или только имя принта.">Имя в файле
+        <input type="text" id="mName" placeholder="например: белая">
+      </span>
+      <button id="btnPrev" class="printctl">⟨ Пред</button>
+      <button id="btnNext" class="printctl">След ⟩</button>
+      <button id="btnApplyAll" class="printctl">Применить ко всем</button>
+      <button id="btnResetOne" class="printctl">Сброс принта</button>
+      <button id="btnResetAll" class="printctl">Сброс всех</button>
+      <span id="status"></span>
+    </div>
+  </section>
+</main>
+<footer>Тяни принт — двигать · Угловые квадратики — размер · Кружок сверху — поворот (Shift = шаг 15°) · Колесо — размер · Alt+колесо — поворот · Стрелки — сдвиг · PgUp/PgDn — другой принт</footer>
+<div id="modal" hidden>
+  <div class="box">
+    <div id="modalText">Экспорт…</div>
+    <progress id="modalBar" max="1" value="0"></progress>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
+const HANDLE_HIT = 12, ROT_OFF = 26;  // радиус попадания по маркеру и вынос ручки поворота, px
+const MAX_PRINTS = 100, MAX_MOCKUPS = 20;
+const MAX_FILE_BYTES = 30 * 1024 * 1024, MAX_IMAGE_PIXELS = 50_000_000;
+const MAX_TOTAL_FILE_BYTES = 300 * 1024 * 1024, MAX_TOTAL_IMAGE_PIXELS = 150_000_000;
+const MAX_EXPORT_FILES = 300, MAX_EXPORT_PIXELS = 120_000_000;
+const MAX_ZIP_BYTES = 300 * 1024 * 1024, DECODE_WORKERS = 4;
+
+const state = { mockups: [], prints: [], am: -1, ap: -1, view: 'editor', mode: 'compose', link: true };
+let uid = 1;
+let viewS = 1, viewOx = 0, viewOy = 0;
+
+const cv = $('#cv'), gridEl = $('#grid'), stageEl = $('#stage'),
+      printsEl = $('#printsPanel'), tabsEl = $('#tabs'), ctrlEl = $('#ctrl');
+
+const activeM = () => state.mockups[state.am] || null;
+const activeP = () => state.prints[state.ap] || null;
+
+/* ---------- загрузка файлов ---------- */
+function loadFiles(files, kind){
+  let arr = [...files].filter(f => f.type.startsWith('image/') && f.type !== 'image/svg+xml');
+  const oversized = arr.filter(f => f.size > MAX_FILE_BYTES).length;
+  arr = arr.filter(f => f.size <= MAX_FILE_BYTES);
+  if (oversized) alert(`Пропущено слишком больших файлов: ${oversized}. Лимит — 30 МБ на изображение.`);
+  if (!arr.length) return Promise.resolve(0);
+  if (kind === 'print'){
+    const room = MAX_PRINTS - state.prints.length;
+    if (room <= 0){ alert(`Лимит — ${MAX_PRINTS} принтов. Удалите лишние, чтобы добавить новые.`); return Promise.resolve(0); }
+    if (arr.length > room){ alert(`Лимит ${MAX_PRINTS} принтов: будут добавлены первые ${room}.`); arr = arr.slice(0, room); }
+  } else {
+    const room = MAX_MOCKUPS - state.mockups.length;
+    if (room <= 0){ alert(`Лимит — ${MAX_MOCKUPS} мокапов. Удалите лишние, чтобы добавить новые.`); return Promise.resolve(0); }
+    if (arr.length > room){ alert(`Лимит ${MAX_MOCKUPS} мокапов: будут добавлены первые ${room}.`); arr = arr.slice(0, room); }
+  }
+
+  const existing = [...state.mockups, ...state.prints];
+  let byteRoom = MAX_TOTAL_FILE_BYTES - existing.reduce((sum, item) => sum + (item.bytes || 0), 0);
+  let budgetRejected = 0;
+  arr = arr.filter(file => {
+    if (file.size > byteRoom){ budgetRejected++; return false; }
+    byteRoom -= file.size;
+    return true;
+  });
+  if (budgetRejected) alert(`Пропущено файлов сверх общего лимита 300 МБ: ${budgetRejected}.`);
+  if (!arr.length) return Promise.resolve(0);
+
+  const pixelRoom = MAX_TOTAL_IMAGE_PIXELS - existing.reduce((sum, item) => sum + item.w * item.h, 0);
+  const list = new Array(arr.length);
+  let nextIndex = 0, acceptedPixels = 0;
+  async function decodeWorker(){
+    while (nextIndex < arr.length){
+      const index = nextIndex++;
+      const f = arr[index];
+      const decoded = await new Promise(res => {
+        const img = new Image();
+        const url = URL.createObjectURL(f);
+        img.onload = () => res({ f, img, url });
+        img.onerror = () => { URL.revokeObjectURL(url); res(null); };
+        img.src = url;
+      });
+      if (!decoded) continue;
+      const pixels = decoded.img.naturalWidth * decoded.img.naturalHeight;
+      if (pixels > MAX_IMAGE_PIXELS || acceptedPixels + pixels > pixelRoom){
+        URL.revokeObjectURL(decoded.url);
+        continue;
+      }
+      acceptedPixels += pixels;
+      list[index] = decoded;
+    }
+  }
+
+  return Promise.all(
+    Array.from({ length: Math.min(DECODE_WORKERS, arr.length) }, () => decodeWorker()),
+  ).then(() => {
+    let loaded = 0;
+    for (const it of list){
+      if (!it) continue;
+      const item = {
+        id: uid++, name: it.f.name, base: it.f.name.replace(/\.[^.]+$/, ''),
+        img: it.img, w: it.img.naturalWidth, h: it.img.naturalHeight, bytes: it.f.size
+      };
+      if (kind === 'mock'){
+        item.def = { cx: item.w/2, cy: item.h*0.45, wf: 0.35, rot: 0 };
+        item.ov = {}; item.opacity = 1; item.blend = 'source-over'; item.label = '';
+        // при включённой синхронизации новый мокап перенимает раскладку уже загруженного
+        const src = state.mockups[state.am] || state.mockups[0];
+        if (state.link && src){
+          item.def = mapLayout(src, item, src.def);
+          for (const pid in src.ov) item.ov[pid] = mapLayout(src, item, src.ov[pid]);
+        }
+        state.mockups.push(item);
+        if (state.am < 0) state.am = 0;
+      } else {
+        state.prints.push(item);
+        if (state.ap < 0) state.ap = 0;
+      }
+      loaded++;
+    }
+    const rejected = list.length - loaded;
+    if (rejected) alert(`Пропущено повреждённых или слишком больших изображений: ${rejected}. Лимит — 50 мегапикселей.`);
+    renderAll();
+    return loaded;
+  });
+}
+
+function removeMockup(i){
+  const m = state.mockups[i];
+  URL.revokeObjectURL(m.img.src);
+  state.mockups.splice(i, 1);
+  if (state.am >= state.mockups.length) state.am = state.mockups.length - 1;
+  renderAll();
+}
+function removePrint(i){
+  const p = state.prints[i];
+  URL.revokeObjectURL(p.img.src);
+  state.prints.splice(i, 1);
+  for (const m of state.mockups) delete m.ov[p.id];
+  if (state.ap >= state.prints.length) state.ap = state.prints.length - 1;
+  renderAll();
+}
+
+/* ---------- раскладка принта ---------- */
+function effPl(m, p){
+  return m.ov[p.id] || { cx: m.def.cx, cy: m.def.cy, wf: m.def.wf, rot: m.def.rot };
+}
+function ovPl(m, p){
+  if (!m.ov[p.id]) m.ov[p.id] = effPl(m, p);
+  return m.ov[p.id];
+}
+
+/* ---------- отрисовка ---------- */
+function drawComposite(ctx, m, p, f){
+  ctx.drawImage(m.img, 0, 0, m.w*f, m.h*f);
+  if (!p) return;
+  const pl = effPl(m, p);
+  const w = pl.wf * m.w, h = w * p.h / p.w;
+  ctx.save();
+  ctx.globalAlpha = m.opacity;
+  ctx.globalCompositeOperation = m.blend;
+  ctx.translate(pl.cx*f, pl.cy*f);
+  ctx.rotate(pl.rot * Math.PI/180);
+  ctx.drawImage(p.img, -w/2*f, -h/2*f, w*f, h*f);
+  ctx.restore();
+}
+
+function drawEditor(){
+  const dpr = devicePixelRatio || 1;
+  const cw = stageEl.clientWidth, ch = stageEl.clientHeight;
+  cv.width = cw*dpr; cv.height = ch*dpr;
+  cv.style.width = cw+'px'; cv.style.height = ch+'px';
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  const m = activeM();
+  if (!m){
+    ctx.fillStyle = '#5b6270'; ctx.font = '16px Segoe UI'; ctx.textAlign = 'center';
+    ctx.fillText(state.mode === 'ready'
+      ? 'Загрузите готовые мокапы («+ Готовые мокапы»)'
+      : 'Загрузите мокап («+ Мокапы») и принты («+ Принты»)', cw/2, ch/2);
+    return;
+  }
+  viewS = Math.min(cw/m.w, ch/m.h) * 0.97;
+  viewOx = (cw - m.w*viewS)/2; viewOy = (ch - m.h*viewS)/2;
+  ctx.translate(viewOx, viewOy);
+  const p = state.mode === 'ready' ? null : activeP();
+  drawComposite(ctx, m, p, viewS);
+  if (p){
+    const pl = effPl(m, p);
+    const w = pl.wf*m.w*viewS, h = w*p.h/p.w;
+    ctx.save();
+    ctx.translate(pl.cx*viewS, pl.cy*viewS);
+    ctx.rotate(pl.rot*Math.PI/180);
+    ctx.strokeStyle = 'rgba(108,140,255,.9)';
+    ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5;
+    ctx.strokeRect(-w/2, -h/2, w, h);
+    ctx.setLineDash([]);
+    // ручка поворота: стержень вверх + круглый маркер
+    ctx.beginPath(); ctx.moveTo(0, -h/2); ctx.lineTo(0, -h/2 - ROT_OFF); ctx.stroke();
+    drawKnob(ctx, 0, -h/2 - ROT_OFF, true);
+    // угловые маркеры размера
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) drawKnob(ctx, sx*w/2, sy*h/2, false);
+    ctx.restore();
+  }
+}
+
+function drawKnob(ctx, x, y, round){
+  ctx.save();
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#4664e4';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (round) ctx.arc(x, y, 6, 0, Math.PI*2);
+  else { const s = 5; ctx.rect(x - s, y - s, s*2, s*2); }
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+/* ---------- геометрия принта и попадание мыши по маркерам (экранные px) ---------- */
+function printGeom(m, p){
+  const pl = effPl(m, p);
+  const w = pl.wf*m.w*viewS, h = w*p.h/p.w;
+  return { cx: viewOx + pl.cx*viewS, cy: viewOy + pl.cy*viewS, hw: w/2, hh: h/2, rot: pl.rot*Math.PI/180 };
+}
+function toLocal(ox, oy, g){
+  const dx = ox - g.cx, dy = oy - g.cy;
+  const c = Math.cos(-g.rot), s = Math.sin(-g.rot);
+  return { lx: dx*c - dy*s, ly: dx*s + dy*c };
+}
+function hitTest(ox, oy, m, p){
+  const g = printGeom(m, p);
+  const { lx, ly } = toLocal(ox, oy, g);
+  if (Math.hypot(lx, ly - (-g.hh - ROT_OFF)) <= HANDLE_HIT) return { mode: 'rotate' };
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]){
+    if (Math.hypot(lx - sx*g.hw, ly - sy*g.hh) <= HANDLE_HIT) return { mode: 'resize', dist: Math.hypot(lx, ly) };
+  }
+  return { mode: 'move' };
+}
+const cursorFor = mode => mode === 'resize' ? 'nwse-resize' : mode === 'rotate' ? 'grab' : 'move';
+
+function renderGrid(){
+  gridEl.innerHTML = '';
+  if (state.mode === 'ready'){
+    if (!state.mockups.length){ gridEl.innerHTML = '<div style="color:#5b6270;padding:20px">Нет изображений</div>'; return; }
+    state.mockups.forEach((m, idx) => {
+      const f = 220 / m.w;
+      const cell = document.createElement('div');
+      cell.className = 'cell' + (idx === state.am ? ' active' : '');
+      const c = document.createElement('canvas');
+      c.width = 220; c.height = Math.round(m.h*f);
+      drawComposite(c.getContext('2d'), m, null, f);
+      const lab = document.createElement('div');
+      lab.className = 'lab'; lab.textContent = m.name;
+      cell.append(c, lab);
+      cell.onclick = () => { state.am = idx; setView('editor'); renderAll(); };
+      gridEl.append(cell);
+    });
+    return;
+  }
+  const m = activeM();
+  if (!m){ gridEl.innerHTML = '<div style="color:#5b6270;padding:20px">Нет мокапа</div>'; return; }
+  if (!state.prints.length){ gridEl.innerHTML = '<div style="color:#5b6270;padding:20px">Нет принтов</div>'; return; }
+  const f = 220 / m.w;
+  let i = 0;
+  const chunk = () => {
+    if (state.view !== 'grid') return;
+    const end = Math.min(i + 8, state.prints.length);
+    for (; i < end; i++){
+      const p = state.prints[i], idx = i;
+      const cell = document.createElement('div');
+      cell.className = 'cell' + (i === state.ap ? ' active' : '') + (m.ov[p.id] ? ' edited' : '');
+      const c = document.createElement('canvas');
+      c.width = 220; c.height = Math.round(m.h*f);
+      drawComposite(c.getContext('2d'), m, p, f);
+      const lab = document.createElement('div');
+      lab.className = 'lab'; lab.textContent = p.name;
+      cell.append(c, lab);
+      cell.onclick = () => { state.ap = idx; setView('editor'); renderPrintList(); syncControls(); };
+      gridEl.append(cell);
+    }
+    if (i < state.prints.length) requestAnimationFrame(chunk);
+  };
+  chunk();
+}
+
+/* ---------- списки ---------- */
+function renderTabs(){
+  tabsEl.innerHTML = '';
+  state.mockups.forEach((m, i) => {
+    const t = document.createElement('div');
+    t.className = 'tab' + (i === state.am ? ' active' : '');
+    const nm = document.createElement('span'); nm.textContent = m.name;
+    const x = document.createElement('span'); x.className = 'rm'; x.textContent = '×'; x.title = 'Убрать мокап';
+    x.onclick = e => { e.stopPropagation(); removeMockup(i); };
+    t.append(nm, x);
+    t.onclick = () => { state.am = i; renderAll(); };
+    tabsEl.append(t);
+  });
+}
+
+function renderPrintList(){
+  printsEl.innerHTML = '';
+  const m = activeM();
+  state.prints.forEach((p, i) => {
+    const li = document.createElement('div');
+    li.className = 'pitem' + (i === state.ap ? ' active' : '') + (m && m.ov[p.id] ? ' edited' : '');
+    const img = document.createElement('img'); img.src = p.img.src;
+    const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = p.name; nm.title = p.name;
+    const dot = document.createElement('span'); dot.className = 'dot'; dot.title = 'Изменён вручную';
+    const x = document.createElement('span'); x.className = 'rm'; x.textContent = '×'; x.title = 'Убрать принт';
+    x.onclick = e => { e.stopPropagation(); removePrint(i); };
+    li.append(img, nm, dot, x);
+    li.onclick = () => { state.ap = i; renderPrintList(); setView('editor'); syncControls(); };
+    printsEl.append(li);
+    if (i === state.ap) li.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function updateDot(){
+  const li = printsEl.children[state.ap];
+  const m = activeM(), p = activeP();
+  if (li) li.classList.toggle('edited', !!(m && p && m.ov[p.id]));
+}
+
+function syncControls(){
+  const m = activeM(), p = activeP(), has = !!(m && p);
+  $('#linkChk').checked = state.link;
+  $('#sW').disabled = $('#sR').disabled = !has;
+  $('#sO').disabled = $('#sB').disabled = $('#mName').disabled = !m;
+  if (m){ $('#sO').value = Math.round(m.opacity*100); $('#sB').value = m.blend; }
+  $('#mName').value = m ? m.label : '';
+  $('#oVal').textContent = m ? Math.round(m.opacity*100)+'%' : '—';
+  if (has){
+    const pl = effPl(m, p);
+    $('#sW').value = +(pl.wf*100).toFixed(1);
+    $('#sR').value = Math.round(pl.rot);
+    $('#wVal').textContent = (pl.wf*100).toFixed(1).replace(/\.0$/,'')+'%';
+    $('#rVal').textContent = Math.round(pl.rot)+'°';
+  } else {
+    $('#wVal').textContent = $('#rVal').textContent = '—';
+  }
+  if (state.mode === 'ready'){
+    $('#cnt').textContent = `Готовых мокапов: ${state.mockups.length}`;
+    $('#status').textContent = !m ? 'Нет изображений' : `${state.am+1}/${state.mockups.length} · ${m.name}`;
+    return;
+  }
+  $('#status').textContent = !m ? 'Нет мокапа'
+    : !p ? 'Нет принтов'
+    : `${state.ap+1}/${state.prints.length} · ${p.name} · ${m.ov[p.id] ? 'изменён вручную' : 'по умолчанию'}`;
+  $('#cnt').textContent = `Мокапы: ${state.mockups.length}/${MAX_MOCKUPS} · Принты: ${state.prints.length}/${MAX_PRINTS}`;
+}
+
+function refresh(){
+  if (state.view === 'editor') drawEditor();
+  updateDot();
+  syncControls();
+}
+
+/* ---------- синхронизация раскладки между мокапами ---------- */
+// переносит раскладку принта из мокапа src в систему координат dst (относительно размеров)
+function mapLayout(src, dst, pl){
+  return { wf: pl.wf, rot: pl.rot, cx: pl.cx / src.w * dst.w, cy: pl.cy / src.h * dst.h };
+}
+// копирует раскладку активного принта с активного мокапа на все остальные
+function mirrorActive(){
+  if (!state.link || state.mode === 'ready' || state.mockups.length < 2) return;
+  const src = activeM(), p = activeP();
+  if (!src || !p) return;
+  const s = effPl(src, p);
+  for (const m of state.mockups){ if (m !== src) m.ov[p.id] = mapLayout(src, m, s); }
+}
+// делает все мокапы идентичными активному (def + ручные правки) — при включении синхронизации
+function syncAllFromActive(){
+  const src = activeM();
+  if (!src || state.mockups.length < 2) return;
+  for (const m of state.mockups){
+    if (m === src) continue;
+    m.def = mapLayout(src, m, src.def);
+    m.ov = {};
+    for (const pid in src.ov) m.ov[pid] = mapLayout(src, m, src.ov[pid]);
+  }
+}
+function editRefresh(){ mirrorActive(); refresh(); }
+
+function setMode(mode){
+  state.mode = mode;
+  const ready = mode === 'ready';
+  $('#mCompose').classList.toggle('active', !ready);
+  $('#mReady').classList.toggle('active', ready);
+  $('#btnPrints').style.display = ready ? 'none' : '';
+  printsEl.style.display = ready ? 'none' : '';
+  $('#btnMock').textContent = ready ? '+ Готовые мокапы' : '+ Мокапы';
+  document.querySelectorAll('.printctl').forEach(el => { el.style.display = ready ? 'none' : ''; });
+  renderAll();
+}
+
+function setView(v){
+  state.view = v;
+  cv.hidden = v !== 'editor';
+  gridEl.hidden = v !== 'grid';
+  ctrlEl.style.display = v === 'editor' ? '' : 'none';
+  $('#btnView').textContent = v === 'editor' ? 'Сетка' : 'Редактор';
+  if (v === 'editor') drawEditor(); else renderGrid();
+}
+
+function renderAll(){
+  renderTabs();
+  renderPrintList();
+  syncControls();
+  setView(state.view);
+}
+
+/* ---------- мышь ---------- */
+let drag = null;
+const livePrint = () => state.mode === 'ready' ? null : activeP();
+cv.addEventListener('pointerdown', e => {
+  const m = activeM(), p = livePrint();
+  if (!m || !p) return;
+  cv.setPointerCapture(e.pointerId);
+  const hit = hitTest(e.offsetX, e.offsetY, m, p);
+  const pl = ovPl(m, p);
+  if (hit.mode === 'resize'){
+    drag = { mode: 'resize', startWf: pl.wf, startDist: hit.dist || 1 };
+  } else if (hit.mode === 'rotate'){
+    drag = { mode: 'rotate' };
+  } else {
+    drag = { mode: 'move', x: e.offsetX, y: e.offsetY, cx: pl.cx, cy: pl.cy };
+  }
+  cv.style.cursor = hit.mode === 'move' ? 'grabbing' : cursorFor(hit.mode);
+});
+cv.addEventListener('pointermove', e => {
+  const m = activeM(), p = livePrint();
+  if (!m || !p) return;
+  if (!drag){ cv.style.cursor = cursorFor(hitTest(e.offsetX, e.offsetY, m, p).mode); return; }
+  const pl = ovPl(m, p);
+  if (drag.mode === 'move'){
+    pl.cx = drag.cx + (e.offsetX - drag.x)/viewS;
+    pl.cy = drag.cy + (e.offsetY - drag.y)/viewS;
+  } else if (drag.mode === 'resize'){
+    const g = printGeom(m, p);
+    const { lx, ly } = toLocal(e.offsetX, e.offsetY, g);
+    pl.wf = clamp(drag.startWf * Math.hypot(lx, ly) / drag.startDist, 0.03, 0.95);
+  } else if (drag.mode === 'rotate'){
+    const cx = viewOx + pl.cx*viewS, cy = viewOy + pl.cy*viewS;
+    let ang = Math.atan2(e.offsetY - cy, e.offsetX - cx) * 180/Math.PI + 90;
+    if (e.shiftKey) ang = Math.round(ang/15)*15;       // Shift — шаг 15°
+    while (ang > 180) ang -= 360; while (ang < -180) ang += 360;
+    pl.rot = Math.round(ang);
+  }
+  editRefresh();
+});
+['pointerup','pointercancel'].forEach(ev => cv.addEventListener(ev, e => {
+  drag = null;
+  const m = activeM(), p = livePrint();
+  if (m && p) cv.style.cursor = cursorFor(hitTest(e.offsetX, e.offsetY, m, p).mode);
+}));
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const m = activeM(), p = activeP();
+  if (!m || !p) return;
+  const pl = ovPl(m, p);
+  if (e.altKey) pl.rot = clamp(Math.round(pl.rot + (e.deltaY > 0 ? -2 : 2)), -180, 180);
+  else pl.wf = clamp(pl.wf * (e.deltaY > 0 ? 1/1.05 : 1.05), 0.03, 0.95);
+  editRefresh();
+}, { passive: false });
+
+/* ---------- клавиатура ---------- */
+window.addEventListener('keydown', e => {
+  if (e.target.matches('input,select,textarea')) return;
+  if (!$('#modal').hidden) return;
+  const m = activeM(), p = activeP();
+  const step = e.shiftKey ? 10 : 1;
+  let used = true;
+  switch (e.key){
+    case 'ArrowLeft':  if (m && p) ovPl(m,p).cx -= step; break;
+    case 'ArrowRight': if (m && p) ovPl(m,p).cx += step; break;
+    case 'ArrowUp':    if (m && p) ovPl(m,p).cy -= step; break;
+    case 'ArrowDown':  if (m && p) ovPl(m,p).cy += step; break;
+    case '+': case '=': if (m && p){ const pl = ovPl(m,p); pl.wf = clamp(pl.wf*1.03, 0.03, 0.95); } break;
+    case '-': case '_': if (m && p){ const pl = ovPl(m,p); pl.wf = clamp(pl.wf/1.03, 0.03, 0.95); } break;
+    case 'PageDown': case ']': nextPrint(1); return;
+    case 'PageUp':   case '[': nextPrint(-1); return;
+    default: used = false;
+  }
+  if (used){ e.preventDefault(); editRefresh(); }
+});
+
+function nextPrint(d){
+  const n = state.prints.length;
+  if (!n) return;
+  state.ap = (state.ap + d + n) % n;
+  renderPrintList();
+  syncControls();
+  if (state.view === 'editor') drawEditor();
+}
+
+/* ---------- контролы ---------- */
+$('#sW').oninput = e => { const m = activeM(), p = activeP(); if (!m || !p) return; ovPl(m,p).wf = +e.target.value/100; editRefresh(); };
+$('#sR').oninput = e => { const m = activeM(), p = activeP(); if (!m || !p) return; ovPl(m,p).rot = +e.target.value; editRefresh(); };
+$('#sO').oninput = e => { const m = activeM(); if (!m) return; m.opacity = +e.target.value/100; refresh(); };
+$('#sB').onchange = e => { const m = activeM(); if (!m) return; m.blend = e.target.value; refresh(); };
+$('#mName').oninput = e => { const m = activeM(); if (m) m.label = e.target.value; };
+
+$('#btnPrev').onclick = () => nextPrint(-1);
+$('#btnNext').onclick = () => nextPrint(1);
+$('#btnApplyAll').onclick = () => {
+  const m = activeM(), p = activeP();
+  if (!m || !p) return;
+  m.def = { ...effPl(m, p) };
+  m.ov = {};
+  if (state.link) for (const o of state.mockups){ if (o !== m){ o.def = mapLayout(m, o, m.def); o.ov = {}; } }
+  renderPrintList(); syncControls();
+  if (state.view === 'editor') drawEditor(); else renderGrid();
+};
+$('#btnResetOne').onclick = () => {
+  const m = activeM(), p = activeP();
+  if (!m || !p) return;
+  delete m.ov[p.id];
+  if (state.link) for (const o of state.mockups) delete o.ov[p.id];
+  refresh(); renderPrintList();
+};
+$('#btnResetAll').onclick = () => {
+  const m = activeM();
+  if (!m) return;
+  const all = state.link && state.mockups.length > 1;
+  if (!confirm(all ? 'Сбросить ручные правки ВСЕХ принтов на ВСЕХ мокапах?' : 'Сбросить ручные правки ВСЕХ принтов на этом мокапе?')) return;
+  m.ov = {};
+  if (all) for (const o of state.mockups) o.ov = {};
+  renderPrintList(); syncControls();
+  if (state.view === 'editor') drawEditor(); else renderGrid();
+};
+$('#btnView').onclick = () => setView(state.view === 'editor' ? 'grid' : 'editor');
+
+$('#mCompose').onclick = () => setMode('compose');
+$('#mReady').onclick = () => setMode('ready');
+
+$('#linkChk').onchange = e => {
+  state.link = e.target.checked;
+  if (state.link) syncAllFromActive();   // включили — сразу выравниваем все мокапы по активному
+  if (state.view === 'editor') drawEditor(); else renderGrid();
+};
+
+$('#btnMock').onclick = () => $('#fileMock').click();
+$('#btnPrints').onclick = () => $('#filePrints').click();
+$('#fileMock').onchange = e => { loadFiles(e.target.files, 'mock'); e.target.value = ''; };
+$('#filePrints').onchange = e => { loadFiles(e.target.files, 'print'); e.target.value = ''; };
+
+/* ---------- drag&drop ---------- */
+[['#printsPanel','print'], ['#stage','print'], ['#tabs','mock']].forEach(([sel, kind]) => {
+  const el = $(sel);
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drop'); });
+  el.addEventListener('dragleave', () => el.classList.remove('drop'));
+  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('drop'); loadFiles(e.dataTransfer.files, state.mode === 'ready' ? 'mock' : kind); });
+});
+
+/* ---------- экспорт ---------- */
+const UTF8_ENCODER = new TextEncoder();
+function sanitize(value, maxBytes = 160){
+  let safe = String(value).normalize('NFKC')
+    .replace(/[\u0000-\u001f\u007f\\/:*?"<>|]+/g, '_')
+    .trim()
+    .replace(/[ .]+$/g, '');
+  if (!safe) safe = 'image';
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(safe)) safe = '_' + safe;
+  const chars = Array.from(safe);
+  while (UTF8_ENCODER.encode(chars.join('')).length > maxBytes) chars.pop();
+  return chars.join('') || 'image';
+}
+
+function exportFileBase(m, p, multi){
+  if (!p){   // режим «готовые мокапы» — имя самого изображения (+ подпись, если задана)
+    const tag = (m.label || '').trim();
+    return sanitize(tag ? `${m.base}__${tag}` : m.base);
+  }
+  const tag = (m.label || '').trim() ? sanitize(m.label.trim()) : (multi ? sanitize(m.base) : '');
+  return sanitize(tag ? `${p.base}__${tag}` : p.base);
+}
+
+function uniqueExportName(baseName, used){
+  let name = baseName, key = name.toLocaleLowerCase();
+  if (used.has(key)){
+    let k = 2;
+    do {
+      const suffix = `_${k++}`;
+      const baseLimit = 160 - UTF8_ENCODER.encode(suffix).length;
+      name = sanitize(baseName, baseLimit) + suffix;
+      key = name.toLocaleLowerCase();
+    } while (used.has(key));
+  }
+  used.add(key);
+  return name;
+}
+
+async function saveBlob(dir, name, blob){
+  if (dir){
+    const fh = await dir.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+const ZIP_CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++){
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+async function crc32Blob(blob){
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = ZIP_CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipClock(date = new Date()){
+  const year = Math.max(1980, date.getFullYear());
+  return {
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1),
+    date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+  };
+}
+
+async function buildZip(entries){
+  if (entries.length > 0xffff) throw new Error('слишком много файлов для одного ZIP');
+  const files = [], directory = [];
+  let offset = 0, directorySize = 0;
+  const stamp = zipClock();
+
+  for (const entry of entries){
+    const name = UTF8_ENCODER.encode(entry.name);
+    if (name.length > 0xffff) throw new Error('слишком длинное имя файла для ZIP');
+    const size = entry.blob.size;
+    if (size > 0xffffffff || offset + size > 0xffffffff){
+      throw new Error('ZIP превысил лимит 4 ГБ — уменьшите размер или число мокапов');
+    }
+    const crc = await crc32Blob(entry.blob);
+    const local = new Uint8Array(30 + name.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint16(10, stamp.time, true);
+    lv.setUint16(12, stamp.date, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, name.length, true);
+    lv.setUint16(28, 0, true);
+    local.set(name, 30);
+    files.push(local, entry.blob);
+
+    const central = new Uint8Array(46 + name.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, stamp.time, true);
+    cv.setUint16(14, stamp.date, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, size, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    central.set(name, 46);
+    directory.push(central);
+    directorySize += central.length;
+    offset += local.length + size;
+  }
+  if (offset + directorySize + 22 > 0xffffffff){
+    throw new Error('ZIP превысил лимит 4 ГБ — уменьшите размер или число мокапов');
+  }
+
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, directorySize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+  return new Blob([...files, ...directory, end], { type: 'application/zip' });
+}
+
+function downloadBlob(name, blob){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+const exportBtn = $('#btnExport');
+exportBtn.onclick = async () => {
+  if (exportBtn.disabled) return;
+  const prints = state.mode === 'ready' ? [null] : state.prints;
+  const mocks = $('#expScope').value === 'all' ? state.mockups : [activeM()].filter(Boolean);
+  if (!mocks.length || (state.mode !== 'ready' && !prints.length)){
+    alert(state.mode === 'ready' ? 'Нужно хотя бы одно готовое изображение.' : 'Нужен хотя бы один мокап и один принт.');
+    return;
+  }
+  const [ext, bg] = $('#expFmt').value.split('-');   // ext: png|jpg, bg: transparent|white|black
+  const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
+  const maxSide = +$('#expSize').value;
+  const total = mocks.length * prints.length;
+  let exportPixels = 0;
+  for (const m of mocks){
+    const f = maxSide ? Math.min(1, maxSide / Math.max(m.w, m.h)) : 1;
+    exportPixels += Math.round(m.w*f) * Math.round(m.h*f) * prints.length;
+  }
+  if (total > MAX_EXPORT_FILES || exportPixels > MAX_EXPORT_PIXELS){
+    alert('Партия слишком большая для памяти браузера. Выберите активный мокап, меньший размер экспорта или сократите число файлов.');
+    return;
+  }
+
+  exportBtn.disabled = true;
+  let dir = null;
+  if (window.showDirectoryPicker){
+    try { dir = await window.showDirectoryPicker({ mode: 'readwrite' }); }
+    catch (err){
+      if (err.name === 'AbortError'){ exportBtn.disabled = false; return; }
+      dir = null;
+    }
+  }
+  let done = 0;
+  let zipBytes = 0;
+  $('#modal').hidden = false;
+  $('#modalBar').max = total; $('#modalBar').value = 0;
+  $('#modalText').textContent = `Экспорт… 0 / ${total}`;
+  const used = new Set();
+  const zipEntries = [];
+  try {
+    for (const m of mocks){
+      const f = maxSide ? Math.min(1, maxSide / Math.max(m.w, m.h)) : 1;
+      const c = document.createElement('canvas');
+      c.width = Math.round(m.w*f); c.height = Math.round(m.h*f);
+      const ctx = c.getContext('2d');
+      for (const p of prints){
+        ctx.clearRect(0, 0, c.width, c.height);
+        if (bg !== 'transparent'){ ctx.fillStyle = bg === 'white' ? '#ffffff' : '#000000'; ctx.fillRect(0, 0, c.width, c.height); }
+        drawComposite(ctx, m, p, f);
+        const blob = await new Promise(r => c.toBlob(r, mime, 0.9));
+        if (!blob) throw new Error('браузер не смог подготовить изображение');
+        const name = uniqueExportName(exportFileBase(m, p, mocks.length > 1), used);
+        const fileName = name + '.' + ext;
+        if (dir) await saveBlob(dir, fileName, blob);
+        else {
+          zipBytes += blob.size;
+          if (zipBytes > MAX_ZIP_BYTES) throw new Error('ZIP превысил лимит 300 МБ — уменьшите размер или число файлов');
+          zipEntries.push({ name: fileName, blob });
+        }
+        done++;
+        $('#modalBar').value = done;
+        $('#modalText').textContent = `Экспорт… ${done} / ${total}`;
+        await new Promise(requestAnimationFrame);
+      }
+    }
+    if (!dir){
+      $('#modalText').textContent = `Собираю ZIP… ${done} файлов`;
+      const zip = await buildZip(zipEntries);
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+      downloadBlob(`mockups-${stamp}.zip`, zip);
+      $('#modalText').textContent = `Готово: ${done} файлов в ZIP ✓`;
+    } else {
+      $('#modalText').textContent = `Готово: ${done} файлов ✓`;
+    }
+  } catch (err){
+    $('#modalText').textContent = 'Ошибка экспорта: ' + err.message;
+    console.error(err);
+  } finally {
+    exportBtn.disabled = false;
+    setTimeout(() => { $('#modal').hidden = true; }, 1200);
+  }
+};
+
+/* ---------- интеграция с Print Factory (?job=<id>) ---------- */
+function setImportStatus(message, kind = ''){
+  const el = $('#importStatus');
+  el.textContent = message;
+  el.className = kind;
+  el.hidden = !message;
+}
+
+async function importJobPrints(jobId){
+  if (!/^[a-f0-9]{12}$/i.test(jobId)){
+    setImportStatus('Некорректный номер задания Print Factory', 'err');
+    return;
+  }
+  setImportStatus('Загружаю готовые принты из Print Factory…');
+  try {
+    const jobResponse = await fetch(`/api/job/${encodeURIComponent(jobId)}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!jobResponse.ok) throw new Error(`задание недоступно (${jobResponse.status})`);
+    const job = await jobResponse.json();
+    if (job.kind && job.kind !== 'generation') throw new Error('это не задание генерации принтов');
+    if (!['done', 'error', 'cancelled'].includes(job.status)){
+      throw new Error('задание ещё выполняется — откройте мокап-мастер после завершения');
+    }
+    const items = (job.items || []).filter(item => item.ok && item.file_url).slice(0, MAX_PRINTS);
+    if (!items.length) throw new Error('в задании пока нет готовых принтов');
+
+    const files = new Array(items.length);
+    let nextIndex = 0;
+    async function downloadWorker(){
+      while (nextIndex < items.length){
+        const index = nextIndex++;
+        const item = items[index];
+        try {
+          const response = await fetch(item.file_url);
+          if (!response.ok) throw new Error(String(response.status));
+          const contentLength = Number(response.headers.get('content-length') || 0);
+          if (contentLength > MAX_FILE_BYTES) throw new Error('файл больше 30 МБ');
+          const blob = await response.blob();
+          if (blob.size > MAX_FILE_BYTES) throw new Error('файл больше 30 МБ');
+          const base = String(item.tag || `print-${index + 1}`).replace(/[\\/:*?"<>|]+/g, '_');
+          files[index] = new File([blob], `${base}.png`, { type: blob.type || 'image/png' });
+        } catch {}
+      }
+    }
+    const workers = Array.from({ length: Math.min(6, items.length) }, () => downloadWorker());
+    await Promise.all(workers);
+
+    const loaded = await loadFiles(files.filter(Boolean), 'print');
+    if (!loaded) throw new Error('не удалось скачать ни одного готового принта');
+    const skipped = items.length - loaded;
+    setImportStatus(
+      `Из Print Factory загружено: ${loaded}${skipped ? ` · пропущено: ${skipped}` : ''}`,
+      skipped ? '' : 'ok',
+    );
+  } catch (error){
+    setImportStatus(`Не удалось загрузить принты: ${error.message}`, 'err');
+  }
+}
+
+window.addEventListener('resize', () => { if (state.view === 'editor') drawEditor(); });
+window.addEventListener('beforeunload', e => {
+  if (state.prints.length || state.mockups.length){ e.preventDefault(); e.returnValue = ''; }
+});
+
+renderAll();
+const integrationJobId = new URLSearchParams(location.search).get('job');
+if (integrationJobId) importJobPrints(integrationJobId);
+</script>
+</body>
+</html>

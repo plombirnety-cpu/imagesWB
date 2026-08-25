@@ -92,6 +92,9 @@ def test_password_gate_protects_ui_and_api(monkeypatch):
     root = client.get("/", follow_redirects=False)
     assert root.status_code == 303
     assert root.headers["location"].startswith("/login")
+    mockup_tool = client.get("/static/mockup-batcher/index.html", follow_redirects=False)
+    assert mockup_tool.status_code == 303
+    assert mockup_tool.headers["location"].startswith("/login")
     api = client.get("/api/styles")
     assert api.status_code == 401
     assert api.json()["detail"].startswith("требуется")
@@ -116,6 +119,7 @@ def test_password_gate_protects_ui_and_api(monkeypatch):
     assert "httponly" in accepted.headers["set-cookie"].lower()
     assert client.get("/").status_code == 200
     assert client.get("/api/styles").status_code == 200
+    assert client.get("/static/mockup-batcher/index.html").status_code == 200
 
     logged_out = client.get("/logout", follow_redirects=False)
     assert logged_out.status_code == 303
@@ -520,6 +524,35 @@ def test_frontend_contains_cancel_and_individual_preview_controls():
     assert "refreshOpportunityEmptyState" in html
     assert "monthly_growth_estimate" in html
     assert "расчётно +" in html
+
+
+def test_mockup_batcher_is_integrated_as_a_separate_window():
+    client = TestClient(panel_app.app)
+
+    panel_html = client.get("/").text
+    assert 'id="mockupTab"' in panel_html
+    assert 'id="mockupJobBtn"' in panel_html
+    assert 'target="_blank"' in panel_html
+    assert "/static/mockup-batcher/index.html" in panel_html
+    assert "?job=${encodeURIComponent(jobId)}" in panel_html
+    assert "okCount && terminal" in panel_html
+
+    batcher = client.get("/static/mockup-batcher/index.html")
+    assert batcher.status_code == 200
+    assert "Mockup Batcher" in batcher.text
+    assert "importJobPrints" in batcher.text
+    assert "Math.min(6, items.length)" in batcher.text
+    assert "['done', 'error', 'cancelled'].includes(job.status)" in batcher.text
+    assert "MAX_MOCKUPS = 20" in batcher.text
+    assert "MAX_TOTAL_IMAGE_PIXELS = 150_000_000" in batcher.text
+    assert "MAX_EXPORT_PIXELS = 120_000_000" in batcher.text
+    assert "DECODE_WORKERS = 4" in batcher.text
+    assert "MAX_ZIP_BYTES = 300 * 1024 * 1024" in batcher.text
+    assert "normalize('NFKC')" in batcher.text
+    assert "exportBtn.disabled = true" in batcher.text
+    assert "buildZip" in batcher.text
+    assert "Применить ко всем" in batcher.text
+    assert "Экспорт" in batcher.text
 
 
 def test_unknown_job_404():
