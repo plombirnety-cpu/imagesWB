@@ -37,6 +37,10 @@ def test_plan_tasks_city_neocrest_bypasses_franchise_and_rotates_cities(
     assert "BRIDGE CROWN" in tasks[0].style_brief
     assert "MONUMENTAL SUN" in tasks[1].style_brief
     assert all("zero latin letters" in task.style_brief.lower() for task in tasks)
+    assert all("7-10 large readable modules" in task.style_brief for task in tasks)
+    assert all("86-92%" in task.style_brief for task in tasks)
+    assert all("8-9 deliberate print colours" in task.style_brief for task in tasks)
+    assert all("large open chroma gaps" not in task.style_brief for task in tasks)
 
 
 def test_render_city_neocrest_forces_exact_cyrillic_title_and_no_character_fields(
@@ -93,7 +97,9 @@ def test_render_city_neocrest_forces_exact_cyrillic_title_and_no_character_field
     assert design["signature_props"] == ""
     assert design["has_human_figure"] is False
     assert design["chroma"] == "blue"
-    assert design["type_spec"]
+    assert "lower 22-26% plaque" in design["type_spec"]
+    assert "vivid mid-tone city-colour fill" in design["type_spec"]
+    assert "warm-ivory fill" not in design["type_spec"]
 
 
 def test_plan_tasks_city_neocrest_requires_a_city() -> None:

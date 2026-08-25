@@ -668,7 +668,7 @@ function updateThemeHint(){
   $('#themeHint').textContent = profession
     ? 'Введите одну профессию. Для нескольких профессий перечислите их в поле ниже.'
     : (city
-      ? 'Введите город по-русски. Стиль использует премиальную модель Gemini.'
+      ? 'Введите город по-русски. Яркий многослойный стиль использует премиальную модель Gemini.'
       : (optional
       ? 'Для выбранного авто-стиля тему можно не вводить — арт-директор сам соберёт разные сюжеты.'
       : ''));
@@ -896,7 +896,7 @@ genBtn.onclick = () => {
     return;
   }
   if(selected.includes(CITY_NEOCREST_STYLE_ID)
-      && !confirm('Городской неогерб использует более дорогую модель Gemini. Продолжить?')) return;
+      && !confirm('Насыщенный городской неогерб использует более дорогую модель Gemini. Продолжить?')) return;
   startGeneration({styles:selected, count, theme, characters, free_prompt:''}, formErr);
 };
 

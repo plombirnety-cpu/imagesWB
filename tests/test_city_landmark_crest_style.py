@@ -17,7 +17,7 @@ def _style() -> dict:
 def test_city_landmark_crest_is_manual_russian_city_style() -> None:
     style = _style()
 
-    assert style["name_ru"] == "Городской неогерб (рус.)"
+    assert style["name_ru"] == "Городской неогерб — насыщенный (рус.)"
     assert style["manual_only"] is True
     assert style["theme_optional"] is False
 
@@ -36,8 +36,41 @@ def test_city_landmark_crest_enforces_cyrillic_and_landmark_accuracy() -> None:
     assert "cyrillic" in contract
     assert "zero latin letters" in contract
     assert "fantasy hybrid" in contract
-    assert "6-7" in contract
+    assert "8-9" in contract
+    assert "86-92%" in contract
+    assert "at least four saturated hues" in contract
+    assert "near-black covers no more than 15%" in contract
     assert "three-stage" in contract
+
+
+def test_city_neocrest_quality_hint_is_rich_and_style_specific() -> None:
+    import art_director as ad
+
+    hint = ad._city_neocrest_quality_hint(STYLE_ID).lower()
+
+    assert "rich city neo-crest v2" in hint
+    assert "7-10" in hint
+    assert "86-92%" in hint
+    assert "8-9" in hint
+    assert "near-black" in hint
+    assert ad._city_neocrest_quality_hint("40_profession_technical_archive") == ""
+
+
+def test_city_neocrest_build_prompt_injects_mandatory_colour_contract() -> None:
+    import art_director as ad
+
+    prompt = ad.build_prompt({
+        "prompt": "Dense accurate city composition.",
+        "style_id": STYLE_ID,
+        "style_mix": "",
+        "chroma": "green",
+        "type_spec": "",
+        "has_human_figure": False,
+    }).lower()
+
+    assert "mandatory city colour contract" in prompt
+    assert "medium and bright colours cover at least 65%" in prompt
+    assert "never use black as an interior background fill" in prompt
 
 
 def test_city_landmark_crest_has_exactly_one_catalog_entry() -> None:

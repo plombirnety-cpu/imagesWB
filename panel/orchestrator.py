@@ -206,30 +206,41 @@ def _profession_archive_variant_brief(slot: int) -> str:
 
 
 # Городской стиль нуждается в жёсткой композиционной ротации: без неё независимые
-# вызовы быстро сходятся к одинаковому кругу с симметричным собором. Конкретные
-# достопримечательности выбирает арт-директор, а код назначает только различимую
-# геометрию сцены и сохраняет одну общую товарную систему серии.
+# вызовы быстро сходятся к одинаковому тёмному badge с одним огромным объектом.
+# V2 фиксирует плотную многослойную сцену и яркие цветовые массы, но оставляет
+# арт-директору выбор только фактически уместных городских якорей.
 _CITY_NEOCREST_VARIANTS = (
-    "A BRIDGE CROWN — one truthful cable-stayed, truss or stone bridge becomes the upper structural crown; one low foreground landmark and three broad water bands complete the axis; never invent or hybridise bridge geometry",
-    "B MONUMENTAL SUN — one unmistakable civic building dominates in front of a huge two-tone sun disc; two unequal supports create depth and a broad foreground motif locks the scene into the title plaque",
-    "C OPEN WATERFRONT — one hero waterfront landmark, one secondary skyline anchor and one transport or harbour motif form an asymmetrical coastal composition with large open chroma gaps",
-    "D HERITAGE AND MODERNITY — one historic hero building spans the centre while one older and one modern supporting landmark sit on opposite sides with clear air gaps; use one partial structural ring, never a fantasy merged palace",
-    "E GEOGRAPHIC FRAME — one exact hero landmark is framed by a truthful low ridge, river bend, forest line or steppe horizon plus one local engineered motif; no generic alpine peaks or postcard skyline",
+    "A BRIDGE CROWN / JEWEL HARBOUR — one truthful bridge forms only the upper quarter, never a giant empty triangle; below it interlock two separate accurate city anchors, one local vessel or transport motif, bright layered cliffs or shoreline, 4-6 broad rays and three coloured water bands; every zone carries opaque colour and the bridge geometry is never invented or hybridised",
+    "B MONUMENTAL SUN / CIVIC TAPESTRY — one unmistakable civic hero sits before a segmented multicolour sun that is partly covered by two unequal accurate city anchors; add one local transport or engineering motif, broad foliage or river ribbons and architectural ornament so the disc is a populated colour field, not an empty halo",
+    "C OPEN WATERFRONT / FESTIVAL LAYERS — one hero waterfront landmark, two separate accurate city anchors and one harbour or transport motif weave through coloured cloud bands, waves, reflections and a partial radiant arc; keep only narrow print-safe breathing channels and avoid any sparse postcard skyline",
+    "D HERITAGE AND MODERNITY / ORNAMENTAL MOSAIC — one historic hero spans the centre while two separate accurate older or modern anchors sit at different heights; a bright broken ring, local geometric ornament, foliage and one transport or engineering motif connect all four artwork planes without merging the buildings into a fantasy palace",
+    "E GEOGRAPHIC FRAME / CITY JEWEL — one exact hero and two separate accurate city anchors are nested inside a truthful river bend, low ridge, forest line or steppe horizon; add one local engineered or transport motif, saturated sky segments and a wide foreground ornament, with no invented alpine peaks, generic skyline or empty dark cavity",
 )
 
 _CITY_NEOCREST_COMMON_CONTRACT = (
-    "CITY NEOCREST COMMON CONTRACT: interpret the user's label as exactly one real "
-    "city, never as a fictional character or franchise. Use one unmistakable hero "
-    "landmark, no more than two supporting landmarks and one truthful geographic "
-    "motif. Preserve the major geometry of every landmark and do not merge bridges, "
-    "churches, towers or palaces into a fantasy hybrid. Build three depth planes with "
-    "large saturated flat colour masses, hard two-step highlights, a top-left light "
-    "source and thick print-safe contours. Reserve the lower 27-30% for one dominant "
-    "city wordmark. Use ONLY the exact uppercase Russian Cyrillic city name supplied "
-    "by the user, exactly once, with zero Latin letters, translation, dates, numerals, "
-    "microtext or pseudo-writing. Keep a clean 6-8% chroma moat. No rectangular "
-    "postcard, page, photo, official coat of arms, flag, tourist logo, sticker cutline, "
-    "shared white backing, photorealism, CGI gloss, soft gradients or distressed noise."
+    "RICH CITY NEO-CREST V2 COMMON CONTRACT: interpret the user's label as exactly "
+    "one real city, never a fictional character or franchise. Create 7-10 large "
+    "readable modules: one unmistakable hero landmark, exactly two separate supporting "
+    "city anchors chosen only from accurate landmarks or truthful local symbols, one "
+    "geographic motif, one local transport or engineering motif and 2-4 broad decorative "
+    "connectors. Never exceed three buildings and never merge bridges, churches, towers "
+    "or palaces into a fantasy hybrid. Use five layers including the title: four densely "
+    "overlapping artwork depth planes plus the lower plaque. Fill 86-92% of the inner "
+    "silhouette through interlocking opaque coloured elements, never through one solid "
+    "shared backing; no empty chroma or near-black cavity may exceed 4-5% of the design. "
+    "Use 8-9 deliberate print colours with at least four large saturated hues. Medium "
+    "and bright colours cover at least 65%; near-black is contour-only and at most 15%, "
+    "all dark masses at most 25%, and black interior background fills are forbidden. "
+    "Give every major module a base, hard highlight and deep coloured hard shadow under "
+    "one top-left light source. Artwork occupies 74-78% of the height; reserve only the "
+    "lower 22-26% for one dominant city wordmark. Use ONLY the exact uppercase Russian "
+    "Cyrillic city name supplied by the user, exactly once, with zero Latin letters, "
+    "translation, dates, numerals, microtext or pseudo-writing. Keep a clean 5-7% outer "
+    "chroma moat and narrow print-safe internal breathing channels. No giant lone bridge "
+    "or tower, generic clock tower or skyscraper, empty sunburst, symmetric trophy-badge "
+    "template, rectangular postcard, page, photo, official coat of arms, flag, tourist "
+    "logo, sticker cutline, shared white or dark backing, photorealism, CGI gloss, soft "
+    "gradients or distressed noise."
 )
 
 
@@ -754,9 +765,8 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
         })
     elif task.style_id == _CITY_NEOCREST_STYLE_ID:
         # Название города — единственный обязательный текст в обычной панели.
-        # Слоган не выдумываем: для курируемых серий он добавляется отдельным
-        # проверенным этапом. Остальные character-поля обнуляем, чтобы город не
-        # запустил поиск портрета или канонического персонажа.
+        # Слоган не выдумываем. Остальные character-поля обнуляем, чтобы город
+        # не запустил поиск портрета или канонического персонажа.
         city_title = task.label.strip().upper()
         chroma = str(design.get("chroma") or "green").strip().lower()
         if chroma not in {"green", "blue"}:
@@ -768,9 +778,11 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
             "slogan": "",
             "type_spec": (
                 "One enormous straight-line uppercase Russian Cyrillic city wordmark "
-                "inside the lower 27-30% plaque, set in a true condensed monumental "
-                "grotesk or slab with warm-ivory fill, thin city-accent inner stroke, "
-                "very thick near-black outer keyline and a short hard-edged shadow; "
+                "inside the lower 22-26% plaque, set in a true condensed monumental "
+                "grotesk or slab with a vivid mid-tone city-colour fill that is never "
+                "white, near-white, black, near-black or the chosen chroma colour; add "
+                "a narrow contrasting highlight stroke, very thick near-black outer "
+                "keyline, warm-ivory separator and short hard-edged coloured shadow; "
                 "exactly one placement, fully readable on black and white fabric"
             ),
             "name_jp": "",
