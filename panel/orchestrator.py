@@ -89,6 +89,8 @@ _ROCK_BAND_STYLE_ID = "39_rock_band_print"
 
 _PROFESSION_ARCHIVE_STYLE_ID = "40_profession_technical_archive"
 
+_CITY_NEOCREST_STYLE_ID = "41_city_neocrest_ru"
+
 # Три композиционные семьи извлечены из пользовательских референсов: крупный
 # фронтмен с инструментом, цветовой коллаж всего состава и сюжетный metal-маскот.
 # Их назначает код ДО вызова арт-директора, иначе независимые генерации быстро
@@ -200,6 +202,42 @@ def _profession_archive_variant_brief(slot: int) -> str:
     return (
         f"ASSIGNED PROFESSION ARCHIVE VARIANT: {variant}. "
         f"{_PROFESSION_ARCHIVE_COMMON_CONTRACT}"
+    )
+
+
+# Городской стиль нуждается в жёсткой композиционной ротации: без неё независимые
+# вызовы быстро сходятся к одинаковому кругу с симметричным собором. Конкретные
+# достопримечательности выбирает арт-директор, а код назначает только различимую
+# геометрию сцены и сохраняет одну общую товарную систему серии.
+_CITY_NEOCREST_VARIANTS = (
+    "A BRIDGE CROWN — one truthful cable-stayed, truss or stone bridge becomes the upper structural crown; one low foreground landmark and three broad water bands complete the axis; never invent or hybridise bridge geometry",
+    "B MONUMENTAL SUN — one unmistakable civic building dominates in front of a huge two-tone sun disc; two unequal supports create depth and a broad foreground motif locks the scene into the title plaque",
+    "C OPEN WATERFRONT — one hero waterfront landmark, one secondary skyline anchor and one transport or harbour motif form an asymmetrical coastal composition with large open chroma gaps",
+    "D HERITAGE AND MODERNITY — one historic hero building spans the centre while one older and one modern supporting landmark sit on opposite sides with clear air gaps; use one partial structural ring, never a fantasy merged palace",
+    "E GEOGRAPHIC FRAME — one exact hero landmark is framed by a truthful low ridge, river bend, forest line or steppe horizon plus one local engineered motif; no generic alpine peaks or postcard skyline",
+)
+
+_CITY_NEOCREST_COMMON_CONTRACT = (
+    "CITY NEOCREST COMMON CONTRACT: interpret the user's label as exactly one real "
+    "city, never as a fictional character or franchise. Use one unmistakable hero "
+    "landmark, no more than two supporting landmarks and one truthful geographic "
+    "motif. Preserve the major geometry of every landmark and do not merge bridges, "
+    "churches, towers or palaces into a fantasy hybrid. Build three depth planes with "
+    "large saturated flat colour masses, hard two-step highlights, a top-left light "
+    "source and thick print-safe contours. Reserve the lower 27-30% for one dominant "
+    "city wordmark. Use ONLY the exact uppercase Russian Cyrillic city name supplied "
+    "by the user, exactly once, with zero Latin letters, translation, dates, numerals, "
+    "microtext or pseudo-writing. Keep a clean 6-8% chroma moat. No rectangular "
+    "postcard, page, photo, official coat of arms, flag, tourist logo, sticker cutline, "
+    "shared white backing, photorealism, CGI gloss, soft gradients or distressed noise."
+)
+
+
+def _city_neocrest_variant_brief(slot: int) -> str:
+    variant = _CITY_NEOCREST_VARIANTS[slot % len(_CITY_NEOCREST_VARIANTS)]
+    return (
+        f"ASSIGNED CITY NEOCREST VARIANT: {variant}. "
+        f"{_CITY_NEOCREST_COMMON_CONTRACT}"
     )
 
 # A brand-only request used to be repeated verbatim for every slot.  Each
@@ -544,6 +582,21 @@ def plan_tasks(
     if free_prompt:
         entries = [(free_prompt, "")] * count
         source = "free"
+    elif style_list == [_CITY_NEOCREST_STYLE_ID]:
+        # Название города — самостоятельная товарная тема, а не тайтл франшизы.
+        # Обходим franchise_scout и разрешаем перечислить несколько городов через
+        # основное поле и дополнительный список, сохраняя точное русское написание.
+        cities: list[str] = []
+        seen_cities: set[str] = set()
+        for city in (([theme] if theme else []) + names):
+            key = city.casefold()
+            if key not in seen_cities:
+                cities.append(city)
+                seen_cities.add(key)
+        if not cities:
+            raise ValueError("для городского неогерба нужно указать город")
+        entries = [(city, "") for city in _expand_round_robin(cities, count)]
+        source = "city"
     elif style_list == [_PROFESSION_ARCHIVE_STYLE_ID]:
         # Профессия — самостоятельная товарная тема. Не отправляем её в
         # franchise_scout: «хирург»/«юрист» не должны превращаться в персонажей.
@@ -629,6 +682,8 @@ def plan_tasks(
             style_brief = _rock_band_variant_brief(style_occurrence)
         elif style_id == _PROFESSION_ARCHIVE_STYLE_ID:
             style_brief = _profession_archive_variant_brief(style_occurrence)
+        elif style_id == _CITY_NEOCREST_STYLE_ID:
+            style_brief = _city_neocrest_variant_brief(style_occurrence)
         else:
             style_brief = ""
         base = sanitize_slug(label, fallback="item")
@@ -696,6 +751,35 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
             "signature_props": "",
             "has_human_figure": False,
             "chroma": "green",
+        })
+    elif task.style_id == _CITY_NEOCREST_STYLE_ID:
+        # Название города — единственный обязательный текст в обычной панели.
+        # Слоган не выдумываем: для курируемых серий он добавляется отдельным
+        # проверенным этапом. Остальные character-поля обнуляем, чтобы город не
+        # запустил поиск портрета или канонического персонажа.
+        city_title = task.label.strip().upper()
+        chroma = str(design.get("chroma") or "green").strip().lower()
+        if chroma not in {"green", "blue"}:
+            chroma = "green"
+        design.update({
+            "style_id": _CITY_NEOCREST_STYLE_ID,
+            "style_mix": "",
+            "quote": city_title,
+            "slogan": "",
+            "type_spec": (
+                "One enormous straight-line uppercase Russian Cyrillic city wordmark "
+                "inside the lower 27-30% plaque, set in a true condensed monumental "
+                "grotesk or slab with warm-ivory fill, thin city-accent inner stroke, "
+                "very thick near-black outer keyline and a short hard-edged shadow; "
+                "exactly one placement, fully readable on black and white fabric"
+            ),
+            "name_jp": "",
+            "kana": "",
+            "character_en": "",
+            "title_en": "",
+            "signature_props": "",
+            "has_human_figure": False,
+            "chroma": chroma,
         })
 
     # Протяжка из досье (ветка franchise): перезаписываем character_en/title_en

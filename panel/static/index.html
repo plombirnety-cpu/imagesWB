@@ -467,6 +467,7 @@ let studioModelsLoaded = false;
 let previewItems = [], previewIndex = 0;
 let themeOptionalStyleIds = new Set();
 const PROFESSION_STYLE_ID = '40_profession_technical_archive';
+const CITY_NEOCREST_STYLE_ID = '41_city_neocrest_ru';
 let collectorRefreshKey = null;
 let collectorRunning = false;
 let brightDataPrice = 1.5;
@@ -662,23 +663,30 @@ function allowsEmptyTheme(){
 function updateThemeHint(){
   const selected = selectedStyles();
   const profession = selected.length === 1 && selected[0] === PROFESSION_STYLE_ID;
+  const city = selected.length === 1 && selected[0] === CITY_NEOCREST_STYLE_ID;
   const optional = allowsEmptyTheme();
   $('#themeHint').textContent = profession
     ? 'Введите одну профессию. Для нескольких профессий перечислите их в поле ниже.'
-    : (optional
+    : (city
+      ? 'Введите город по-русски. Стиль использует премиальную модель Gemini.'
+      : (optional
       ? 'Для выбранного авто-стиля тему можно не вводить — арт-директор сам соберёт разные сюжеты.'
-      : '');
+      : ''));
   themeEl.placeholder = profession
     ? 'например: хирург, юрист, стоматолог'
-    : (optional
+    : (city
+      ? 'например: Владивосток'
+      : (optional
       ? 'необязательно — автомобиль и смысловой текст выберет арт-директор'
-      : 'напр. «поднятие уровня в одиночку», «тачки»');
+      : 'напр. «поднятие уровня в одиночку», «тачки»'));
   charsEl.placeholder = profession
     ? 'несколько профессий — через запятую или с новой строки'
-    : 'через запятую или с новой строки, если пусто — берём из темы (тайтла) или саму тему';
+    : (city
+      ? 'дополнительные города — через запятую или с новой строки'
+      : 'через запятую или с новой строки, если пусто — берём из темы (тайтла) или саму тему');
   charactersLabel.textContent = profession
     ? 'Дополнительные профессии (опционально)'
-    : 'Персонажи (опционально)';
+    : (city ? 'Дополнительные города (опционально)' : 'Персонажи (опционально)');
 }
 
 function cardFor(item){
@@ -879,10 +887,16 @@ genBtn.onclick = () => {
     formErr.textContent = 'Укажите профессию.';
     return;
   }
+  if(selected.length === 1 && selected[0] === CITY_NEOCREST_STYLE_ID && !theme && !characters){
+    formErr.textContent = 'Укажите город.';
+    return;
+  }
   if(!theme && !characters && !allowsEmptyTheme()){
     formErr.textContent = 'Укажи тему/персонажей или выбери автономный авто-стиль.';
     return;
   }
+  if(selected.includes(CITY_NEOCREST_STYLE_ID)
+      && !confirm('Городской неогерб использует более дорогую модель Gemini. Продолжить?')) return;
   startGeneration({styles:selected, count, theme, characters, free_prompt:''}, formErr);
 };
 

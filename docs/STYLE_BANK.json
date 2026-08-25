@@ -582,6 +582,40 @@
         "Линии, засечки и штриховка печатно-безопасной толщины, не исчезают после удаления GreenKey и читаются с двух метров",
         "Только зелёный хромакей; в самом принте запрещены зелёный, изумрудный, лаймовый и оливковый цвета"
       ]
+    },
+    {
+      "id": "41_city_neocrest_ru",
+      "name_ru": "Городской неогерб (рус.)",
+      "theme_optional": false,
+      "manual_only": true,
+      "essence": "A premium Russian city landmark crest for apparel, built as one cohesive portrait die-cut silhouette rather than a rectangular postcard. Treat the user's theme as exactly ONE real city. Use one unmistakable hero landmark, no more than two supporting landmarks and one truthful geographic or cultural motif. Preserve the major geometry that makes each landmark identifiable; simplify windows, cables and ornament into thick print-safe forms instead of merging buildings into a fantasy hybrid. Build three depth planes with purposeful overlap: a large upper background symbol such as a partial sun, gear-ring or structural arc, a landmark ensemble through the middle, and one broad foreground motif connecting the scene to the wordmark. The lower 27-30% is dominated by the exact Russian city name in Cyrillic, with one optional short verified Russian slogan on an integrated ribbon below. Use a top-left light source, opaque saturated colour blocks, hard-edged two-step cel shading, deep local shadows and a three-stage outer edge (dark contour, narrow warm-ivory separator, final dark contour). The result must be richer, more dimensional and more commercially polished than a generic souvenir badge while staying legible at thumbnail size and printable from two metres. Use a clean 6-8% chroma moat on every edge. No rectangular page, full-bleed landscape, sticker cutline, shared white backing, coat of arms, flag, official seal, copied tourist logo, invented dates, generic skyline, fantasy architecture, photorealism, CGI gloss, soft gradients, tiny filigree, distress noise or text clutter.",
+      "text_treatment": "The exact city name supplied by the user is the single dominant wordmark, written once in correctly spelled uppercase RUSSIAN CYRILLIC and kept on one line whenever physically possible. Use a custom condensed slab or monumental grotesk with warm-ivory or light-metal fill, a thin city-accent inner stroke, a very thick near-black outer keyline and a short hard-edged shadow, so it reads on both black and white garments. A second and only other text line may be one short, truthful Russian slogan of 2-5 words on the lower ribbon; if no verified slogan is available, omit it rather than inventing a claim. Every alphabetic character anywhere in the artwork must be Cyrillic: zero Latin letters, zero pseudo-letters, zero English translations, zero repeated city names and zero additional microtext. Keep generous spacing between words and verify the difficult Cyrillic glyphs such as Д, Л, И, Й, Б, У and Г.",
+      "palette_rule": "Use 6-7 strong flat print inks selected specifically for the city: one deep near-black outline, two related city colours, one hot saturated accent, one warm metallic accent, warm ivory and optional clean white. Each major object uses one base tone, one hard highlight and one deep shadow; no muddy continuous gradients or rainbow palette. Choose green or blue chroma opposite the artwork palette and explicitly forbid that chroma family inside the emblem. Preserve large opaque colour masses, thick negative gaps and a three-stage silhouette edge that remains distinct on both black and white fabric.",
+      "mood_tags": [
+        "город",
+        "города России",
+        "достопримечательности",
+        "архитектура",
+        "туризм",
+        "путешествия",
+        "эмблема",
+        "шеврон",
+        "сувенир",
+        "city landmark"
+      ],
+      "constraints": [
+        "Ровно один реальный город; один главный архитектурный якорь, максимум два вспомогательных и один географический или культурный мотив",
+        "Главная геометрия достопримечательностей правдоподобна: не смешивать разные мосты, башни, храмы и дворцы в fantasy-гибрид",
+        "Название города — точная русская кириллица ВЕРХНИМ РЕГИСТРОМ один раз; перевод на английский, латинские буквы и псевдобуквы полностью запрещены",
+        "Допустима только одна дополнительная строка — короткий проверенный русский слоган на нижней ленте; если факт не подтверждён, слоган не добавлять",
+        "Сочная, но дисциплинированная палитра 6-7 плоских красок: тёмный контур, два городских тона, горячий акцент, тёплый металл, крем и при необходимости белый",
+        "Три плана глубины, единый свет сверху слева, двухступенчатые жёсткие блики и тени; без фотореализма, CGI, мягких градиентов и HDR-свечения",
+        "Нижние 27-30% занимает мощная плашка с названием, ещё 7-9% — компактная лента; архитектура не пересекает поля букв и не ухудшает читаемость",
+        "Крупные контуры и просветы печатно-безопасной толщины; никаких тонких лесов тросов, микроскопических окон, шума, distressed-текстур и одиночных пикселей",
+        "Фигурный вертикальный принт на плоском хромакее с чистым отступом 6-8%; не прямоугольный постер, открытка, страница, фото, стикер или общая белая подложка",
+        "Без герба, флага, официальной печати, государственного знака, бренда, туристического логотипа, выдуманных дат, цифр и дополнительного мелкого текста",
+        "Внешняя кромка по возможности трёхступенчатая: тёмный контур, узкий кремовый разделитель и финальный тёмный кант для чёрной и белой ткани"
+      ]
     }
   ]
 }
