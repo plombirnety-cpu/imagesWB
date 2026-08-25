@@ -20,6 +20,16 @@
   русское название города; slogan и character/franchise-поля очищаются.
 - ID не меняется: `41_city_neocrest_ru`; новое имя в панели — «Городской неогерб —
   насыщенный (рус.)». Дополнительных платных генераций при исправлении не было.
+- Насыщенная редакция развёрнута из коммита `07921bf` образом
+  `print-factory-panel:candidate-city41-rich-07921bf`; 9/9 целевых тестов и весь
+  candidate/production HTTP-smoke прошли, restart count `0`.
+- Production использует прежний `panel_panel_out`; известный каталог задания
+  `12870d67ef32` и около `1.3G` результатов сохранены. API-список jobs является
+  in-memory и обнуляется после рестарта, сами файлы не удаляются.
+- Откат подготовлен тремя независимыми артефактами: stopped container
+  `print-factory-panel-pre-rich-07921bf`, image-tag
+  `print-factory-panel:backup-pre-city41-rich-07921bf` и source backup
+  `/opt/print-panel-backup-pre-rich-07921bf`.
 
 ## Style 41 — «Городской неогерб (рус.)» (2026-08-25)
 
