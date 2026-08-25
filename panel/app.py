@@ -56,6 +56,16 @@ import virtual_studio  # noqa: E402  (panel/virtual_studio.py)
 
 STATIC_DIR = PANEL_DIR / "static"
 
+_RUSSIAN_STYLE_ID = "42_russian_style"
+_RUSSIAN_RADAR_LIFECYCLES = {"NEW", "RISING", "RESURGENCE"}
+_RUSSIAN_RADAR_HARD_BLOCK_RE = re.compile(
+    r"(?:полит|президент|депутат|выбор|санкц|войн|военн|арм(?:ия|ейск)|оруж|"
+    r"террор|теракт|убий|погиб|смерт|трагед|катастроф|авари|наркот|казино|"
+    r"ставк[аи]|экстрем|ненавист|религи|церк|православ|ислам|мусульм|"
+    r"politic|president|election|war|military|weapon|terror|death|casino)",
+    re.IGNORECASE,
+)
+
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
@@ -466,6 +476,55 @@ def _style_bank() -> list[dict]:
     ]
 
 
+def _approved_russian_style_topics(limit: int) -> list[str]:
+    """Читает безопасные свежие темы только из локальной SQLite радара.
+
+    Никакой collector, сеть или LLM здесь не запускаются. Неподтверждённые темы,
+    текущая политика/трагедии и сомнительные короткие метки отбрасываются; при любой
+    ошибке orchestrator использует собственный evergreen-каталог.
+    """
+    wanted = max(1, min(50, int(limit)))
+    try:
+        candidates = _radar_store.list_opportunities(limit=min(100, wanted * 8))
+    except Exception as exc:  # noqa: BLE001 — база может быть занята/ещё не создана
+        logger.warning(f"Русский стиль: локальный радар недоступен, evergreen fallback: {exc}")
+        return []
+
+    topics: list[str] = []
+    seen: set[str] = set()
+    for trend in candidates:
+        opportunity = trend.get("opportunity") or {}
+        if not trend.get("approved") or trend.get("rejected"):
+            continue
+        if not opportunity.get("qualified"):
+            continue
+        if float(opportunity.get("confidence") or 0) < 70:
+            continue
+        if str(trend.get("lifecycle") or "").upper() not in _RUSSIAN_RADAR_LIFECYCLES:
+            continue
+        last_seen_text = str(trend.get("last_seen_at") or "").strip()
+        try:
+            last_seen = datetime.fromisoformat(last_seen_text.replace("Z", "+00:00"))
+            now = datetime.now(last_seen.tzinfo) if last_seen.tzinfo else datetime.now()
+            if (now - last_seen).total_seconds() > 72 * 60 * 60:
+                continue
+        except (TypeError, ValueError):
+            continue
+        topic = re.sub(r"\s+", " ", str(trend.get("display_name") or "")).strip()
+        key = topic.casefold()
+        if not (3 <= len(topic) <= 80) or key in seen:
+            continue
+        if _RUSSIAN_RADAR_HARD_BLOCK_RE.search(topic):
+            continue
+        if re.search(r"https?://|[@#]", topic, re.IGNORECASE):
+            continue
+        topics.append(topic)
+        seen.add(key)
+        if len(topics) >= wanted:
+            break
+    return topics
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "print-factory-panel"}
@@ -546,6 +605,14 @@ def _enqueue_generation(
     characters: str,
     free_prompt: str,
 ) -> dict:
+    autonomous_topics: list[str] = []
+    if (
+        list(styles) == [_RUSSIAN_STYLE_ID]
+        and not (theme or "").strip()
+        and not (characters or "").strip()
+        and not (free_prompt or "").strip()
+    ):
+        autonomous_topics = _approved_russian_style_topics(count)
     job_id = uuid.uuid4().hex[:12]
     with _jobs_lock:
         _jobs[job_id] = {
@@ -564,6 +631,7 @@ def _enqueue_generation(
         theme,
         characters,
         free_prompt,
+        autonomous_topics,
     )
     return {"job_id": job_id}
 
@@ -748,12 +816,20 @@ def _job_process_entry(
     theme: str,
     characters: str,
     free_prompt: str,
+    autonomous_topics: list[str],
     outdir_text: str,
     events,
 ) -> None:
     """Планирует и рендерит job, отправляя родителю только простые события."""
     try:
-        tasks = orchestrator.plan_tasks(styles, count, theme, characters, free_prompt)
+        tasks = orchestrator.plan_tasks(
+            styles,
+            count,
+            theme,
+            characters,
+            free_prompt,
+            autonomous_topics=autonomous_topics,
+        )
     except Exception as e:  # noqa: BLE001
         events.put({"type": "error", "error": f"план не построился: {e}"})
         return
@@ -800,6 +876,7 @@ def _run_job(
     theme: str,
     characters: str,
     free_prompt: str,
+    autonomous_topics: list[str] | None = None,
 ) -> None:
     with _jobs_lock:
         job = _jobs[job_id]
@@ -815,7 +892,16 @@ def _run_job(
     events = context.Queue()
     process = context.Process(
         target=_job_process_entry,
-        args=(styles, count, theme, characters, free_prompt, str(outdir), events),
+        args=(
+            styles,
+            count,
+            theme,
+            characters,
+            free_prompt,
+            list(autonomous_topics or []),
+            str(outdir),
+            events,
+        ),
         name=f"print-job-{job_id}",
     )
     try:

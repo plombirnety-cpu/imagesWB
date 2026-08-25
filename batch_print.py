@@ -62,6 +62,7 @@ _REFERENCE_PREFIX = (
 _MAGAZINE_PRINT_STYLE_ID = "34_anime_magazine_cover"
 _PROFESSION_ARCHIVE_STYLE_ID = "40_profession_technical_archive"
 _CITY_NEOCREST_STYLE_ID = "41_city_neocrest_ru"
+_RUSSIAN_STYLE_ID = "42_russian_style"
 _MAGAZINE_PRINT_PROMPT_SUFFIX = (
     " STREETWEAR OPEN-EDGE PRINT COMPOSITION — NOT A STICKER AND NOT A RECTANGULAR "
     "MAGAZINE COVER: treat the "
@@ -101,7 +102,11 @@ def _generation_model_for_design(design: dict) -> str | None:
     if (
         config.IMAGE_PROVIDER == "gemini"
         and str(design.get("style_id") or "").strip()
-        in {_PROFESSION_ARCHIVE_STYLE_ID, _CITY_NEOCREST_STYLE_ID}
+        in {
+            _PROFESSION_ARCHIVE_STYLE_ID,
+            _CITY_NEOCREST_STYLE_ID,
+            _RUSSIAN_STYLE_ID,
+        }
     ):
         return config.GEMINI_MODEL_PREMIUM
     return None

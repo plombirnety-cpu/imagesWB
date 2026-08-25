@@ -468,6 +468,7 @@ let previewItems = [], previewIndex = 0;
 let themeOptionalStyleIds = new Set();
 const PROFESSION_STYLE_ID = '40_profession_technical_archive';
 const CITY_NEOCREST_STYLE_ID = '41_city_neocrest_ru';
+const RUSSIAN_STYLE_ID = '42_russian_style';
 let collectorRefreshKey = null;
 let collectorRunning = false;
 let brightDataPrice = 1.5;
@@ -664,29 +665,35 @@ function updateThemeHint(){
   const selected = selectedStyles();
   const profession = selected.length === 1 && selected[0] === PROFESSION_STYLE_ID;
   const city = selected.length === 1 && selected[0] === CITY_NEOCREST_STYLE_ID;
+  const russian = selected.length === 1 && selected[0] === RUSSIAN_STYLE_ID;
   const optional = allowsEmptyTheme();
-  $('#themeHint').textContent = profession
-    ? 'Введите одну профессию. Для нескольких профессий перечислите их в поле ниже.'
-    : (city
-      ? 'Введите город по-русски. Яркий многослойный стиль использует премиальную модель Gemini.'
-      : (optional
-      ? 'Для выбранного авто-стиля тему можно не вводить — арт-директор сам соберёт разные сюжеты.'
-      : ''));
-  themeEl.placeholder = profession
-    ? 'например: хирург, юрист, стоматолог'
-    : (city
-      ? 'например: Владивосток'
-      : (optional
-      ? 'необязательно — автомобиль и смысловой текст выберет арт-директор'
-      : 'напр. «поднятие уровня в одиночку», «тачки»'));
-  charsEl.placeholder = profession
-    ? 'несколько профессий — через запятую или с новой строки'
-    : (city
-      ? 'дополнительные города — через запятую или с новой строки'
-      : 'через запятую или с новой строки, если пусто — берём из темы (тайтла) или саму тему');
-  charactersLabel.textContent = profession
-    ? 'Дополнительные профессии (опционально)'
-    : (city ? 'Дополнительные города (опционально)' : 'Персонажи (опционально)');
+  let hint = '';
+  let themePlaceholder = 'напр. «поднятие уровня в одиночку», «тачки»';
+  let charactersPlaceholder = 'через запятую или с новой строки, если пусто — берём из темы (тайтла) или саму тему';
+  let charactersTitle = 'Персонажи (опционально)';
+  if(profession){
+    hint = 'Введите одну профессию. Для нескольких профессий перечислите их в поле ниже.';
+    themePlaceholder = 'например: хирург, юрист, стоматолог';
+    charactersPlaceholder = 'несколько профессий — через запятую или с новой строки';
+    charactersTitle = 'Дополнительные профессии (опционально)';
+  }else if(city){
+    hint = 'Введите город по-русски. Яркий многослойный стиль использует премиальную модель Gemini.';
+    themePlaceholder = 'например: Владивосток';
+    charactersPlaceholder = 'дополнительные города — через запятую или с новой строки';
+    charactersTitle = 'Дополнительные города (опционально)';
+  }else if(russian){
+    hint = 'Введите любой сюжет: смысл сохранится, а форма станет ярким премиальным «Русским стилем». Если оставить пусто — возьмём подтверждённую тему российского радара или безопасный популярный сюжет.';
+    themePlaceholder = 'кот-космонавт, кофе, программист, любовь — или оставьте пустым';
+    charactersPlaceholder = 'необязательные герои, предметы и важные детали сюжета';
+    charactersTitle = 'Дополнительные образы и детали (опционально)';
+  }else if(optional){
+    hint = 'Тему можно не вводить — автономный стиль сам соберёт разные сюжеты.';
+    themePlaceholder = 'необязательно — тему и смысловой текст выберет арт-директор';
+  }
+  $('#themeHint').textContent = hint;
+  themeEl.placeholder = themePlaceholder;
+  charsEl.placeholder = charactersPlaceholder;
+  charactersLabel.textContent = charactersTitle;
 }
 
 function cardFor(item){
@@ -892,11 +899,11 @@ genBtn.onclick = () => {
     return;
   }
   if(!theme && !characters && !allowsEmptyTheme()){
-    formErr.textContent = 'Укажи тему/персонажей или выбери автономный авто-стиль.';
+    formErr.textContent = 'Укажи тему/персонажей или выбери автономный стиль.';
     return;
   }
-  if(selected.includes(CITY_NEOCREST_STYLE_ID)
-      && !confirm('Насыщенный городской неогерб использует более дорогую модель Gemini. Продолжить?')) return;
+  if((selected.includes(CITY_NEOCREST_STYLE_ID) || selected.includes(RUSSIAN_STYLE_ID))
+      && !confirm('Выбранный детализированный стиль использует более дорогую премиальную модель Gemini. Продолжить?')) return;
   startGeneration({styles:selected, count, theme, characters, free_prompt:''}, formErr);
 };
 

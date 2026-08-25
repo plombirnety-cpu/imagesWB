@@ -79,6 +79,24 @@ _AUTONOMOUS_STYLE_BRIEFS = {
         "минималистичная museum-spec композиция с моделью, страной и одной честной "
         "эмоциональной фразой для автолюбителя.",
     ],
+    "42_russian_style": [
+        "Жар-птица в ночном саду — свет, движение и надежда",
+        "Лиса в зимней тайге среди рябины и северного ветра",
+        "Космонавт с букетом полевых цветов — мечта и дом",
+        "Кот-дачник среди урожая — добрый современный юмор",
+        "Чай у окна зимним вечером — тепло дома и тишина",
+        "Поезд сквозь северный лес — дорога через большую страну",
+        "Музыкант соединяет современный ритм и народный инструмент",
+        "Робот собирает лесные ягоды — технология встречает природу",
+        "Велосипедист мчится вдоль реки навстречу рассвету",
+        "Сова-хранительница книг в орнаментальном ночном лесу",
+        "Семейный сад и яблоня как образ памяти поколений",
+        "Мастерская изобретателя — механика превращается в резной узор",
+        "Северное сияние над деревянным домом и еловым лесом",
+        "Девушка-программист — линии кода становятся геометрической вышивкой",
+        "Щука подо льдом — вода, течение и зимний орнамент",
+        "Летний дождь над полем — ветер превращается в цветочный ритм",
+    ],
 }
 
 _AUTOMOTIVE_STYLE_ID = "37_auto_racing_editorial"
@@ -90,6 +108,8 @@ _ROCK_BAND_STYLE_ID = "39_rock_band_print"
 _PROFESSION_ARCHIVE_STYLE_ID = "40_profession_technical_archive"
 
 _CITY_NEOCREST_STYLE_ID = "41_city_neocrest_ru"
+
+_RUSSIAN_STYLE_ID = "42_russian_style"
 
 # Три композиционные семьи извлечены из пользовательских референсов: крупный
 # фронтмен с инструментом, цветовой коллаж всего состава и сюжетный metal-маскот.
@@ -249,6 +269,56 @@ def _city_neocrest_variant_brief(slot: int) -> str:
     return (
         f"ASSIGNED CITY NEOCREST VARIANT: {variant}. "
         f"{_CITY_NEOCREST_COMMON_CONTRACT}"
+    )
+
+
+# «Русский стиль» — зонтичная система: композицию выбирают по смыслу запроса,
+# поэтому код вращает палитру и материальную технику, но не навязывает каждому
+# сюжету кокошник, матрёшку или одну и ту же фольклорную позу.
+_RUSSIAN_STYLE_ART_DIRECTIONS = (
+    "RUBY / ULTRAMARINE / OLD GOLD / IVORY — flat enamel-like colour steps with broad ornamental rhythm and crisp warm highlights",
+    "MALACHITE / CORAL / CREAM / DEEP INK — flat decorative painting with generous coloured masses; force BLUE chroma and keep blue out of the artwork",
+    "COBALT / VERMILION / OCHRE / LINEN — controlled lubok-like print with a few carved hatching groups, never all-over distress",
+    "CRIMSON / WARM GOLD / IVORY / TRANSPARENT NEGATIVE SPACE — lacquer-miniature depth with hard highlights and no black rectangular field",
+    "DUSTY ROSE / DEEP TEAL / PEACH / NAVY — contemporary editorial folk illustration with rich floral rhythm and mature, non-kawaii faces",
+    "BRICK RED / WINE / MUSTARD / OLIVE / CREAM — vintage poster grain used only inside shapes, dynamic diagonal and dignified good-natured humour",
+    "CORNFLOWER BLUE / CHERRY / SUNFLOWER OCHRE / WARM WHITE — broad embroidery-like geometry scaled for real garment printing",
+    "PLUM / TURQUOISE / AMBER / IVORY / CHARCOAL — enamel-and-filigree impression built from broad cells, not fragile micro-lines",
+)
+
+_RUSSIAN_STYLE_COMMON_CONTRACT = (
+    "RUSSIAN STYLE SEMANTIC CONTRACT: preserve the user's exact subject, action, "
+    "relationships and mood as the unmistakable hero. Russian styling changes the "
+    "visual grammar, never the topic. First choose exactly ONE semantic composition "
+    "family: a neofolk hero for a person or dark-fantasy character; tradition in "
+    "motion for an action, sport or modern activity; textile manifesto for an exact "
+    "short phrase; ornamental animal for an animal or bird; contemporary folk portrait "
+    "for a profession or hobby; roots of words for a concise value statement; object "
+    "icon for food, transport, tools or technology. Build at least two visible SEMANTIC "
+    "BRIDGES where the subject's own construction, motion or function becomes the "
+    "ornament. One decorative flower pasted beside the subject is not enough. Use one "
+    "primary Russian decorative grammar and at most one quiet support; never mix every "
+    "folk cliché. One hero silhouette occupies 50-70%, supported by 3-7 meaningful large "
+    "motifs. Keep the focal cluster lavish and organised, readable at thumbnail size and "
+    "from two metres. Typography is optional. If exact wording is supplied, write it "
+    "once in correctly spelled MODERN RUSSIAN CYRILLIC; otherwise prefer no text. Zero "
+    "Latin, pseudo-Cyrillic, English translation or fake microcopy. Create an open "
+    "irregular apparel print directly on uniform chroma with a clean 6-8% moat and real "
+    "gaps. Only TEXTILE MANIFESTO may use a self-contained woven rectangular patch with "
+    "that moat; it is never a full-bleed page. No rectangular poster, shirt mockup, "
+    "shared sticker backing, flag, coat of "
+    "arms, official seal, political/military slogan, weapon, religious symbol by default, "
+    "tourist clip art, photorealism, glossy 3D, generic kawaii or copied reference layout."
+)
+
+
+def _russian_style_variant_brief(slot: int) -> str:
+    direction = _RUSSIAN_STYLE_ART_DIRECTIONS[
+        slot % len(_RUSSIAN_STYLE_ART_DIRECTIONS)
+    ]
+    return (
+        f"ASSIGNED RUSSIAN ART DIRECTION: {direction}. "
+        f"{_RUSSIAN_STYLE_COMMON_CONTRACT}"
     )
 
 # A brand-only request used to be repeated verbatim for every slot.  Each
@@ -572,6 +642,7 @@ def plan_tasks(
     theme: str,
     characters: str,
     free_prompt: str = "",
+    autonomous_topics: list[str] | None = None,
 ) -> list[DesignTask]:
     """Строит план из `count` задач по правилам PLAN.md. Не делает никаких
     платных вызовов КРОМЕ (возможно) одного franchise_scout.build_dossier,
@@ -593,6 +664,52 @@ def plan_tasks(
     if free_prompt:
         entries = [(free_prompt, "")] * count
         source = "free"
+    elif style_list == [_RUSSIAN_STYLE_ID]:
+        # Универсальный русский стиль сохраняет запрос как единый смысловой сюжет и
+        # не отправляет его в franchise_scout. Поле персонажей здесь — уточняющие
+        # герои/объекты. При пустом вводе app.py передаёт только подтверждённые темы
+        # локального RU-радара; если их нет, используем версионированный evergreen-пул.
+        if theme:
+            subject = theme
+            if names:
+                subject = (
+                    f"{theme}. Обязательные дополнительные герои или объекты: "
+                    f"{'; '.join(names)}"
+                )
+            entries = [(subject, "")] * count
+            source = "russian_style"
+        elif names:
+            entries = [
+                (name, "") for name in _expand_round_robin(names, count)
+            ]
+            source = "russian_style"
+        else:
+            radar_topics: list[str] = []
+            seen_topics: set[str] = set()
+            for item in autonomous_topics or []:
+                topic = str(item or "").strip()
+                key = topic.casefold()
+                if topic and key not in seen_topics:
+                    radar_topics.append(topic)
+                    seen_topics.add(key)
+            evergreen = _autonomous_briefs(_RUSSIAN_STYLE_ID, count)
+            # Не более половины партии отдаём трендам: стиль остаётся разнообразным,
+            # а одобренный радар не превращает весь запуск в один краткий инфоповод.
+            selected_topics: list[str] = []
+            radar_iter = iter(radar_topics)
+            evergreen_iter = iter(evergreen)
+            radar_budget = 1 if count == 1 else count // 2
+            radar_used = 0
+            for slot in range(count):
+                use_radar = slot % 2 == 0 and radar_used < radar_budget
+                topic = next(radar_iter, "") if use_radar else ""
+                if topic:
+                    radar_used += 1
+                if not topic:
+                    topic = next(evergreen_iter, evergreen[slot % len(evergreen)])
+                selected_topics.append(topic)
+            entries = [(topic, "") for topic in selected_topics]
+            source = "russian_style_auto"
     elif style_list == [_CITY_NEOCREST_STYLE_ID]:
         # Название города — самостоятельная товарная тема, а не тайтл франшизы.
         # Обходим franchise_scout и разрешаем перечислить несколько городов через
@@ -695,6 +812,8 @@ def plan_tasks(
             style_brief = _profession_archive_variant_brief(style_occurrence)
         elif style_id == _CITY_NEOCREST_STYLE_ID:
             style_brief = _city_neocrest_variant_brief(style_occurrence)
+        elif style_id == _RUSSIAN_STYLE_ID:
+            style_brief = _russian_style_variant_brief(style_occurrence)
         else:
             style_brief = ""
         base = sanitize_slug(label, fallback="item")
@@ -721,6 +840,27 @@ def plan_tasks(
 # промпт/сид/сценарий и обычно проходит со 2-й попытки, чтобы батч не оставался с
 # дыркой). Каждая попытка — платная генерация; 2 = максимум 1 доп. попытка на слот.
 _RENDER_ATTEMPTS = int(os.getenv("PANEL_RENDER_ATTEMPTS", "2"))
+
+_RUSSIAN_VISIBLE_TEXT_RE = re.compile(
+    r"^[А-Яа-яЁё0-9\s.,!?…:;—–\-«»()]+$"
+)
+
+
+def _safe_russian_visible_text(value: object) -> str:
+    """Оставляет только короткую настоящую кириллицу для style 42.
+
+    Латинская строка из референса или выдуманный English slogan не должны попасть
+    на принт. Хотя цифры/пунктуация разрешены внутри фразы, хотя бы одна русская
+    буква обязательна — строка из одних декоративных знаков тоже отбрасывается.
+    """
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text or len(text) > 120:
+        return ""
+    if not _RUSSIAN_VISIBLE_TEXT_RE.fullmatch(text):
+        return ""
+    if not re.search(r"[А-Яа-яЁё]", text):
+        return ""
+    return text
 
 
 def _render_once(task: "DesignTask", outdir: Path) -> dict:
@@ -791,6 +931,37 @@ def _render_once(task: "DesignTask", outdir: Path) -> dict:
             "title_en": "",
             "signature_props": "",
             "has_human_figure": False,
+            "chroma": chroma,
+        })
+    elif task.style_id == _RUSSIAN_STYLE_ID:
+        # Все семь композиционных семей допускают и людей, и животных, и предметы,
+        # поэтому has_human_figure оставляем решению арт-директора. Но банковский
+        # стиль, кириллица и отсутствие случайного style_mix фиксируются кодом.
+        visible_text = (
+            _safe_russian_visible_text(design.get("quote"))
+            or _safe_russian_visible_text(design.get("slogan"))
+        )
+        chroma = str(design.get("chroma") or "green").strip().lower()
+        if chroma not in {"green", "blue"}:
+            chroma = "green"
+        type_spec = str(design.get("type_spec") or "").strip() if visible_text else ""
+        if visible_text and not type_spec:
+            type_spec = (
+                "Render the exact supplied Russian Cyrillic phrase once in bold custom "
+                "print-safe lettering integrated into the chosen semantic composition; "
+                "all glyphs fully readable on black and white fabric, no translation, "
+                "duplicate line, pseudo-writing or microtext"
+            )
+        design.update({
+            "style_id": _RUSSIAN_STYLE_ID,
+            "style_mix": "",
+            "quote": visible_text,
+            "slogan": "",
+            "type_spec": type_spec,
+            "text_mode": "none",
+            "text_modes_v3": [],
+            "name_jp": "",
+            "kana": "",
             "chroma": chroma,
         })
 

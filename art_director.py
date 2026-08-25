@@ -737,6 +737,42 @@ def _city_neocrest_quality_hint(style_pref: str) -> str:
     return ""
 
 
+_RUSSIAN_STYLE_ID = "42_russian_style"
+_RUSSIAN_STYLE_QUALITY_HINT = (
+    " ДЛЯ ЭТОГО дизайна трактуй весь запрос как неприкосновенный СМЫСЛОВОЙ КОНТРАКТ: "
+    "главный субъект, действие, отношения объектов и настроение должны остаться "
+    "узнаваемыми. Русский стиль меняет художественную грамматику, но НЕ подменяет "
+    "тему матрёшкой, медведем или кокошником. В первой фразе prompt явно назови "
+    "сохранённый главный сюжет. Затем выбери РОВНО ОДНУ подходящую композиционную "
+    "семью: NEOFOLK HERO для персонажа; TRADITION IN MOTION для действия/спорта; "
+    "TEXTILE MANIFESTO для точной короткой фразы; ORNAMENTAL ANIMAL для животного; "
+    "CONTEMPORARY FOLK PORTRAIT для профессии/увлечения; ROOTS OF WORDS для краткой "
+    "ценности; OBJECT ICON для предмета, еды, транспорта или технологии. Объясни в "
+    "prompt минимум ДВА semantic bridge: какие линии, движение или функция самого "
+    "героя физически продолжаются в орнаменте. Используй одну главную русскую "
+    "декоративную грамматику и максимум одну тихую вспомогательную, одну фактуру, "
+    "один hero-силуэт 50-70% и 3-7 смысловых поддерживающих мотивов. Результат яркий, "
+    "богатый и дорогой: 5-8 согласованных печатных красок, минимум три насыщенных "
+    "крупных массы, средние и яркие цвета не менее 60%, тёмные массы менее 30%. "
+    "style_mix всегда пустой. Видимый текст НЕ обязателен. Если пользователь явно "
+    "дал короткую русскую фразу или автономный бриф содержит проверенную фразу, верни "
+    "её дословно ОДИН РАЗ в quote, slogan оставь пустым и подробно задай type_spec. "
+    "Иначе quote, slogan и type_spec оставь пустыми. Любая надпись — только настоящая "
+    "современная русская кириллица: ноль латиницы, псевдобукв, перевода, дат и fake "
+    "microcopy. Не переноси надписи из референсов. has_human_figure выставляй по "
+    "реальному сюжету. Не добавляй по умолчанию флаг, герб, официальный символ, "
+    "политику, войну, оружие, религиозный знак, туристический клипарт, фотомокап, "
+    "прямоугольный постер, общую sticker-подложку, photorealism или glossy 3D."
+)
+
+
+def _russian_style_quality_hint(style_pref: str) -> str:
+    """Смысловой, кириллический и цветовой контракт универсального style 42."""
+    if style_pref == _RUSSIAN_STYLE_ID:
+        return _RUSSIAN_STYLE_QUALITY_HINT
+    return ""
+
+
 # Цвет фона сам регулярно попадает в prose-промпт, хотя SYSTEM просит отдавать
 # prompt "без цвета фона". Поэтому искать голое слово green во всём prompt нельзя:
 # "green chroma-key background" ложно превращало практически каждый green в blue.
@@ -832,6 +868,7 @@ def _ask_claude(theme: str, n: int, fmt: str, recent_styles: list = None,
         + _automotive_editorial_quality_hint(style_pref)
         + _profession_archive_quality_hint(style_pref)
         + _city_neocrest_quality_hint(style_pref)
+        + _russian_style_quality_hint(style_pref)
     )
     system_fn = _SYSTEMS_FN.get(fmt, system_cutout)
     # Щедрый бюджет токенов: gemini-pro-latest тратит часть на рассуждение, а
@@ -1318,6 +1355,12 @@ def _style_bank_prompt_block(design: dict) -> str:
         # Добавляем количественный цветовой контракт непосредственно перед рендером.
         parts.append(
             f"MANDATORY CITY COLOUR CONTRACT: {style['palette_rule']}"
+        )
+    elif style_id == _RUSSIAN_STYLE_ID:
+        # Для зонтичного style 42 яркость и дорогая печатная палитра — такой же
+        # обязательный production-контракт, как semantic bridge и кириллица.
+        parts.append(
+            f"MANDATORY RUSSIAN PALETTE CONTRACT: {style['palette_rule']}"
         )
     if style.get("hybrid_ring_text"):
         parts.append(
