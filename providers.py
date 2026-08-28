@@ -43,6 +43,7 @@ import requests
 from PIL import Image
 
 import config
+from gemini_errors import GeminiPrepayDepleted, gemini_http_error, is_prepay_depleted
 
 log = logging.getLogger("providers")
 
@@ -149,6 +150,10 @@ def _generate_gemini(prompt: str, seed: int = None, model: str = None,
         try:
             r = requests.post(url, headers=headers, json=body, timeout=180)
             if r.status_code != 200:
+                if is_prepay_depleted(r.status_code, r.text):
+                    raise gemini_http_error(
+                        "Gemini (nano-banana)", r.status_code, r.text,
+                    )
                 last_err = f"HTTP {r.status_code}: {r.text[:300]}"
             else:
                 data = r.json()
@@ -171,6 +176,8 @@ def _generate_gemini(prompt: str, seed: int = None, model: str = None,
                         )
                 last_err = f"ответ без inlineData: {str(data)[:300]}"
         except GeminiImageRejected:
+            raise
+        except GeminiPrepayDepleted:
             raise
         except Exception as e:  # noqa: BLE001
             last_err = str(e)
@@ -215,6 +222,12 @@ def generate_image_with_references(prompt: str, references: list[Image.Image], m
         try:
             response = requests.post(url, headers=headers, json=body, timeout=180)
             if response.status_code != 200:
+                if is_prepay_depleted(response.status_code, response.text):
+                    raise gemini_http_error(
+                        "Gemini (фотостудия)",
+                        response.status_code,
+                        response.text,
+                    )
                 last_err = f"HTTP {response.status_code}: {response.text[:300]}"
             else:
                 data = response.json()
@@ -232,6 +245,8 @@ def generate_image_with_references(prompt: str, references: list[Image.Image], m
                         raise GeminiImageRejected(finish_reason, str(candidate.get("finishMessage") or ""))
                 last_err = f"ответ без inlineData: {str(data)[:300]}"
         except GeminiImageRejected:
+            raise
+        except GeminiPrepayDepleted:
             raise
         except Exception as exc:  # noqa: BLE001
             last_err = str(exc)
@@ -319,7 +334,7 @@ def verify_text_in_image(image: Image.Image, prompt: str = _OCR_PROMPT) -> str:
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"OCR-контроль: сеть упала: {e}") from e
     if r.status_code != 200:
-        raise RuntimeError(f"OCR-контроль: HTTP {r.status_code}: {r.text[:300]}")
+        raise gemini_http_error("OCR-контроль", r.status_code, r.text)
     data = r.json()
     for cand in data.get("candidates", []):
         text = "".join(
@@ -392,7 +407,7 @@ def verify_anatomy_in_image(image: Image.Image, prompt: str = _ANATOMY_PROMPT) -
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"vision-QC анатомии: сеть упала: {e}") from e
     if r.status_code != 200:
-        raise RuntimeError(f"vision-QC анатомии: HTTP {r.status_code}: {r.text[:300]}")
+        raise gemini_http_error("vision-QC анатомии", r.status_code, r.text)
     data = r.json()
     raw_text = ""
     for cand in data.get("candidates", []):

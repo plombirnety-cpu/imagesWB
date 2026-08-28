@@ -719,7 +719,17 @@ function cardFor(item){
   }else{
     div.className = 'card err';
     const th = document.createElement('div');
-    th.className = 'th'; th.textContent = item.error || 'ошибка';
+    const errorText = item.error || 'ошибка';
+    th.className = 'th'; th.textContent = errorText;
+    if(errorText.includes('https://aistudio.google.com/billing')){
+      const billingLink = document.createElement('a');
+      billingLink.href = 'https://aistudio.google.com/billing';
+      billingLink.target = '_blank';
+      billingLink.rel = 'noopener noreferrer';
+      billingLink.textContent = 'Пополнить Gemini API ↗';
+      billingLink.style.cssText = 'display:block;margin-top:8px;color:#fff;font-weight:700';
+      th.append(billingLink);
+    }
     const nm = document.createElement('div');
     nm.className = 'nm'; nm.textContent = item.tag; nm.title = item.tag;
     div.append(th, nm);

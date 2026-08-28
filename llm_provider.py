@@ -33,6 +33,8 @@ import config
 
 import requests
 
+from gemini_errors import gemini_http_error, is_prepay_depleted
+
 # Модель для дешёвого текстового Gemini-запроса (тот же способ вызова, что
 # providers.py::_generate_gemini, но endpoint/модель — текстовые, не image).
 _GEMINI_TEXT_URL_TMPL = (
@@ -62,7 +64,8 @@ def _generate_gemini_text(system: str, user: str, max_tokens: int) -> str:
         "generationConfig": {"maxOutputTokens": out_tokens},
     }
     # Ретрай на ВРЕМЕННЫЕ сбои: 503 (модель перегружена — популярная
-    # gemini-pro-latest часто отдаёт "high demand"), 429 (rate-limit),
+    # gemini-pro-latest часто отдаёт "high demand"), 429 (rate-limit, но НЕ
+    # исчерпанный Prepay-баланс),
     # 500 (внутренняя). backoff 4/10/20с, до 4 попыток. Постоянные ошибки
     # (404 нет модели, 400 гео/невалидный ключ) НЕ ретраятся — сразу RuntimeError.
     _TRANSIENT = {429, 500, 503}
@@ -77,10 +80,17 @@ def _generate_gemini_text(system: str, user: str, max_tokens: int) -> str:
             raise RuntimeError(f"Gemini (арт-директор, текст): сеть упала: {e}") from e
         if r.status_code == 200:
             break
+        # Google также отвечает 429 при нулевом Prepay. Это постоянное состояние:
+        # повторы 4/10/20 секунд только создают эффект зависания панели.
+        if is_prepay_depleted(r.status_code, r.text):
+            raise gemini_http_error(
+                "Gemini (арт-директор, текст)", r.status_code, r.text,
+            )
         if r.status_code in _TRANSIENT and attempt < len(_BACKOFF):
             time.sleep(_BACKOFF[attempt]); continue
-        raise RuntimeError(
-            f"Gemini (арт-директор, текст): HTTP {r.status_code}: {r.text[:300]}")
+        raise gemini_http_error(
+            "Gemini (арт-директор, текст)", r.status_code, r.text,
+        )
     data = r.json()
     for cand in data.get("candidates", []):
         text = "".join(

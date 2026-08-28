@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r engine-requirements.txt -r panel-requirements.
 # НЕ копируем tools/realesrgan/, out_batch/, data/, D:\800 (см. panel/PLAN.md).
 COPY art_director.py batch_print.py bg_removal.py character_ref.py chroma_remove.py \
      config.py franchise_scout.py greenkey_core.py greenkey_postprocess.py \
-     llm_provider.py meme_ref.py palette.py providers.py typography.py \
+     gemini_errors.py llm_provider.py meme_ref.py palette.py providers.py typography.py \
      typography_v3.py upscale.py ./
 COPY docs/STYLE_BANK.json docs/STYLE_BANK.json
 
