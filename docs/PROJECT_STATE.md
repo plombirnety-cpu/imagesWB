@@ -1,5 +1,23 @@
 # PROJECT_STATE — print-factory-nb
 
+## 2026-08-29 — Gemini Prepay handling в production
+
+- Исправление выложено из коммита `8a059bf`; production image:
+  `sha256:00449142285281dc1cf918efa7d0d3c756e9112fd4f0fff63b0274f200f4b25b`.
+- После переключения Docker health `healthy`, HTTP `/health=200`, restart count `0`.
+  Постоянный volume `panel_panel_out` сохранён (`1,389,823,843` байта),
+  `trend_radar.sqlite3` присутствует; `.env` перенесён с mode `600` без вывода
+  содержимого.
+- Живой минимальный text-probe после деплоя вернул новую операторскую ошибку за
+  1 секунду, без прежних повторов 4/10/20 секунд. UI содержит кликабельную кнопку
+  «Пополнить Gemini API».
+- Быстрый откат: image `print-factory-panel:backup-pre-gemini-billing-8a059bf`
+  (`sha256:daa089f650e63df3fd782723a3d6797f86a5325aa859f70dd29009ee63283ffc`)
+  и исходники `/opt/print-panel-backup-pre-gemini-billing-8a059bf`.
+- Это исправляет зависание и диагностику, но не подменяет внешний биллинг Google:
+  генерация начнётся только после положительного Gemini API Prepay у связанного
+  проекта на `https://aistudio.google.com/billing`.
+
 ## 2026-08-28 — Gemini Prepay 429: диагноз и исправление обработки
 
 - Production остаётся healthy (`/health=200`, restart count `0`), а активный

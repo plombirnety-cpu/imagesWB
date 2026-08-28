@@ -1,5 +1,18 @@
 # Память проекта Print Factory
 
+## Gemini Prepay handling — production (2026-08-29)
+
+- Коммит `8a059bf` развёрнут в production; image
+  `sha256:00449142285281dc1cf918efa7d0d3c756e9112fd4f0fff63b0274f200f4b25b`.
+- Health healthy, HTTP 200, restart count 0. Volume с результатами и radar DB
+  сохранён; `.env` mode 600.
+- Живой probe подтвердил новое поведение: постоянная Prepay 429 возвращается за
+  1 секунду, по-русски и со ссылками AI Studio; UI-кнопка пополнения присутствует.
+- Rollback: image `print-factory-panel:backup-pre-gemini-billing-8a059bf`, source
+  `/opt/print-panel-backup-pre-gemini-billing-8a059bf`.
+- Генерация всё ещё внешне заблокирована нулевым Prepay правильного проекта. После
+  пополнения AI Studio повторить короткий probe, затем одну тестовую генерацию.
+
 ## Gemini Prepay 429 (2026-08-28)
 
 - Production и ключ исправны: health 200, рестартов нет, список моделей тем же
